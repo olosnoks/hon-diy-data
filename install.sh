@@ -17,10 +17,12 @@ ME=$(id -un)
 # apt also pulls in PyQt5 as its dependency; hondalog still runs on PySide6.
 REQUIRED="python3 python3-numpy python3-serial python3-pyqtgraph
           python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets"
-# Nice to have; each is tried on its own and may be missing.
+# Nice to have; each is tried on its own and may be missing. sqlite3 is the
+# shell that 'hondalog-log sql' opens (Python's own sqlite3 module needs nothing).
 OPTIONAL="python3-pyside6.qtsvg python3-pyside6.qtopenglwidgets python3-pyside6.qtopengl
           python3-opengl python3-pyside6.qttest python3-pytestqt
-          qt6-qpa-plugins qt6-svg-plugins libxcb-cursor0 python3-pytest"
+          qt6-qpa-plugins qt6-svg-plugins libxcb-cursor0 python3-pytest
+          sqlite3"
 
 deps_ok() {
     PYTHONPATH="$PREFIX" PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/tmp/hondalog-pyc "$1" -c '
@@ -83,6 +85,8 @@ sudo install -D -m 644 "$SRC/hondalog/data/hondalog.png" /usr/local/share/icons/
 command -v update-desktop-database >/dev/null 2>&1 && sudo update-desktop-database /usr/local/share/applications || true
 command -v gtk-update-icon-cache >/dev/null 2>&1 && sudo gtk-update-icon-cache -q -t -f /usr/local/share/icons/hicolor || true
 
+# drives are recorded into ~/hondalog/hondalog.db (made on the first recording);
+# exports, reports and black box captures go to ~/hondalog/logs
 mkdir -p "$HOME/hondalog/logs"
 
 RELOGIN=0
@@ -108,4 +112,6 @@ if [ "$RELOGIN" -eq 1 ]; then
 fi
 echo "  * Try it without the car:   hondalog-sim      (leave it running)"
 echo "                              hondalog --port /tmp/hondalog-sim --connect"
-echo "  * Logs go to ~/hondalog/logs. The address map is ~/.config/hondalog/addressmap.toml"
+echo "  * Drives are recorded into ~/hondalog/hondalog.db (SQLite: hondalog-log list, hondalog-log sql)."
+echo "    Exports, reports and black box captures go to ~/hondalog/logs."
+echo "    The address map is ~/.config/hondalog/addressmap.toml"

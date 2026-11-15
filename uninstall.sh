@@ -22,7 +22,8 @@ command -v update-desktop-database >/dev/null 2>&1 && sudo update-desktop-databa
 
 echo
 echo "Removed. Left alone on purpose:"
-echo "  * your logs:      ~/hondalog/logs"
+echo "  * your drives:    ~/hondalog/hondalog.db   (one SQLite file; -wal and -shm beside it while open)"
+echo "  * your files:     ~/hondalog/logs          (exports, reports, black box captures)"
 echo "  * your settings:  ~/.config/hondalog   (address map, window settings)"
 echo "  * the Debian packages (python3-pyside6.*, python3-pyqtgraph, python3-serial)"
 echo "  * your membership of the dialout group (undo: sudo gpasswd -d $(id -un) dialout)"

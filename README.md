@@ -5,9 +5,10 @@ KKL 409.1 USB cable (FTDI FT232RL). Linux desktop app: Python, PySide6,
 pyqtgraph, pyserial. Built for Debian 13 on an old ThinkPad.
 
 It reads ECU RAM with the Honda diagnostic protocol on the K-line
-(`20 05 addr len cksum`, 9600 8N1), shows it, logs it to a crash-safe native
-log (`.hlog`), and saves a separate capture when the engine stalls or another
-trigger fires. Logs export to MegaLogViewer (`.mlg`, `.msl`) and CSV.
+(`20 05 addr len cksum`, 9600 8N1), shows it, records every drive into one
+crash-safe SQLite database (`~/hondalog/hondalog.db`), and marks a capture in
+it when the engine stalls or another trigger fires. Drives export to
+MegaLogViewer (`.mlg`, `.msl`) and CSV, and you can query them with plain SQL.
 
 ![All sensors on the simulated ECU: 24 ECU slots, the black box, math channels](docs/screenshots/sim-sensors.png)
 
@@ -209,20 +210,26 @@ Drive view; right-click for its limits and "mark verified".
 button the size of a hand. Right-click a readout to change what it shows.
 
 **Recording.** Starts on connect (ECU chip menu, "Record on connect").
-Logs go to `~/hondalog/logs/log_DATE_TIME.hlog`. The file holds the ECU id
-bytes, the whole address map, the units, markers and every channel with its
-own timestamps. It is written every half second, so a dead laptop battery
-costs at most the last second. A recording that runs longer than an hour
-continues in `..._p002.hlog` and so on. Logs from 0.1.0 (`.csv`) still open.
+Every drive goes into one database, `~/hondalog/hondalog.db`, under a name
+like `drive_2026_11_16_0712`. Its row holds the ECU id bytes, the address
+map it was decoded with, the units and the link counters; next to it are the
+markers and every channel with its own timestamps, the K-line reads with the
+bytes the ECU sent. It is committed every half second, so a crash or a dead
+laptop battery costs at most the last second: the next start shows that
+drive as "crashed", with everything up to the last commit in it. A drive
+ends when you stop recording or when the ECU has been silent for two minutes
+(key off); the next answer starts a new drive. Logs from 0.1.0 (`.csv`) and
+MegaLogViewer files are read in with "Import file" or `hondalog-log import`.
 
 **Stall catcher.** While recording, once RPM has been above 400:
 
 - RPM reads 0, or
 - the ECU stops answering for 1 second (power loss, cable pulled),
 
-the app saves the 30 seconds before and the 10 seconds after to
-`~/hondalog/logs/stall_DATE_TIME.hlog`, shows a red banner over the tabs and
-beeps. Enter opens the file in Replay. Turning the key off with the engine
+the app marks the 30 seconds before and the 10 seconds after as a capture
+named `stall_DATE_TIME` (a row in the database pointing into the drive, not
+a copy), shows a red banner over the tabs and beeps. Enter opens the
+capture in Replay. Turning the key off with the engine
 running counts as a stall too; press Esc for that one.
 
 **Map 3D (F3).** RPM x MAP surface built from what has been logged this
@@ -239,11 +246,12 @@ and how much to keep before and after, for example
 overheating ship switched off, because they depend on channels that have not
 been verified on the car yet.
 
-**Replay (F4).** O opens a log, a stall file or a black box capture (`.hlog`, old `.csv`,
-MegaLogViewer `.msl`/`.mlg`, `.bbx`); with none open it follows
-live data. Stacked lanes with one cursor: click or drag, arrows step 0.1 s
+**Replay (F4).** O opens the drive picker: every drive, its stall captures
+under it, black box captures (`.bbx`), a search box over names, notes and
+markers, and "Import file" for an old `.csv` or a MegaLogViewer
+`.msl`/`.mlg`. With nothing open it follows live data. Stacked lanes with one cursor: click or drag, arrows step 0.1 s
 (Shift 1 s), `[` and `]` jump between events, P plays, `+` and `-` zoom, D
-drops a second cursor for a time difference. For a stall file the right
+drops a second cursor for a time difference. For a stall capture the right
 side lists what left its normal range first.
 
 **Raw tools (F5).** S sweeps all 256 bytes and keeps going. Yellow = changed
@@ -440,31 +448,97 @@ for sweeps where nothing valid came back.
 **Window does not start: `could not load the Qt platform plugin "xcb"`.**
 `sudo apt install libxcb-cursor0 qt6-qpa-plugins`.
 
-## Log files from the command line
+## Drives from the command line
 
 ```sh
 hondalog-log record  --port sim: --seconds 30   # record without the window (add --bb PORT)
-hondalog-log info    FILE                 # streams, rates, markers, header
-hondalog-log import  old_log.csv          # 0.1.0 CSV, MSL or MLG -> .hlog
-hondalog-log export  FILE out.mlg         # also .msl .csv .npz .hlog
-hondalog-log export  FILE out.csv --channels rpm,map,stft --filter "ect > 80" --hz 10
-hondalog-log repair  FILE                 # finish a log cut off by a crash
-hondalog-log report  stall_....hlog       # one-page HTML report
-hondalog-log redecode FILE out.hlog       # decode the raw bytes with your current map
-hondalog-log list    [-q words]           # search names, notes, markers
-hondalog-log prune   --days 90 --yes      # delete old session logs (captures are kept)
+hondalog-log list    [-q words]           # drives and captures; searches names, notes, markers
+hondalog-log info    [DRIVE]              # streams, rates, markers, header (default: the newest)
+hondalog-log export  DRIVE out.mlg        # also .msl .csv .npz, or .db (a copy to hand on)
+hondalog-log export  DRIVE out.csv --channels rpm,map,stft --filter "ect > 80" --hz 10
+hondalog-log compare DRIVE_A DRIVE_B      # channel by channel; --align marker|trigger|crossing
+hondalog-log import  old_log.csv          # 0.1.0 CSV, MSL or MLG -> a new drive
+hondalog-log report  stall_20261116_071455   # one-page HTML report
+hondalog-log redecode DRIVE               # decode the raw bytes with your current map -> a new drive
+hondalog-log prune   --days 90 --yes      # delete old drives (those with captures or notes are kept)
+hondalog-log vacuum  [--full]             # give freed space back to the disk, check the file
+hondalog-log sql     "SELECT ..."         # run a query; without one, the sqlite3 shell
 ```
+
+DRIVE is a drive name (`drive_2026_11_16_0712`), a capture name
+(`stall_20261116_071455`), `last`, `other.db#drive_...` for a drive in another
+database, or a CSV/MSL/MLG file. `--db FILE` before the command picks the
+database (`compare` can take one drive from each).
+
+## Querying your drives with SQL
+
+The database is ordinary SQLite: `hondalog-log sql`, the `sqlite3` shell or
+DB Browser for SQLite open it (also while the app is recording; open it
+read-only). Times (`t`) are seconds since the app connected, the same clock
+in every table of one drive. What is there:
+
+| name | what |
+|---|---|
+| `drive_2026_11_16_0712` | one view per drive: a row per RPM read, every channel as a column (slower channels hold their last value, black box channels show their one-second mean), plus `wall_time` |
+| `drive_..._blackbox` | the same drive's black box streams, a row per second: `<channel>_min`, `_mean`, `_max` |
+| `drive_summary` | a row per drive: when, how long, stalls, markers, status, notes |
+| `stalls` | every stall capture of every drive: when, why, the window |
+| `readings` | every K-line and math value in long form: drive, channel, t, value |
+| `blackbox_1s` | every black box channel per second: min, mean, max |
+| `ecu_reads` | the raw bytes of every K-line read, with its latency |
+| `markers` | markers, trigger firings and alarms |
+
+The tables under them (`drives`, `channels`, `samples`, `chunks`, `events`,
+`alarms`, `captures`) are described in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The black box rows themselves
+are packed (`chunks`); read them at full rate with
+`hondalog.data.open_log("drive_...").series("bb_ecub")` or an export.
+
+```sql
+-- every drive, newest first
+SELECT drive, started, minutes, stalls, markers, status, notes
+FROM drive_summary ORDER BY started DESC;
+
+-- the last 5 seconds before every stall: RPM as it was read, and ECU +B
+-- from the black box (the lowest value in each second)
+SELECT s.name AS stall, 'rpm' AS channel, round(r.t - s.t_trigger, 2) AS seconds, r.value
+FROM stalls s JOIN readings r ON r.drive_id = s.drive_id AND r.channel = 'rpm'
+WHERE r.t BETWEEN s.t_trigger - 5 AND s.t_trigger
+UNION ALL
+SELECT s.name, 'ecu +B', b.t - s.t_trigger, b.min
+FROM stalls s JOIN blackbox_1s b ON b.drive_id = s.drive_id AND b.channel = 'bb_ecub'
+WHERE b.t BETWEEN s.t_trigger - 5 AND s.t_trigger
+ORDER BY 1, 2, 3;
+
+-- one drive as a table: where was it lean at a warm idle?
+SELECT t, wall_time, rpm, map, o2, stft
+FROM drive_2026_11_16_0712
+WHERE ect > 80 AND rpm < 1000 AND o2 < 0.2;
+
+-- lowest battery voltage the ECU reported, per drive
+SELECT drive, min(value) AS lowest_batt, count(*) AS reads
+FROM readings WHERE channel = 'batt' GROUP BY drive;
+
+-- the raw K-line bytes within a second of each marker
+SELECT m.drive, m.text, e.t, e.block, e.raw_hex, e.latency_ms
+FROM markers m JOIN ecu_reads e ON e.drive_id = m.drive_id
+WHERE m.kind = 'marker' AND e.t BETWEEN m.t - 1 AND m.t + 1;
+```
+
+Write to the database only through hondalog (notes and tags:
+`Library.set_notes`; deleting: `hondalog-log prune`).
 
 MLG files follow EFI Analytics' published MLG 2.0 layout and are checked
 byte by byte in the tests. Nobody has opened one in MegaLogViewer from this
 project yet. Parquet is not offered: Debian trixie has no `python3-pyarrow`.
 
-`redecode` needs a log that holds raw bytes. Everything recorded by the
+`redecode` needs a drive that holds raw bytes. Everything recorded by the
 app or by `hondalog-log record` does: every K-line read is stored with its
 own timestamp and the bytes the ECU sent. Logs imported from CSV, MSL or
 MLG have decoded values only. The header also carries the address map's
 version and decode hash, the link's counters, and any frame sent with the
 expert unlock.
+
 ## Black box (Track B)
 
 A K-line log cannot show a millisecond power dropout: the ECU just stops
@@ -532,7 +606,8 @@ does the same without the window.
 
 | what | where |
 |------|-------|
-| logs and stall captures | `~/hondalog/logs/` |
+| every drive and capture | `~/hondalog/hondalog.db` (plus `-wal` and `-shm` beside it while open) |
+| exports, reports, black box captures (`.bbx`) | `~/hondalog/logs/` |
 | address map (edit this) | `~/.config/hondalog/addressmap.toml` |
 | shipped default map | `/opt/hondalog/hondalog/data/addressmap.toml` |
 | program | `/opt/hondalog/` |

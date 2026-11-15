@@ -431,6 +431,45 @@ def test_views_are_queryable_with_plain_sqlite3(tmp_path):
     assert conn.execute("SELECT count(*) FROM address_maps").fetchone()[0] == 1
 
 
+def test_readme_sql_examples_run(tmp_path):
+    """Every query in the README's SQL section runs against a recorded
+    database and returns rows (the drive name is the only thing swapped in)."""
+    import re
+    from pathlib import Path
+    from hondalog import addressmap
+    from hondalog.logger import Recorder
+    rec = Recorder(addressmap.load_default(), "SIM", "sim:", out_dir=tmp_path, sync_captures=True, fsync=False,
+                   epoch=__import__("datetime").datetime(2026, 11, 16, 7, 12))
+    for i in range(1200):
+        t = i * 0.05
+        rpm = 800 if t < 50 else 0
+        rec.feed_read(t, 0x00, bytes([(rpm * 4) >> 8, (rpm * 4) & 255, 0]), 0.004)
+        rec.feed_read(t + 0.01, 0x12, bytes([60, 141, 24, 2]))
+        rec.feed_read(t + 0.02, 0x20, bytes([128, 128, 0]))
+        if i % 10 == 0:
+            rec.feed_read(t + 0.03, 0x08, bytes([0x20, 0x60, 0, 0, 0, 0, 0, 0, 0, 0]))
+            rec.feed_read(t + 0.04, 0x17, bytes([145, 128, 0]))
+        rec.feed_values("blackbox/live", t, {"bb_ecub": 13.8 if t < 49 else 0.2, "bb_vbat": 13.9}, source="blackbox")
+        if i == 400:
+            rec.mark("MARK 1")
+    rec.stop()
+    assert rec.events.get_nowait().reason == "rpm"
+    readme = (Path(__file__).parent.parent / "README.md").read_text(encoding="utf-8")
+    section = readme[readme.index("## Querying your drives with SQL"):]
+    block = re.search(r"```sql\n(.*?)```", section, re.S).group(1)
+    queries = [q.strip() for q in block.split(";") if q.strip()]
+    assert len(queries) >= 4
+    conn = sqlite3.connect(rec.db)
+    for query in queries:
+        rows = conn.execute(query.replace("drive_2026_11_16_0712", rec.path.name)).fetchall()
+        assert rows, query
+    names = re.findall(r"^\| `([a-z_0-9.]+)` \|", section, re.M)       # the table of views
+    views = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='view'")}
+    assert {"drive_summary", "stalls", "readings", "blackbox_1s", "ecu_reads", "markers"} <= set(names) <= views | {
+        "drive_2026_11_16_0712", "drive_..._blackbox"}
+    assert rec.path.name + "_blackbox" in views
+
+
 @pytest.mark.skipif(shutil.which("sqlite3") is None, reason="the sqlite3 shell is not installed")
 def test_the_sqlite3_shell_reads_a_drive(tmp_path):
     ref = make(tmp_path / "a.db")

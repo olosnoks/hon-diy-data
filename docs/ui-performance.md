@@ -13,7 +13,7 @@ hondalog --port sim: --connect --profile                        # overlay in the
 ```
 
 The bench runs the real app against the built-in simulator (`sim:`): real
-poller thread, real protocol code, real recorder writing the native log,
+poller thread, real protocol code, real recorder writing into the database,
 W2's simulated black box at 50 Hz. Per screen it reports:
 
 - **fps / min**: frame timer rate achieved; min = slowest 1 % of frames.
@@ -30,23 +30,23 @@ Intel Xeon 2.1 GHz, 2 cores, PySide6 / pyqtgraph, Qt offscreen platform,
 1366x768, Daylight, 8 s per screen, after the backends were bound
 (`ui/wired.py`): W1 link at true rates (fast class about 17 Hz, each read
 published on arrival), W3 math channels and alarms on the poller thread,
-W4 recorder writing a native log with raw bytes, W2's simulated black box
+W4 recorder writing a drive with raw bytes into SQLite, W2's simulated black box
 at 50 Hz, 41 tiles (24 ECU + 8 black box + 9 math).
 
 | Screen | fps | min fps | frame p50 / p95 / max (ms) | CPU % | latency p50 / p95 / max (ms) |
 |---|---|---|---|---|---|
-| Sensors, 41 tiles | 30.3 | 29.5 | 3.3 / 8.2 / 12.8 | 21.5 | 4.7 / 14.8 / 16.0 |
-| Drive | 30.3 | 29.7 | 1.8 / 6.0 / 8.7 | 16.6 | 4.3 / 15.4 / 17.2 |
-| Map 3D (2D fallback) | 30.3 | 29.6 | 4.0 / 9.2 / 15.3 | 22.2 | 5.0 / 14.9 / 18.0 |
-| Map 3D, orbiting | 30.3 | 27.9 | 3.2 / 6.1 / 17.4 | 35.7 | 5.7 / 14.4 / 16.5 |
-| Replay, live lanes following the bus | 30.3 | 29.6 | 0.3 / 18.6 / 31.4 | 26.0 | 5.0 / 13.8 / 16.5 |
-| Replay, playing a file | 30.3 | 29.5 | 5.2 / 9.4 / 23.9 | 28.5 | 7.0 / 14.7 / 16.6 |
-| Raw tools, sweeping | 30.3 | 29.6 | 0.3 / 4.0 / 19.5 | 15.6 | 7.4 / 17.6 / 20.0 |
-| Tune (2D fallback) | 30.3 | 29.5 | 3.0 / 5.6 / 12.1 | 19.3 | 5.8 / 14.3 / 17.2 |
-| Alarms | 30.3 | 29.5 | 0.1 / 3.0 / 12.3 | 13.4 | 5.6 / 14.0 / 17.2 |
-| Sensors again (traces full) | 30.3 | 29.5 | 3.8 / 13.9 / 23.9 | 26.7 | 6.2 / 13.6 / 15.9 |
+| Sensors, 41 tiles | 30.3 | 29.5 | 3.4 / 9.5 / 14.8 | 23.8 | 4.3 / 14.5 / 16.7 |
+| Drive | 30.3 | 29.5 | 1.8 / 6.3 / 9.7 | 16.5 | 3.6 / 15.2 / 17.7 |
+| Map 3D (2D fallback) | 30.3 | 29.5 | 4.0 / 8.4 / 13.9 | 21.6 | 4.8 / 14.5 / 16.0 |
+| Map 3D, orbiting | 30.3 | 28.4 | 2.6 / 6.1 / 9.9 | 31.6 | 6.0 / 14.3 / 16.9 |
+| Replay, live lanes following the bus | 30.3 | 29.5 | 0.2 / 20.7 / 33.8 | 26.9 | 5.2 / 14.0 / 17.2 |
+| Replay, playing a file | 30.3 | 29.4 | 4.5 / 7.7 / 20.7 | 24.5 | 3.2 / 14.4 / 17.1 |
+| Raw tools, sweeping | 30.3 | 29.5 | 0.3 / 4.8 / 22.4 | 16.3 | 7.8 / 17.9 / 20.4 |
+| Tune (2D fallback) | 30.3 | 29.4 | 2.9 / 7.1 / 12.7 | 19.4 | 4.5 / 14.4 / 17.4 |
+| Alarms | 30.3 | 28.8 | 0.2 / 3.6 / 11.0 | 13.9 | 5.4 / 14.5 / 16.2 |
+| Sensors again (traces full) | 30.3 | 29.5 | 4.0 / 13.5 / 20.0 | 27.2 | 6.0 / 14.7 / 16.0 |
 
-Peak RSS 167 MB. No link errors. All four targets are met.
+Peak RSS 171 MB. No link errors. All four targets are met.
 
 Against the numbers before the backends were bound (stand-in sources,
 32 tiles): frame rate and frame times are unchanged, latency is lower (the

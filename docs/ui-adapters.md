@@ -49,7 +49,7 @@ mapped`. Labels must fit a 163 px tile (about 12 capitals).
 | Black box | `ChannelSource` | `BlackboxSource` | W2 `BlackboxReader` on the poller's `t0` | `DemoSource` |
 | Alarms | `AlarmSource` | `PipelineAlarms` | W3 `LivePipeline.alarms`; plain limits for the black box rails | `LimitAlarms` |
 | Recording, stall catcher | `Recording` | `LiveRecording` | W4 `Recorder` + trigger engine (`Recorder.status()`) | `NullRecording` |
-| Logs, forensics | `LogReader` | `HlogReader` | W4 `open_log` / `ReplaySession`; W2 `open_event` for `.bbx` | `CsvLogReader` |
+| Logs, forensics | `LogReader` | `DriveReader` | W4 `open_log` / `ReplaySession` / `Library` on the drive database; W2 `open_event` for `.bbx` | `CsvLogReader` |
 | Observed map | `ObservedMap` | `LogHistogramMap` | W4 `TableHistogram`, bins from the W5 table when a ROM is open | `HistogramMap` |
 | Raw tools, wizard | `MapperSession` | `MappingSession` | W3 `VerificationSession` / `correlate` / `mapedit`; W1 read-only guard | `DemoMapper` |
 | Tables | `TableModel` | `RomTableModel` | W5 `RomSession` / `TableEditor`; sample tables when no ROM is loaded | `DemoTableModel` |
@@ -106,7 +106,7 @@ W2: the eight black-box ids the layouts assume are `bbatt, ecub, fpv, ig1,
 tach, igt, injp, bbmark` (`BLACKBOX_SPECS`). `wired.BB_TO_UI` maps the reader's
 names onto them (`bb_vbat, bb_ecub, bb_pump, bb_ig1, bb_rpm_tach / 30,
 bb_rpm_ign / 30, bb_inj_pw, bb_button`); logs keep W2's names and
-`HlogReader` applies the same mapping. The default Drive view and the
+`DriveReader` applies the same mapping. The default Drive view and the
 Replay lanes reference `fpv`, `bbatt`, `ecub`, `ig1`, `tach`, `bbmark` by id;
 keep the ids or edit `DRIVE_DEFAULT` (session.py) and `GROUPS` (replay.py).
 
@@ -156,8 +156,22 @@ black box trigger, `alarm`, `manual`) and `message` its own words.
 ```python
 def read(self, path) -> LogView       # raises OSError / ValueError with a user message
 def analyze(self, view) -> Forensics  # order of loss, "held up", reading, banner summary
-def recent(self, stalls_only=False) -> Sequence[Path]   # newest first
+def recent(self, stalls_only=False) -> Sequence          # newest first
+def drives(self) -> Sequence[DriveRow]                   # the drive picker's list
+def import_file(self, path)                              # CSV / MSL / MLG -> a new drive
 ```
+
+There are no log files to browse any more: recordings are drives in
+`hondalog.db`. `read` takes what `recent` and `drives` hand out (a
+`hondalog.data.DriveRef` for a drive or a capture, a `Path` for a `.bbx`
+file), a drive or capture name, or the path of a file to read as it is.
+`Recording.path` and `StallCapture.path` are `DriveRef`s too; all of them
+have `.name` (`drive_2026_11_16_0712`, `stall_20261116_071455`).
+
+Replay's Open button shows `ui/drivepicker.DrivePicker`: `drives()` as a
+list (each drive followed by its captures, then `.bbx` files), a search box
+over `DriveRow.text`, and "Import file", which calls `import_file` and opens
+what it returns.
 
 `LogView` holds per-channel time and value arrays (`t[id]`, `data[id]`), so
 1 kHz black-box channels and 10 Hz ECU channels sit in one view at their own
