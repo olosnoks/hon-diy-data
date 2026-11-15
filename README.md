@@ -5,8 +5,9 @@ KKL 409.1 USB cable (FTDI FT232RL). Linux desktop app: Python, PySide6,
 pyqtgraph, pyserial. Built for Debian 13 on an old ThinkPad.
 
 It reads ECU RAM with the Honda diagnostic protocol on the K-line
-(`20 05 addr len cksum`, 9600 8N1), shows it, logs it to CSV, and saves a
-separate file when the engine stalls.
+(`20 05 addr len cksum`, 9600 8N1), shows it, logs it to a crash-safe native
+log (`.hlog`), and saves a separate capture when the engine stalls or another
+trigger fires. Logs export to MegaLogViewer (`.mlg`, `.msl`) and CSV.
 
 ![dashboard](docs/screenshot.png)
 
@@ -149,12 +150,15 @@ latency timer to 1 ms on every plug-in. `install.sh` installs it.
 ## Using it
 
 **Recording.** Starts on connect (untick "Record on connect" to stop that).
-Logs go to `~/hondalog/logs/log_DATE_TIME.csv`. The header lines (starting
-with `#`) hold the ECU id bytes, the address map version and the units.
+Logs go to `~/hondalog/logs/log_DATE_TIME.hlog`. The file holds the ECU id
+bytes, the whole address map, the units, markers and every channel with its
+own timestamps. It is written every half second, so a dead laptop battery
+costs at most the last second. A recording that runs longer than an hour
+continues in `..._p002.hlog` and so on. Logs from 0.1.0 (`.csv`) still open.
 
 **Marker.** Press **Space** or the big amber button when something happens
-("it just stumbled"). The next row in the log gets `MARK n` in the `marker`
-column and a line appears on the charts. Space types a normal space while
+("it just stumbled"). The log gets a `MARK n` event at that moment and a line
+appears on the charts. Space types a normal space while
 the cursor is in a text box.
 
 **Stall catcher.** While recording, once RPM has been above 400:
@@ -163,14 +167,22 @@ the cursor is in a text box.
 - the ECU stops answering for 1 second (power loss, cable pulled),
 
 the app saves the 30 seconds before and the 10 seconds after to
-`~/hondalog/logs/stall_DATE_TIME.csv`, shows a red banner and beeps.
+`~/hondalog/logs/stall_DATE_TIME.hlog`, shows a red banner and beeps.
 "Open in replay" loads the file. Turning the key off with the engine
 running counts as a stall too; ignore that one or press Stop first.
 
 **Charts.** "Plot channels" picks what is drawn (up to 8). "Window" sets how
 much history scrolls by.
 
-**Replay tab.** Open any log or stall file. Drag the slider or click in a
+The stall catcher is two rules of a general trigger engine
+(`hondalog/triggers/`). A rule is a condition on any channels, a hold time,
+and how much to keep before and after, for example
+`when = "ect > 105"`, `hold_s = 2`. Rules for low battery, a lean spike and
+overheating ship switched off, because they depend on channels that have not
+been verified on the car yet.
+
+**Replay tab.** Open any log or stall file (`.hlog`, old `.csv`, MegaLogViewer
+`.msl`/`.mlg`). "Export…" saves the open log as `.mlg`, `.msl`, `.csv` or `.npz`. Drag the slider or click in a
 chart to move the cursor. The table shows every channel at that moment.
 Click a marker in the list to jump to it. Mouse wheel zooms the time axis.
 
@@ -325,6 +337,28 @@ for sweeps where nothing valid came back.
 **Window does not start: `could not load the Qt platform plugin "xcb"`.**
 `sudo apt install libxcb-cursor0 qt6-qpa-plugins`.
 
+## Log files from the command line
+
+```sh
+hondalog-log info    FILE                 # streams, rates, markers, header
+hondalog-log import  old_log.csv          # 0.1.0 CSV, MSL or MLG -> .hlog
+hondalog-log export  FILE out.mlg         # also .msl .csv .npz .hlog
+hondalog-log export  FILE out.csv --channels rpm,map,stft --filter "ect > 80" --hz 10
+hondalog-log repair  FILE                 # finish a log cut off by a crash
+hondalog-log report  stall_....hlog       # one-page HTML report
+hondalog-log redecode FILE out.hlog       # decode the raw bytes with your current map
+hondalog-log list    [-q words]           # search names, notes, markers
+hondalog-log prune   --days 90 --yes      # delete old session logs (captures are kept)
+```
+
+MLG files follow EFI Analytics' published MLG 2.0 layout and are checked
+byte by byte in the tests. Nobody has opened one in MegaLogViewer from this
+project yet. Parquet is not offered: Debian trixie has no `python3-pyarrow`.
+
+`redecode` needs a log that holds raw bytes. Those are stored when the
+poller hands over single reads (`Recorder.feed_read`); a log recorded sweep
+by sweep has decoded values only.
+
 ## Files
 
 | what | where |
@@ -343,8 +377,11 @@ planner, scheduler, adaptive timing, clocks), `poller.py` (worker thread),
 `obd2.py` (ISO 9141-2 and OBD2 services), `diag/` (first contact, probes,
 adapter check, DTC text), `addressmap.py`, `expr/` (the safe expression
 evaluator), `mathch/`, `alarms/`, `mapping/` (verification, finder, map
-editing), `live.py` (math + alarms per sample), `logger.py` (CSV, stall
-catcher, log reader), `sim.py` (fake ECU), `ui/` (Qt).
+editing), `live.py` (math + alarms per sample), `logger.py` (the recorder),
+`data/` (native log format, reader, library, retention), `triggers/`
+(trigger engine, stall presets), `analysis/` (filters, table histogram,
+scatter, cursors, compare, plot decimation), `export/` (MLG, MSL, CSV,
+importers), `logtool.py` (`hondalog-log`), `sim.py` (fake ECU), `ui/` (Qt).
 
 ## Link: how fast, and how it copes
 
@@ -425,6 +462,7 @@ silent=0.005,echo=0.005`), `--seed N` (runs repeat exactly), `--turnaround-ms`,
 `--iso-only`. Key `u` pulls the cable for 3 s. Bytes are paced at true 9600
 baud unless `--fast`. In the app, the ports `sim:` and `sim:flaky` are the
 same model in-process, with ISO 9141-2.
+
 ## Tests
 
 ```sh
@@ -432,6 +470,7 @@ cd /opt/hondalog
 python3 -m pytest                                   # unit tests
 python3 -m hondalog.bench.expr_bench                # math/alarm CPU cost against the budget
 QT_QPA_PLATFORM=offscreen python3 tools/smoke.py    # full run against the simulator
+python3 bench/bench_data.py                         # log write/open/histogram timings
 ```
 
 (If the installer had to build a venv, use `/opt/hondalog/.venv/bin/python`

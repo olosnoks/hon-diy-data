@@ -8,7 +8,9 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 
 echo "==> Removing hondalog"
-sudo rm -f /usr/local/bin/hondalog /usr/local/bin/hondalog-sim /usr/local/bin/hondalog-firstcontact \
+sudo rm -f /usr/local/bin/hondalog /usr/local/bin/hondalog-sim \
+    /usr/local/bin/hondalog-firstcontact /usr/local/bin/hondalog-map \
+    /usr/local/bin/hondalog-log
     /usr/local/bin/hondalog-map
 sudo rm -f /usr/local/share/applications/hondalog.desktop
 sudo rm -f /usr/local/share/icons/hicolor/scalable/apps/hondalog.svg

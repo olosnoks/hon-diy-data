@@ -5,8 +5,8 @@ import time
 import pytest
 
 from hondalog import addressmap, protocol
-from hondalog.logger import Recorder, StallCatcher, read_log
-from hondalog.poller import OK, Poller, Sample
+from hondalog.logger import Recorder, read_log
+from hondalog.poller import OK, Poller
 from hondalog.sim import EcuModel
 from hondalog.transport import Link, LoopbackTransport, Transport
 
@@ -186,62 +186,3 @@ def test_poller_reports_silent_ecu():
         assert _wait(lambda: poller.state == OK, 5)
     finally:
         poller.stop()
-
-
-# ---- stall catcher logic on its own ----
-
-def _feed(sc, t, rpm, link=True):
-    from datetime import datetime
-    return sc.feed(Sample(t, datetime(2026, 1, 1, 12, 0, int(t) % 60), link,
-                          {"rpm": rpm} if link else {}))
-
-
-def test_stall_catcher_windows(tmp_path):
-    sc = StallCatcher(tmp_path, ["rpm"], {}, pre_s=30, post_s=10)
-    t = 0.0
-    while t < 50:                       # 50 s of running at 10 Hz
-        assert _feed(sc, t, 800) == (None, None)
-        t += 0.1
-    reason, _ = _feed(sc, t, 0)
-    assert reason == "rpm" and sc.capturing
-    event = None
-    while event is None:
-        t += 0.1
-        _, event = _feed(sc, t, 0)
-    log = read_log(event.path)
-    stall_t = float(log.meta["stall_time_s"])
-    assert stall_t - log.t[0] == pytest.approx(30, abs=0.2)
-    assert log.t[-1] - stall_t == pytest.approx(10, abs=0.2)
-
-
-def test_stall_catcher_needs_running_engine_first(tmp_path):
-    sc = StallCatcher(tmp_path, ["rpm"], {})
-    for i in range(50):                 # key on, engine off: never triggers
-        assert _feed(sc, i * 0.1, 0)[0] is None
-    for i in range(50, 80):             # cranking below 400 does not arm it
-        assert _feed(sc, i * 0.1, 250)[0] is None
-    assert _feed(sc, 8.0, 0)[0] is None
-
-
-def test_stall_catcher_link_loss(tmp_path):
-    sc = StallCatcher(tmp_path, ["rpm"], {}, post_s=1, link_down_s=1.0)
-    for i in range(20):
-        _feed(sc, i * 0.1, 900)
-    assert _feed(sc, 2.0, None, link=False)[0] is None      # one bad sweep is not a stall
-    assert _feed(sc, 2.1, 900)[0] is None
-    assert _feed(sc, 2.2, None, link=False)[0] is None
-    assert _feed(sc, 2.8, None, link=False)[0] is None
-    assert _feed(sc, 3.3, None, link=False)[0] == "link"
-    event = sc.finish()                 # recording stopped early
-    assert event.reason == "link" and event.rows > 20
-    assert "link lost" in read_log(event.path).meta["stall_trigger"]
-
-
-def test_stall_catcher_rearms(tmp_path):
-    sc = StallCatcher(tmp_path, ["rpm"], {}, post_s=0.2)
-    _feed(sc, 0, 800)
-    assert _feed(sc, 1, 0)[0] == "rpm"
-    assert _feed(sc, 1.3, 0)[1] is not None
-    assert _feed(sc, 2, 0)[0] is None           # still dead: no second file
-    _feed(sc, 3, 900)
-    assert _feed(sc, 4, 0)[0] == "rpm"

@@ -10,10 +10,12 @@ hondalog = "hondalog.__main__:main"
 hondalog-sim = "hondalog.sim:main"
 hondalog-firstcontact = "hondalog.diag.firstcontact:main"
 hondalog-map = "hondalog.mapping.__main__:main"
+hondalog-log = "hondalog.logtool:main"
 
 [tool.setuptools]
 packages = ["hondalog", "hondalog.ui", "hondalog.link", "hondalog.diag", "hondalog.expr",
-            "hondalog.mathch", "hondalog.alarms", "hondalog.mapping", "hondalog.bench"]
+            "hondalog.mathch", "hondalog.alarms", "hondalog.mapping", "hondalog.bench",
+            "hondalog.data", "hondalog.analysis", "hondalog.export", "hondalog.triggers"]
 
 [tool.setuptools.package-data]
 hondalog = ["data/*"]
