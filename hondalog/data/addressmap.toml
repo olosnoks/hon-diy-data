@@ -26,6 +26,9 @@
 #   gauge    show a big number on the dashboard
 #   plot     plotted by default
 #   status   "unverified" or "verified"
+#   rate     optional: "fast", "medium" or "slow". How often the channel is
+#            read. Left out, the name decides (rpm map tps inj ign are fast,
+#            o2 stft ltft vss medium, the rest slow).
 
 version = "p2p-guess-1 (kerpz P2T map)"
 ecu = "P2P expected, not confirmed"
@@ -44,6 +47,19 @@ length = 10
 # reply_timeout_s = 0.2
 # init_sequence = "68 6a f5 af bf b3 b2 c1 db b3 e9"
 # init_delay_s = 0.3
+# max_read_len = 16          # largest block the ECU answers (hondalog-firstcontact probes it)
+# Read rates the scheduler aims for, in reads per second per rate class:
+# rate_fast_hz = 20
+# rate_medium_hz = 5
+# rate_slow_hz = 1
+# Link timing. reply_timeout_s and inter_request_delay_s above are the ceiling
+# and the floor; the link adapts between them from what it measures.
+# adaptive_timing = true
+# min_reply_timeout_s = 0.02
+# inter_byte_timeout_s = 0.05
+# inter_request_delay_s = 0.002
+# max_inter_request_delay_s = 0.05
+# retries = 1                # extra attempts per read before it counts as failed
 
 [[channel]]
 name = "rpm"

@@ -118,9 +118,33 @@ without the pty.
 4. Start `hondalog`. The port box should already show `/dev/hondalog`.
    Press **Connect**.
 5. The status box turns green (`ECU OK`), READS counts up, and RATE shows
-   about 10 Hz.
+   about 17 Hz.
 
-If it stays red, go to Troubleshooting.
+If it stays red, run `hondalog-firstcontact` (next section), then go to
+Troubleshooting.
+
+### 4. First contact
+
+```sh
+hondalog-firstcontact            # or: --port /dev/ttyUSB0, --port sim:
+```
+
+Run this the first time the cable is in the car, with the key ON and
+hondalog itself disconnected. It takes about 15 seconds and only reads. It
+checks the adapter (FTDI or not, clone or not, latency timer), tests the
+echo, listens, tries a Honda read with and without the wake-up bytes, tries
+other reply framings, reads the ECU id, finds the longest block the ECU
+answers, measures its reply time, reads 0x00-0xFF once, and then tries the
+standard OBD2 link (ISO 9141-2) for codes, freeze frame and readiness.
+
+It ends with one of five verdicts: `Honda protocol OK`, `ISO only`,
+`cable dead`, `ECU silent`, `no port`. Two files land in `~/hondalog/logs/`:
+`firstcontact-DATE.md` (verdict, next steps, findings, suggested
+`[protocol]` settings) and `firstcontact-DATE.hex.log` (every byte sent and
+received, with times). Send both along when asking for help.
+
+`hondalog-firstcontact --udev` prints the udev rule that sets the FTDI
+latency timer to 1 ms on every plug-in. `install.sh` installs it.
 
 ## Using it
 
@@ -248,10 +272,91 @@ for sweeps where nothing valid came back.
 To get the shipped map back, delete your copy and start the app.
 
 Code layout: `protocol.py` (framing and checksum, no I/O), `transport.py`
-(serial port, built-in simulator, request/reply), `poller.py` (worker
-thread), `addressmap.py`, `logger.py` (CSV, stall catcher, log reader),
-`sim.py` (fake ECU), `ui/` (Qt). `iso9141.py` is an empty stub for standard
-OBD2 PIDs.
+(serial port, built-in simulator, request/reply `Link`), `link/` (read
+planner, scheduler, adaptive timing, clocks), `poller.py` (worker thread),
+`obd2.py` (ISO 9141-2 and OBD2 services), `diag/` (first contact, probes,
+adapter check, DTC text), `addressmap.py`, `logger.py` (CSV, stall catcher,
+log reader), `sim.py` (fake ECU), `ui/` (Qt).
+
+## Link: how fast, and how it copes
+
+**Rates.** Each channel has a rate class: fast (rpm, map, tps, inj, ign),
+medium (o2, stft, ltft, vss), slow (the rest). Set `rate = "fast"` on a
+channel in the address map to override. Targets are 20 / 5 / 1 reads per
+second (`rate_fast_hz` etc. in `[protocol]`). The planner merges nearby
+addresses into the fewest requests using the measured cost of a request
+(5 echo bytes + 3 frame bytes + ECU reply time + gap, about 12 ms, the
+same as 12 data bytes), and the scheduler interleaves them.
+
+`python3 tools/bench_link.py` shows the result against the simulator at true
+9600-baud byte timing (2 ms ECU reply time, 1 ms USB latency):
+
+| channels | before (v0.1.0) | now |
+|---|---|---|
+| rpm, map, tps, inj, ign (+ vss, o2, baro in the same reads) | 11.4 Hz | 17.3 Hz |
+| stft, ltft | 11.4 Hz | 4.6 Hz (target 5) |
+| temperatures, battery, flags, knock | 11.4 Hz | 1.0 Hz (target 1) |
+| rpm alone, burst mode | - | 66.7 Hz |
+
+20 Hz on the fast class does not fit on a 9600 baud wire with this map
+(it would need 109 % of the wire); the app reports the shortfall per
+channel instead of hiding it. A full frame of every channel still arrives
+about once a second at worst; lower `rate_fast_hz` or mark more channels
+medium if you want it more even.
+
+**Timestamps.** Every value carries the time its reply was complete
+(monotonic clock), minus an estimate of how old the data was by then.
+Channels from different reads no longer share one timestamp.
+
+**Errors.** Response timeout, inter-byte timeout and the gap between
+requests are measured and adapt. A bad reply is retried once after the line
+has been drained. Counters (timeouts, checksum failures, echo mismatches,
+resyncs, retries) are in `poller.stats`.
+
+**Recovery.** Key off and on again, or the cable pulled and plugged back in:
+the app notices within about 0.5 s, keeps trying, and carries on by itself
+within about 2-3 s of the ECU or cable coming back. No restart needed.
+
+**Read-only guard.** The hex console sends only read requests
+(`20 05 addr len cksum`) and the wake-up bytes. Anything else is refused
+until the expert unlock is switched on for the session
+(`poller.set_expert_unlock(True)`); what was sent is kept in
+`poller.link.unlocked_frames`.
+
+## OBD2 (ISO 9141-2)
+
+Standard OBD2 on the same pin at 10400 baud: 5-baud init at address 0x33
+(by break toggling, the FT232 cannot do 5 baud), KWP2000 fast init as a
+fallback, supported-PID discovery, live PIDs, stored and pending codes with
+Honda P1xxx text, freeze frame, readiness, and clear codes. Clear needs the
+literal confirmation `"CLEAR"`, refuses while the engine runs, and resets
+the readiness monitors.
+
+Limits:
+
+- It is slow: about 8-10 PIDs per second in the simulator, likely fewer on
+  the car. Use it for codes and cross-checks, not for logging.
+- The two protocols cannot share the line. `poller.obd2(fn)` pauses Honda
+  polling, runs the init (about 2.6 s), runs `fn`, and goes back. No power
+  cycle is needed in the simulator: the ECU drops the ISO session after 5 s
+  of silence and Honda reads resume. Expect a gap of about 8 s in the log.
+  Whether the real P2P behaves the same is not known; if Honda reads do not
+  come back, turn the key off and on.
+- The ISO session dies after 5 s without a request; the code re-inits by
+  itself, which costs another 2.6 s.
+- It needs break and baud control, so it works on the real cable and on the
+  built-in `sim:` port, not through the `hondalog-sim` pty.
+- 10400 baud is non-standard; some clone FTDI chips and most CH340 cables
+  get it wrong. If the init fails on a clone, suspect that first.
+
+## Simulator extras
+
+`hondalog-sim --faults flaky` (or `drop=0.01,cksum=0.01,junk=0.01,slow=0.005,
+silent=0.005,echo=0.005`), `--seed N` (runs repeat exactly), `--turnaround-ms`,
+`--max-read-len`, `--unplug-after SEC --unplug-for SEC`, `--cable-dead`,
+`--iso-only`. Key `u` pulls the cable for 3 s. Bytes are paced at true 9600
+baud unless `--fast`. In the app, the ports `sim:` and `sim:flaky` are the
+same model in-process, with ISO 9141-2.
 
 ## Tests
 
@@ -273,7 +378,15 @@ real car:
 - whether it needs the wake-up bytes, and whether they do any harm
 - every address and formula in the map
 - the ECU id location (0x76, 10 bytes)
-- the real polling rate (the simulator gives about 10 Hz)
+- the real polling rate: the ECU's reply time is assumed to be 2 ms in the
+  simulator; the timing probe measures the real one
+- the longest block the ECU answers (assumed 16; the probe tries up to 64)
+- ISO 9141-2 on the real ECU: the break-toggled 5-baud init on this cable,
+  the key bytes, which PIDs it supports, and whether Honda reads come back
+  after an ISO session without cycling the key
+- the FTDI latency timer actually reaching 1 ms on the ThinkPad
+- unplug/replug recovery with a real cable (tested with the simulator's
+  unplug only)
 
 ## Uninstall
 

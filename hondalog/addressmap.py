@@ -94,6 +94,7 @@ class Channel:
     gauge: bool = False
     plot: bool = False
     status: str = "unverified"
+    rate: str = ""             # "fast" | "medium" | "slow"; "" = by name (link/scheduler.py)
     _fn: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):

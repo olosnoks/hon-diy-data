@@ -60,9 +60,10 @@ else
     fi
 fi
 
-echo "==> Commands: /usr/local/bin/hondalog, /usr/local/bin/hondalog-sim"
+echo "==> Commands: /usr/local/bin/hondalog, hondalog-sim, hondalog-firstcontact"
 sudo ln -sf "$PREFIX/bin/hondalog" /usr/local/bin/hondalog
 sudo ln -sf "$PREFIX/bin/hondalog-sim" /usr/local/bin/hondalog-sim
+sudo ln -sf "$PREFIX/bin/hondalog-firstcontact" /usr/local/bin/hondalog-firstcontact
 
 echo "==> udev rule: /dev/hondalog for the FTDI cable (0403:6001)"
 sudo install -m 644 "$SRC/packaging/99-hondalog.rules" /etc/udev/rules.d/99-hondalog.rules

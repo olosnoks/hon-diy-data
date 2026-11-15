@@ -42,7 +42,8 @@ class Scripted(Transport):
 
 
 FAST = protocol.DEFAULT.with_overrides({"reply_timeout_s": 0.03, "init_sequence": "",
-                                        "inter_request_delay_s": 0.0})
+                                        "inter_request_delay_s": 0.0, "retries": 0,
+                                        "inter_byte_timeout_s": 0.03})
 
 
 def test_sim_echoes_then_replies():

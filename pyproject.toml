@@ -8,9 +8,10 @@ dependencies = ["PySide6", "pyqtgraph", "pyserial", "numpy"]
 [project.scripts]
 hondalog = "hondalog.__main__:main"
 hondalog-sim = "hondalog.sim:main"
+hondalog-firstcontact = "hondalog.diag.firstcontact:main"
 
 [tool.setuptools]
-packages = ["hondalog", "hondalog.ui"]
+packages = ["hondalog", "hondalog.ui", "hondalog.link", "hondalog.diag"]
 
 [tool.setuptools.package-data]
 hondalog = ["data/*"]

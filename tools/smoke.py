@@ -141,7 +141,7 @@ def gui(docs: Path):
         win.rescan_ports()
         win.connect_port(LINK)
         check(spin(5, lambda: win.poller and win.poller.state == OK), "GUI connected to the sim pty")
-        check(win.recorder is not None, "auto-record started")
+        check(spin(2, lambda: win.recorder is not None), "auto-record started")
         spin(4)
         win.mark()
         spin(3)
