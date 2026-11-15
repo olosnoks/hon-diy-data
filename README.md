@@ -186,22 +186,88 @@ Click a marker in the list to jump to it. Mouse wheel zooms the time axis.
 
 ### Mapping the P2P
 
-1. Engine warm and idling. Raw tools, "Sweep continuously".
-2. Press "Clear changes", then change one thing only: blip the throttle,
-   switch on the headlights, turn on the A/C.
-3. Watch which bytes turn orange. Compare with the guess in the map
-   (RPM at 0x00-0x01, TPS at 0x14, battery at 0x17, and so on).
-4. "Edit address map" (bottom right) opens
-   `~/.config/hondalog/addressmap.toml`. Fix the address or formula, set
-   `status = "verified"`, bump `version`, save.
-5. Disconnect and connect again to load it.
+Every address starts as a guess. Three tools turn guesses into verified
+channels; all of them work from the terminal (`hondalog-map`, also over ssh)
+and the logic is in `hondalog/mapping/` for the UI to use.
 
-The file explains its own fields. Formulas are plain arithmetic on `x`
-(the raw number). If the file has an error the app tells you and uses the
-built-in map until you fix it.
+**1. Guided checks.** `hondalog-map scripts` lists them; `hondalog-map status`
+shows which script can prove which channel.
 
-Temperatures are in °C, pressure in kPa, speed in km/h. Change the formula
-and units in the map if you want others.
+```sh
+hondalog-map verify koeo --port /dev/hondalog          # key on, engine off
+hondalog-map verify tps_sweep --port /dev/hondalog     # press the pedal slowly
+hondalog-map verify idle --port /dev/hondalog          # warm idle; asks for the tach reading
+hondalog-map verify steady_3000 --port /dev/hondalog
+hondalog-map verify warmup --port /dev/hondalog        # cold start to warm
+hondalog-map verify drive --port /dev/hondalog         # passenger types the speedo reading
+hondalog-map verify ac_switch --port /dev/hondalog
+```
+
+Each script tells you what to do, records the whole time, and gives a verdict
+per channel:
+
+- `pass`: a check that can prove the address held (throttle went from under
+  5% to over 90% as you pressed; battery within 0.3 V of your meter).
+- `plausible`: the value looks sane but that proves nothing (RPM reads 0 with
+  the engine off). Not marked unless you insist (`--force`).
+- `fail`: it lists where the signal may really live.
+- `skip`: no reading was given, or the check does not apply (engine not cold).
+
+Nothing is marked verified until you say yes. Then the map gets
+`status = "verified"` and a `[channel.evidence]` table: date, script, what was
+measured, the map version and hash, and the name of the evidence file in
+`~/hondalog/verification/` (a report plus every raw byte recorded).
+
+**2. The finder.** Sweep while something changes, then rank every address as
+a byte and as a 16-bit value in both byte orders:
+
+```sh
+hondalog-map find --port /dev/hondalog --channel rpm --seconds 30   # what moves with RPM?
+hondalog-map find --port /dev/hondalog --value 12.4 --formula "x / 10.45"   # what reads 12.4 V?
+```
+
+In the app: Raw tools, "Sweep continuously", then "Rank addresses". It prints
+a suggested formula (least squares) for each hit. Rank against a channel you
+have already verified, or the result is only as good as that guess.
+
+**3. Cross-check with standard OBD2 PIDs** (`hondalog/mapping/crosscheck.py`).
+Feed it pairs of readings taken under the same steady conditions and it says
+agree, scaled (with a corrected formula) or no match for RPM, ECT, IAT, MAP,
+TPS, speed, both trims, O2 and timing. It needs the ISO 9141-2 link, which is
+still being built; until then it runs on numbers from any scan tool.
+
+**By hand** still works: "Edit address map" opens the file. Changing an
+address or formula through the tools resets that channel to unverified and
+bumps the version. `hondalog-map diff old.toml new.toml` shows what changed
+and whether old logs would decode differently; `hondalog-map hash` prints the
+12-digit hash that identifies a map's decoding.
+
+An old (schema 1) map keeps working as it is. `hondalog-map upgrade` adds the
+math channels and alarms to it and keeps your comments.
+
+### Math channels and alarms
+
+Both live in the address map, under `[[math]]` and `[[alarm]]`; the file
+explains every field. Shipped math channels: injector duty, fuel flow, total
+trim, RPM rate, load, a rough AFR estimate and three filtered values. Shipped
+alarms: coolant over 105 °C for 2 s (critical), battery low and high, over-rev,
+idle collapsing, lean under load. The limits are starting points, not Honda
+figures, and every one of them reads channels that are not verified yet (the
+alarm text shows a `?` until they are).
+
+Expressions use `[rpm]` or `rpm` for a channel, `[rpm-1]` for its previous
+sample, `a ? b : c`, and helpers such as `avg(x, ms)`, `slope(x, ms)`,
+`minw(x, ms)`, `maxw(x, ms)`, `smooth(x, n)`. `min(a, b)` and `max(a, b)`
+compare two values, so the time-window versions are spelled `minw`/`maxw`.
+Nothing in an expression is run as Python: the text is parsed into a small
+tree and only the listed functions exist.
+
+For now the app shows the top alarm at the bottom of the window (click it to
+acknowledge) and writes alarm markers into the log. Math channels are computed
+but the dashboard does not display them until the new UI lands.
+
+Temperatures are in °C, pressure in kPa, speed in km/h in the map and in logs.
+`hondalog/units.py` converts for display (°F, psi, inHg, mph, AFR).
 
 ## Troubleshooting
 
@@ -275,8 +341,10 @@ Code layout: `protocol.py` (framing and checksum, no I/O), `transport.py`
 (serial port, built-in simulator, request/reply `Link`), `link/` (read
 planner, scheduler, adaptive timing, clocks), `poller.py` (worker thread),
 `obd2.py` (ISO 9141-2 and OBD2 services), `diag/` (first contact, probes,
-adapter check, DTC text), `addressmap.py`, `logger.py` (CSV, stall catcher,
-log reader), `sim.py` (fake ECU), `ui/` (Qt).
+adapter check, DTC text), `addressmap.py`, `expr/` (the safe expression
+evaluator), `mathch/`, `alarms/`, `mapping/` (verification, finder, map
+editing), `live.py` (math + alarms per sample), `logger.py` (CSV, stall
+catcher, log reader), `sim.py` (fake ECU), `ui/` (Qt).
 
 ## Link: how fast, and how it copes
 
@@ -357,12 +425,12 @@ silent=0.005,echo=0.005`), `--seed N` (runs repeat exactly), `--turnaround-ms`,
 `--iso-only`. Key `u` pulls the cable for 3 s. Bytes are paced at true 9600
 baud unless `--fast`. In the app, the ports `sim:` and `sim:flaky` are the
 same model in-process, with ISO 9141-2.
-
 ## Tests
 
 ```sh
 cd /opt/hondalog
 python3 -m pytest                                   # unit tests
+python3 -m hondalog.bench.expr_bench                # math/alarm CPU cost against the budget
 QT_QPA_PLATFORM=offscreen python3 tools/smoke.py    # full run against the simulator
 ```
 
@@ -387,6 +455,13 @@ real car:
 - the FTDI latency timer actually reaching 1 ms on the ThinkPad
 - unplug/replug recovery with a real cable (tested with the simulator's
   unplug only)
+- the verification scripts' limits (idle 550-950 rpm, MAP 20-48 kPa at idle,
+  charging 13.2-14.9 V and so on) are ordinary D-series expectations, not
+  figures measured on this car
+- whether the MIL bit reads 1 during the key-on bulb check
+- the alarm limits, the 240 cc/min injector size and the 0.85 VE guess behind
+  the fuel flow and AFR estimates
+- the ISO PID cross-check against a real ISO 9141-2 session
 
 ## Uninstall
 

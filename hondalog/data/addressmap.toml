@@ -25,13 +25,39 @@
 #   kind     "value" (default) or "flag" (0/1 lamp)
 #   gauge    show a big number on the dashboard
 #   plot     plotted by default
-#   status   "unverified" or "verified"
-#   rate     optional: "fast", "medium" or "slow". How often the channel is
-#            read. Left out, the name decides (rpm map tps inj ign are fast,
-#            o2 stft ltft vss medium, the rest slow).
+#   status   "unverified", "verified" or "suspect" (checked and it failed)
+#   rate     poll rate class: "fast", "medium" or "slow". How often the
+#            channel is read (see rate_*_hz under [protocol]). Left out, the
+#            name decides (rpm map tps inj ign are fast, o2 stft ltft vss
+#            medium, anything else slow).
+#   endian   "big" (default) or "little": byte order of x for 2-4 byte channels
+#   source   where the address and formula came from
+#   notes    free text
+#
+# [channel.evidence] is written by the verification tool when you confirm a
+# channel: date, method, result, summary, log, map_version, map_hash, reference.
+#
+# [channel.variants.NAME] overrides addr, length, formula, endian, units,
+# min, max, decimals, rate, label, source, notes for another ECU, or drops the
+# channel there with absent = true. Verified marks never carry over to
+# another ECU: each variant has its own status and evidence.
+#
+# Further down: [constants], [[math]] channels and [[alarm]] rules.
 
-version = "p2p-guess-1 (kerpz P2T map)"
+schema = 2
+version = "p2p-guess-2 (kerpz P2T map)"
 ecu = "P2P expected, not confirmed"
+ecu_variant = "P2P"                     # which of the [variants] below to load
+
+# The plain channel entries describe the first variant listed here.
+[variants.P2P]
+description = "2000 Civic EX, D16Y8, OBD2B. The target. Not confirmed on the car."
+
+[variants.P2T]
+description = "kerpz's OBD2 test ECU. The addresses in this file are his."
+
+[variants.P28]
+description = "Chipped OBD1 P28. Needs the OBD1 datalog link, not this K-line protocol."
 
 # Where the ECU ID bytes are thought to live (kerpz: 20 05 76 0A 5B).
 [ecu_id]
@@ -74,6 +100,12 @@ decimals = 0
 gauge = true
 plot = true
 status = "unverified"
+rate = "fast"
+source = "kerpz hobd_uni2 (P2T)"
+
+[channel.variants.P28]            # OBD1 stores the period, not the speed (kerpz)
+formula = "1875000 / (x + 1)"
+source = "kerpz hobd_uni2 (OBD1 branch)"
 
 [[channel]]
 name = "vss"
@@ -87,6 +119,8 @@ max = 200
 decimals = 0
 gauge = true
 status = "unverified"
+rate = "medium"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "ect"
@@ -100,6 +134,8 @@ max = 120
 decimals = 0
 gauge = true
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "iat"
@@ -113,6 +149,8 @@ max = 80
 decimals = 0
 gauge = true
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "map"
@@ -127,6 +165,8 @@ decimals = 0
 gauge = true
 plot = true
 status = "unverified"
+rate = "fast"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "baro"
@@ -139,6 +179,8 @@ min = 60
 max = 110
 decimals = 0
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "tps"
@@ -153,6 +195,8 @@ decimals = 0
 gauge = true
 plot = true
 status = "unverified"
+rate = "fast"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "o2"
@@ -167,6 +211,8 @@ decimals = 2
 gauge = true
 plot = true
 status = "unverified"
+rate = "medium"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "batt"
@@ -181,6 +227,8 @@ decimals = 1
 gauge = true
 plot = true
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "alt_fr"
@@ -193,6 +241,8 @@ min = 0
 max = 100
 decimals = 0
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "eld"
@@ -205,6 +255,8 @@ min = 0
 max = 80
 decimals = 1
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "stft"
@@ -218,6 +270,8 @@ max = 30
 decimals = 1
 gauge = true
 status = "unverified"
+rate = "medium"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "ltft"
@@ -231,6 +285,8 @@ max = 30
 decimals = 1
 gauge = true
 status = "unverified"
+rate = "medium"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "inj"
@@ -244,6 +300,8 @@ max = 16
 decimals = 2
 gauge = true
 status = "unverified"
+rate = "fast"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "ign"
@@ -257,6 +315,8 @@ max = 50
 decimals = 1
 gauge = true
 status = "unverified"
+rate = "fast"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "ign_limit"
@@ -269,6 +329,8 @@ min = -10
 max = 50
 decimals = 1
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "iacv"
@@ -281,6 +343,8 @@ min = 0
 max = 100
 decimals = 0
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "knock"
@@ -293,6 +357,8 @@ min = 0
 max = 5
 decimals = 2
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 # ---- status flags -----------------------------------------------------------
 
@@ -304,6 +370,8 @@ length = 1
 formula = "bit(x, 2)"
 kind = "flag"
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "vtec"
@@ -313,6 +381,8 @@ length = 1
 formula = "bit(x, 3)"
 kind = "flag"
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "mil"
@@ -322,6 +392,8 @@ length = 1
 formula = "bit(x, 5)"
 kind = "flag"
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
 
 [[channel]]
 name = "closed_loop"
@@ -331,3 +403,213 @@ length = 1
 formula = "bit(x, 0)"
 kind = "flag"
 status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+# ---- constants --------------------------------------------------------------
+# Named numbers for the expressions below. Check them against your engine.
+
+[constants]
+cylinders = 4
+displacement_l = 1.590                  # D16Y8
+inj_flow_cc_min = 240                   # stock D16Y8 injector at 3 bar (not measured here)
+fuel_density_g_cc = 0.745               # petrol
+ve_assumed = 0.85                       # volumetric efficiency guess for afr_est
+
+# ---- math channels ----------------------------------------------------------
+# Worked out from other channels at poll rate, and again on replay.
+#
+#   name     column name, like a channel
+#   expr     [rpm] or rpm = a channel, [rpm-1] = its previous sample, constants
+#            by name. Operators: + - * / // % **  < <= > >= == !=  && || !
+#            (also and/or/not)  a ? b : c  (also b if a else c)  & | ^ << >> ~
+#            Over time: avg(x, ms) slope(x, ms) minw(x, ms) maxw(x, ms)
+#                       stdev(x, ms) smooth(x, n) median(x, n) ema(x, ms)
+#                       prev(x, n) delta(x) rate(x) integ(x) held(cond, ms)
+#            Plain:     abs min max round int floor ceil sqrt exp ln log10 pow
+#                       sign clamp(x, lo, hi) between(x, lo, hi) bit signed
+#                       poly table(x, x0, y0, x1, y1, ...) thermistor
+#            Other:     valid(x) coalesce(a, b) time()
+#   label units min max decimals gauge plot kind description enabled
+#
+# A math channel may use another math channel. Loops are refused.
+# It is only as good as its inputs: all of these are built on unverified addresses.
+
+[[math]]
+name = "inj_duty"
+label = "Injector duty"
+expr = "[inj] * [rpm] / 1200"           # one squirt per cylinder every two turns
+units = "%"
+min = 0
+max = 100
+decimals = 1
+description = "Share of the time the injector is open. Above about 85% it is out of fuel."
+
+[[math]]
+name = "fuel_flow"
+label = "Fuel flow"
+expr = "[inj_duty] / 100 * inj_flow_cc_min * cylinders * 60 / 1000"
+units = "L/h"
+min = 0
+max = 60
+decimals = 2
+description = "Estimate from injector size and duty. Ignores injector dead time."
+
+[[math]]
+name = "total_trim"
+label = "Total trim"
+expr = "[stft] + [ltft]"
+units = "%"
+min = -40
+max = 40
+decimals = 1
+description = "Short plus long fuel trim: how far the ECU is correcting the base fuel."
+
+[[math]]
+name = "rpm_rate"
+label = "RPM rate"
+expr = "slope([rpm], 500)"
+units = "rpm/s"
+min = -5000
+max = 5000
+decimals = 0
+description = "How fast engine speed is changing, fitted over the last half second."
+
+[[math]]
+name = "load"
+label = "Load"
+expr = "[map] / [baro] * 100"
+units = "%"
+min = 0
+max = 100
+decimals = 0
+description = "Manifold pressure as a share of barometric pressure."
+
+[[math]]
+name = "afr_est"
+label = "AFR estimate"
+expr = "clamp(([map] * displacement_l / cylinders * ve_assumed / (0.287 * ([iat] + 273.15))) / ([inj] / 60000 * inj_flow_cc_min * fuel_density_g_cc), 5, 30)"
+units = "AFR"
+min = 8
+max = 22
+decimals = 1
+description = "Air mass (speed-density with an assumed VE) over fuel mass. A rough guide only: it is not a wideband."
+
+[[math]]
+name = "rpm_smooth"
+label = "RPM (smoothed)"
+expr = "smooth([rpm], 5)"
+units = "rpm"
+min = 0
+max = 7200
+decimals = 0
+description = "Mean of the last 5 RPM readings."
+
+[[math]]
+name = "map_avg"
+label = "MAP (0.5 s mean)"
+expr = "avg([map], 500)"
+units = "kPa"
+min = 0
+max = 110
+decimals = 0
+
+[[math]]
+name = "batt_min_5s"
+label = "Battery low (5 s)"
+expr = "minw([batt], 5000)"
+units = "V"
+min = 8
+max = 16
+decimals = 1
+description = "Lowest battery reading in the last 5 seconds. Catches short sags."
+
+# ---- alarms -----------------------------------------------------------------
+# Checked on every sample, on measured and math channels alike.
+#
+#   name        letters, digits, underscore
+#   channel     the channel that low/high/rate limits look at (colours its tile)
+#   low / high  trip below / above this value
+#   rate_low / rate_high   trip when the value changes faster than this per
+#               second (fitted over rate_window_ms, default 500)
+#   when        an expression that trips the alarm, for combinations
+#   clear_when  an expression that re-arms a `when` alarm (default: `when` false)
+#   gate        the rule only runs while this expression is true
+#   hold_s      must stay tripped this long before the alarm is raised
+#   clear_hold_s  must stay clear this long before it clears
+#   hysteresis  low/high: must come back inside the limit by this much to clear
+#   severity    "warn" or "critical"
+#   priority    higher shows first (default 50 warn, 100 critical)
+#   latching    true = stays up until acknowledged
+#   actions     any of "tile", "banner", "beep", "marker", "capture"
+#   message     text; {value} {value:.1f} {label} {units} {high} {low} {rate}
+#               and any channel name in braces are filled in
+#   label enabled
+#
+# The limits below are sensible starting points, not Honda figures.
+
+[[alarm]]
+name = "ect_high"
+label = "Coolant hot"
+channel = "ect"
+high = 105
+hold_s = 2
+hysteresis = 3
+severity = "critical"
+latching = true
+actions = ["tile", "banner", "beep", "marker"]
+message = "Coolant {value:.0f} °C"
+
+[[alarm]]
+name = "batt_low"
+label = "Battery low"
+channel = "batt"
+low = 12.0
+hold_s = 3
+hysteresis = 0.3
+gate = "[rpm] > 400"                    # engine running: the alternator should hold it up
+severity = "warn"
+actions = ["tile", "banner", "marker"]
+message = "Battery {value:.1f} V with the engine running"
+
+[[alarm]]
+name = "batt_high"
+label = "Overcharging"
+channel = "batt"
+high = 15.2
+hold_s = 2
+hysteresis = 0.2
+severity = "warn"
+actions = ["tile", "banner", "marker"]
+message = "Battery {value:.1f} V"
+
+[[alarm]]
+name = "over_rev"
+label = "Over-rev"
+channel = "rpm"
+high = 6800
+hysteresis = 300
+severity = "warn"
+actions = ["tile", "banner", "beep"]
+message = "{value:.0f} rpm"
+
+[[alarm]]
+name = "idle_collapse"
+label = "Idle collapsing"
+channel = "rpm"
+rate_low = -400                         # rpm per second
+rate_window_ms = 400
+gate = "[rpm] < 600"                    # already below a normal idle and still falling
+severity = "warn"
+actions = ["tile", "marker"]
+message = "RPM {value:.0f} falling {rate:.0f} rpm/s"
+
+[[alarm]]
+name = "lean_under_load"
+label = "Lean under load"
+when = "[o2] < 0.2 && [tps] > 60 && [rpm] > 3000"
+hold_s = 0.5
+clear_hold_s = 1
+severity = "critical"
+actions = ["banner", "beep", "marker"]
+message = "O2 {o2:.2f} V at {tps:.0f}% throttle, {rpm:.0f} rpm"

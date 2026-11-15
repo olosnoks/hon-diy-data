@@ -1,0 +1,317 @@
+# hondalog address map
+#
+# This is a BEST GUESS for a stock P2P. The addresses and formulas come from
+# kerpz/ArduinoHondaOBD (hobd_uni2), which was tested on a P2T (OBD2) and a
+# chipped P30 (OBD1) - not on a P2P. Every entry is marked "unverified" until
+# you have checked it against the real car. Use Raw tools > Memory scanner to
+# find what really lives where, then edit this file and reconnect.
+#
+# The app reads ~/.config/hondalog/addressmap.toml (copied from the shipped
+# default on first run). Bump "version" when you change it: the version is
+# written into every log header.
+#
+# Channel fields:
+#   name     column name in the CSV (letters, digits, underscore)
+#   label    text on the dashboard
+#   addr     RAM address, 0x00-0xFF
+#   length   bytes to read (1-4)
+#   formula  Python-style expression. x = the bytes as one unsigned
+#            big-endian number, b[0], b[1].. = the single bytes.
+#            Helpers: bit(x, n)  signed(x, bits)  poly(x, c0, c1, ...)
+#                     abs min max round
+#   units    free text
+#   min/max  gauge and plot range
+#   decimals digits after the point
+#   kind     "value" (default) or "flag" (0/1 lamp)
+#   gauge    show a big number on the dashboard
+#   plot     plotted by default
+#   status   "unverified" or "verified"
+
+version = "p2p-guess-1 (kerpz P2T map)"
+ecu = "P2P expected, not confirmed"
+
+# Where the ECU ID bytes are thought to live (kerpz: 20 05 76 0A 5B).
+[ecu_id]
+addr = 0x76
+length = 10
+
+# Framing overrides. Defaults are in hondalog/protocol.py (class Framing).
+# Uncomment to change. init_sequence = "" sends no wake-up bytes.
+[protocol]
+# baud = 9600
+# cmd_read = 0x20
+# reply_header = 0x00        # -1 accepts any first byte
+# reply_timeout_s = 0.2
+# init_sequence = "68 6a f5 af bf b3 b2 c1 db b3 e9"
+# init_delay_s = 0.3
+
+[[channel]]
+name = "rpm"
+label = "RPM"
+addr = 0x00
+length = 2
+formula = "x / 4"                       # OBD1 ECUs: 1875000 / (x + 1)
+units = "rpm"
+min = 0
+max = 7200
+decimals = 0
+gauge = true
+plot = true
+status = "unverified"
+
+[[channel]]
+name = "vss"
+label = "Speed"
+addr = 0x02
+length = 1
+formula = "x"
+units = "km/h"
+min = 0
+max = 200
+decimals = 0
+gauge = true
+status = "unverified"
+
+[[channel]]
+name = "ect"
+label = "Coolant"
+addr = 0x10
+length = 1
+formula = "poly(x, 155.04149, -3.0414878, 0.03952185, -0.00029383913, 0.0000010792568, -0.0000000015618437)"
+units = "°C"
+min = -20
+max = 120
+decimals = 0
+gauge = true
+status = "unverified"
+
+[[channel]]
+name = "iat"
+label = "Intake air"
+addr = 0x11
+length = 1
+formula = "poly(x, 155.04149, -3.0414878, 0.03952185, -0.00029383913, 0.0000010792568, -0.0000000015618437)"
+units = "°C"
+min = -20
+max = 80
+decimals = 0
+gauge = true
+status = "unverified"
+
+[[channel]]
+name = "map"
+label = "MAP"
+addr = 0x12
+length = 1
+formula = "x * 0.716 - 5"               # about 101 at key-on/WOT, 25-40 at idle
+units = "kPa"
+min = 0
+max = 110
+decimals = 0
+gauge = true
+plot = true
+status = "unverified"
+
+[[channel]]
+name = "baro"
+label = "Baro"
+addr = 0x13
+length = 1
+formula = "x * 0.716 - 5"
+units = "kPa"
+min = 60
+max = 110
+decimals = 0
+status = "unverified"
+
+[[channel]]
+name = "tps"
+label = "Throttle"
+addr = 0x14
+length = 1
+formula = "(x - 24) / 2"
+units = "%"
+min = 0
+max = 100
+decimals = 0
+gauge = true
+plot = true
+status = "unverified"
+
+[[channel]]
+name = "o2"
+label = "O2"
+addr = 0x15
+length = 1
+formula = "x / 51.3"
+units = "V"
+min = 0
+max = 1.2
+decimals = 2
+gauge = true
+plot = true
+status = "unverified"
+
+[[channel]]
+name = "batt"
+label = "Battery"
+addr = 0x17
+length = 1
+formula = "x / 10.45"
+units = "V"
+min = 8
+max = 16
+decimals = 1
+gauge = true
+plot = true
+status = "unverified"
+
+[[channel]]
+name = "alt_fr"
+label = "Alternator load"
+addr = 0x18
+length = 1
+formula = "x / 2.55"
+units = "%"
+min = 0
+max = 100
+decimals = 0
+status = "unverified"
+
+[[channel]]
+name = "eld"
+label = "Electrical load"
+addr = 0x19
+length = 1
+formula = "77.06 - x / 2.5371"
+units = "A"
+min = 0
+max = 80
+decimals = 1
+status = "unverified"
+
+[[channel]]
+name = "stft"
+label = "Short trim"
+addr = 0x20
+length = 1
+formula = "(x / 128 - 1) * 100"
+units = "%"
+min = -30
+max = 30
+decimals = 1
+gauge = true
+status = "unverified"
+
+[[channel]]
+name = "ltft"
+label = "Long trim"
+addr = 0x22                             # kerpz uses 0x21 in one place and 0x22 in another
+length = 1
+formula = "(x / 128 - 1) * 100"
+units = "%"
+min = -30
+max = 30
+decimals = 1
+gauge = true
+status = "unverified"
+
+[[channel]]
+name = "inj"
+label = "Injector"
+addr = 0x24
+length = 2
+formula = "x / 250"
+units = "ms"
+min = 0
+max = 16
+decimals = 2
+gauge = true
+status = "unverified"
+
+[[channel]]
+name = "ign"
+label = "Ignition"
+addr = 0x26
+length = 1
+formula = "(x - 24) / 4"
+units = "° BTDC"
+min = -10
+max = 50
+decimals = 1
+gauge = true
+status = "unverified"
+
+[[channel]]
+name = "ign_limit"
+label = "Ignition limit"
+addr = 0x27
+length = 1
+formula = "(x - 24) / 4"
+units = "°"
+min = -10
+max = 50
+decimals = 1
+status = "unverified"
+
+[[channel]]
+name = "iacv"
+label = "Idle valve"
+addr = 0x28
+length = 1
+formula = "x / 2.55"
+units = "%"
+min = 0
+max = 100
+decimals = 0
+status = "unverified"
+
+[[channel]]
+name = "knock"
+label = "Knock"
+addr = 0x3C
+length = 1
+formula = "x / 51"
+units = "V"
+min = 0
+max = 5
+decimals = 2
+status = "unverified"
+
+# ---- status flags -----------------------------------------------------------
+
+[[channel]]
+name = "ac_sw"
+label = "A/C"
+addr = 0x08
+length = 1
+formula = "bit(x, 2)"
+kind = "flag"
+status = "unverified"
+
+[[channel]]
+name = "vtec"
+label = "VTEC"
+addr = 0x0A
+length = 1
+formula = "bit(x, 3)"
+kind = "flag"
+status = "unverified"
+
+[[channel]]
+name = "mil"
+label = "MIL"
+addr = 0x0B
+length = 1
+formula = "bit(x, 5)"
+kind = "flag"
+status = "unverified"
+
+[[channel]]
+name = "closed_loop"
+label = "Closed loop"
+addr = 0x0F
+length = 1
+formula = "bit(x, 0)"
+kind = "flag"
+status = "unverified"
