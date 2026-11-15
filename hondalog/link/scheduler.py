@@ -87,6 +87,7 @@ class Scheduler:
         self._stamps: list[deque[float]] = [deque(maxlen=1024) for _ in self.blocks]
         self.reads = [0] * len(self.blocks)
         self._lead = 0.0
+        self._low_last = False
         self._prev_done = float("-inf")
         self.failures = [0] * len(self.blocks)
         top = max(self._rate, default=0.0)
@@ -96,23 +97,37 @@ class Scheduler:
     def next(self, now: float) -> int:
         """Index of the block to read now.
 
-        The most overdue block wins while anything is at or past its period.
-        When nothing is due the spare wire time goes to the fastest class.
-        Never-read blocks go first, fastest class first.
+        1. A never-read block, fastest class first.
+        2. A slower-class block that is due, but never two in a row: the
+           slower classes are cheap and keep their targets, and the fast
+           class never waits for more than one of them.
+        3. The most overdue block, if anything is due.
+        4. Otherwise the spare wire time goes to the fastest class.
         """
         best, best_u = 0, float("-inf")
         top, top_u = -1, float("-inf")
+        low, low_u = -1, float("-inf")
         last, rate, top_set = self._last, self._rate, self.top
         lead = self._lead
         for i in range(len(rate)):
             u = (now - last[i] + lead) * rate[i]
             if u > best_u or (u == best_u and rate[i] > rate[best]):
                 best, best_u = i, u
-            if u > top_u and i in top_set:
-                top, top_u = i, u
-        if best_u >= 1.0 or top < 0:
-            return best
-        return top
+            if i in top_set:
+                if u > top_u:
+                    top, top_u = i, u
+            elif u > low_u:
+                low, low_u = i, u
+        if best_u == float("inf"):
+            pick = best
+        elif low_u >= 1.0 and not self._low_last:
+            pick = low
+        elif best_u >= 1.0 or top < 0:
+            pick = best if (best in top_set or not self._low_last or top < 0) else top
+        else:
+            pick = top
+        self._low_last = pick not in top_set
+        return pick
 
     def done(self, index: int, t_done: float) -> None:
         # A block picked now is finished one request later, so "due" looks
