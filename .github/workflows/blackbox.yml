@@ -1,10 +1,7 @@
 name: blackbox
 
 on:
-  push:
-    paths: ["firmware/**", "hondalog/blackbox/**", "tests/test_bb_*", "tests/bbhost.py", ".github/workflows/blackbox.yml"]
-  pull_request:
-    paths: ["firmware/**", "hondalog/blackbox/**", "tests/test_bb_*", "tests/bbhost.py"]
+  workflow_dispatch:   # manual only: runs cost Actions minutes; build and test locally
 
 jobs:
   host-tests:
