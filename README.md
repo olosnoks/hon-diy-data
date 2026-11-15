@@ -9,7 +9,7 @@ It reads ECU RAM with the Honda diagnostic protocol on the K-line
 log (`.hlog`), and saves a separate capture when the engine stalls or another
 trigger fires. Logs export to MegaLogViewer (`.mlg`, `.msl`) and CSV.
 
-![dashboard](docs/screenshot.png)
+![all sensors, daylight theme](docs/screenshots/sensors-daylight.png)
 
 *Above: the working 0.1.0 app. Below: the 1.0 UI design that the rebuild targets.*
 
@@ -101,8 +101,9 @@ the simulator terminal:
 | `q` | quit |
 
 `hondalog-sim --stall-after 30` stalls on a timer. `--help` lists the rest.
-In a hurry, pick the `sim:` port in the app: that is the same fake ECU
-without the pty.
+In a hurry, `hondalog --port sim: --connect` uses the same fake ECU without
+the pty (and adds a simulated black box). `hondalog --demo` shows every
+screen with a made-up car driving around; nothing is recorded.
 
 ### 3. In the car
 
@@ -116,12 +117,12 @@ without the pty.
 
 2. Plug the other end into the 16-pin OBD2 port under the dash.
 3. Key to ON (II). The engine can be off or running.
-4. Start `hondalog`. The port box should already show `/dev/hondalog`.
-   Press **Connect**.
-5. The status box turns green (`ECU OK`), READS counts up, and RATE shows
-   about 17 Hz.
+4. Start `hondalog`. Click the **ECU** chip (top left) and pick
+   `/dev/hondalog`. `hondalog --port /dev/hondalog --connect` does the same.
+5. The chip shows a filled circle and `ECU OK`, with the poll rate
+   (about 17 Hz) and the error count.
 
-If it stays red, run `hondalog-firstcontact` (next section), then go to
+If the chip turns red (`ECU SILENT`), run `hondalog-firstcontact` (next section), then go to
 Troubleshooting.
 
 ### 4. First contact
@@ -149,17 +150,35 @@ latency timer to 1 ms on every plug-in. `install.sh` installs it.
 
 ## Using it
 
-**Recording.** Starts on connect (untick "Record on connect" to stop that).
+Built for a 1366x768 laptop in a car: every action has a key, nothing needs
+the touchpad, and state is shown by shape as well as colour.
+
+| Key | Does |
+|-----|------|
+| F1 to F7 | Sensors, Drive, Map 3D, Replay, Raw tools, Tune, Alarms |
+| F9 | Daylight (black on white, for sun) / Night (white on black) |
+| Space | MARK: tag this moment in the log ("it just stumbled") |
+| Esc | Acknowledge alarms, dismiss the stall banner |
+| Enter | Open the caught stall in Replay (while the banner shows) |
+| Ctrl+R | Start / stop recording |
+| F11 | Full screen |
+
+**Sensors (F1).** Every channel on one screen. Each tile has the value, a
+bar with the session minimum and maximum, the last 60 seconds as a trace,
+and a marker: dashed `?` box = the address is a guess, green tick =
+verified. A triangle and yellow band is a warning; an octagon on a filled
+tile is an alarm; a hatched tile has no data. Click a tile to put it on the
+Drive view; right-click for its limits and "mark verified".
+
+**Drive (F2).** Six huge readouts, the stall catcher's state and a MARK
+button the size of a hand. Right-click a readout to change what it shows.
+
+**Recording.** Starts on connect (ECU chip menu, "Record on connect").
 Logs go to `~/hondalog/logs/log_DATE_TIME.hlog`. The file holds the ECU id
 bytes, the whole address map, the units, markers and every channel with its
 own timestamps. It is written every half second, so a dead laptop battery
 costs at most the last second. A recording that runs longer than an hour
 continues in `..._p002.hlog` and so on. Logs from 0.1.0 (`.csv`) still open.
-
-**Marker.** Press **Space** or the big amber button when something happens
-("it just stumbled"). The log gets a `MARK n` event at that moment and a line
-appears on the charts. Space types a normal space while
-the cursor is in a text box.
 
 **Stall catcher.** While recording, once RPM has been above 400:
 
@@ -167,12 +186,16 @@ the cursor is in a text box.
 - the ECU stops answering for 1 second (power loss, cable pulled),
 
 the app saves the 30 seconds before and the 10 seconds after to
-`~/hondalog/logs/stall_DATE_TIME.hlog`, shows a red banner and beeps.
-"Open in replay" loads the file. Turning the key off with the engine
-running counts as a stall too; ignore that one or press Stop first.
+`~/hondalog/logs/stall_DATE_TIME.hlog`, shows a red banner over the tabs and
+beeps. Enter opens the file in Replay. Turning the key off with the engine
+running counts as a stall too; press Esc for that one.
 
-**Charts.** "Plot channels" picks what is drawn (up to 8). "Window" sets how
-much history scrolls by.
+**Map 3D (F3).** RPM x MAP surface built from what has been logged this
+session: height is injector time, ignition or fuel trim; colour is trim or
+sample count; grey cells have no samples yet. V switches to time-in-cell
+bars or stall approach paths, Z and C change height and colour, arrows
+orbit, 1 to 4 are camera presets. Without OpenGL 2.1 it draws the same data
+as a 2D heat map (`--no-gl` forces that).
 
 The stall catcher is two rules of a general trigger engine
 (`hondalog/triggers/`). A rule is a condition on any channels, a hold time,
@@ -181,26 +204,45 @@ and how much to keep before and after, for example
 overheating ship switched off, because they depend on channels that have not
 been verified on the car yet.
 
-**Replay tab.** Open any log or stall file (`.hlog`, old `.csv`, MegaLogViewer
-`.msl`/`.mlg`). "Export…" saves the open log as `.mlg`, `.msl`, `.csv` or `.npz`. Drag the slider or click in a
-chart to move the cursor. The table shows every channel at that moment.
-Click a marker in the list to jump to it. Mouse wheel zooms the time axis.
+**Replay (F4).** O opens a log, a stall file or a black box capture (`.hlog`, old `.csv`,
+MegaLogViewer `.msl`/`.mlg`, `.bbx`); with none open it follows
+live data. Stacked lanes with one cursor: click or drag, arrows step 0.1 s
+(Shift 1 s), `[` and `]` jump between events, P plays, `+` and `-` zoom, D
+drops a second cursor for a time difference. For a stall file the right
+side lists what left its normal range first.
 
-**Raw tools tab.**
+**Raw tools (F5).** S sweeps all 256 bytes and keeps going. Yellow = changed
+in the last sweep, underlined = changed earlier, dashed = in the address
+map but unverified. Arrows move the selected byte; the inspector shows its
+bits and history. The hex console sends raw frames (Enter). The guided
+mapper (N next, B back) ranks bytes by how well they follow three timed
+presses of whatever you are looking for.
 
-- *Hex console*: type bytes, e.g. `20 05 00 10`. "Add checksum" appends the
-  last byte for you. It shows what came back after the echo and whether the
-  checksum adds up.
-- *Memory scanner*: sweeps an address range in chunks and shows a hex grid.
-  Orange = changed in this sweep. Blue = changed earlier. Click a byte for
-  its minimum, maximum and change count. "Export" writes a `.txt` dump and a
-  `.csv` with every sweep.
+**Tune (F6).** Table grid with a 3D surface beside it. Read-only sample
+tables until the chipped P28 and the ROM tools are in.
+
+**Alarms (F7).** The shape key, the live alarm list and the limits.
+
+`hondalog --profile` shows frame time, CPU and latency in the bottom bar.
+`tools/bench_ui.py` measures the same per screen (see docs/ui-adapters.md).
 
 ### Mapping the P2P
 
 Every address starts as a guess. Three tools turn guesses into verified
 channels; all of them work from the terminal (`hondalog-map`, also over ssh)
 and the logic is in `hondalog/mapping/` for the UI to use.
+
+By hand, in the app:
+
+1. Engine warm and idling. Raw tools (F5), S to sweep.
+2. Press C to clear, then change one thing only: blip the throttle,
+   switch on the headlights, turn on the A/C.
+3. Watch which bytes turn yellow. Compare with the guess in the map
+   (RPM at 0x00-0x01, TPS at 0x14, battery at 0x17, and so on).
+4. ECU chip menu, "Edit address map" opens
+   `~/.config/hondalog/addressmap.toml`. Fix the address or formula, set
+   `status = "verified"`, bump `version`, save.
+5. Disconnect and connect again to load it.
 
 **1. Guided checks.** `hondalog-map scripts` lists them; `hondalog-map status`
 shows which script can prove which channel.
@@ -300,16 +342,17 @@ sudo modprobe ftdi_sio
 echo 0403 0000 | sudo tee /sys/bus/usb-serial/drivers/ftdi_sio/new_id
 ```
 
-It then appears as `/dev/ttyUSB0`. Type that into the port box (the
+It then appears as `/dev/ttyUSB0`. Pick it from the ECU chip menu, or use
+"Other port" there (the
 `/dev/hondalog` link only matches `0403:6001`).
 
 **lsusb shows `1a86:7523` (CH340) instead of FTDI.** Some "KKL" cables use
-that chip. It works the same. Pick its `/dev/ttyUSB0` entry in the port box.
+that chip. It works the same. Pick its `/dev/ttyUSB0` entry in the ECU chip menu.
 
 **Clone FTDI chips in general** are fine on Linux. The kernel driver does
 not care.
 
-**Status says NO REPLY.** Hover over the status box to see the last error.
+**The ECU chip is red (`ECU SILENT`).** Click it: the menu shows the last error.
 
 - *"no bytes at all, not even the echo"*: the cable's car side is dead.
   It is powered from the OBD2 plug (pin 16), so it only echoes when it is

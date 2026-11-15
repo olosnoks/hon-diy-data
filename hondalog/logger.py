@@ -31,10 +31,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+import numpy as np
+
 from . import __version__
 from .data.container import EXTENSION, LogWriter
 from .data.model import Column
-from .data.reader import open_log
+from .data.reader import align, open_log
 from .data.retention import RetentionPolicy
 from .data.store import extract_window
 from .triggers import MANUAL, Capture, Fired, TriggerEngine, TriggerRule, default_rules, external_rule
@@ -63,6 +65,19 @@ class CaptureEvent:
 
 
 StallEvent = CaptureEvent       # the 0.1.0 name
+
+
+@dataclass
+class TriggerStatus:
+    """What the stall catcher is doing right now, for a status chip."""
+
+    armed: bool = False             # a stall rule is armed (the engine has been seen running)
+    capturing: bool = False         # a capture window is open
+    pre_s: float = 30.0
+    post_s: float = 10.0
+    buffer_s: float = 0.0           # seconds of log a trigger could reach back over now
+    capture_ends_t: float = 0.0     # session time at which the open window closes
+    fired: int = 0                  # rule firings so far
 
 
 def column_for(ch: Any) -> Column:
@@ -149,6 +164,7 @@ class Recorder:
         self._workers: list[threading.Thread] = []
         self._epoch: datetime | None = epoch    # wall time of session time 0
         self._last_t = 0.0
+        self._t_first: float | None = None      # session time of the first thing recorded
         self._link: bool | None = None
         self.events: queue.Queue[CaptureEvent] = queue.Queue()
         self.notices: queue.Queue[Fired] = queue.Queue()
@@ -170,6 +186,24 @@ class Recorder:
     @property
     def capturing(self) -> bool:
         return self._engine.capturing
+
+    def status(self) -> TriggerStatus:
+        """The trigger engine's state (safe from any thread; a snapshot)."""
+        engine = self._engine
+        stall = [r for r in engine.rules if r.enabled and r.kind == "stall"] or \
+                [r for r in engine.rules if r.enabled]
+        out = TriggerStatus()
+        if stall:
+            out.pre_s, out.post_s = stall[0].pre_s, stall[0].post_s
+            out.armed = any(engine.armed(r.name) for r in stall)
+        out.fired = sum(engine.fired_count(r.name) for r in engine.rules)
+        if self._t_first is not None:
+            out.buffer_s = max(0.0, min(out.pre_s, self._last_t - self._t_first))
+        capture = engine.capture
+        if capture is not None:
+            out.capturing = True
+            out.capture_ends_t = capture.t_end
+        return out
 
     @property
     def write_error(self) -> Exception | None:
@@ -309,6 +343,8 @@ class Recorder:
             # black box capture, or with another log of the same drive
             self.header["epoch_unix"] = self._epoch.timestamp()
             self._log.set_meta(epoch_unix=self.header["epoch_unix"])
+        if self._t_first is None:
+            self._t_first = t
         if self._part_t0 is None:
             self._part_t0 = t
         elif not self._engine.capturing and (
@@ -466,8 +502,18 @@ def read_log(path: str | os.PathLike) -> LogData:
     with open_log(path) as log:
         if not log.channels or log.rows == 0:
             raise ValueError(f"{path}: no data")
-        table = log.table()
+        names = log.channels
+        grid = max((log.series(n) for n in names), key=len).t
+        link = log.series(LINK) if LINK in names else None
+        if link is not None and len(link) and len(link) < len(grid):
+            # per-read log: the link is its own stream, written when it changes and
+            # while it is down. Keep those moments on the grid (the ECU channels
+            # stop there) and hold the state between them.
+            grid = np.union1d(grid, link.t)
+        table = log.table(names, t=grid)
+        columns = dict(table.columns)
+        if link is not None and len(link):
+            columns[LINK] = align(link, table.t, "hold", float("inf"))
         meta = {k: v if isinstance(v, str) else str(v) for k, v in log.meta.items()
                 if k != "address_map_text"}
-        return LogData(Path(path), meta, list(table.names), table.t, dict(table.columns),
-                       list(log.markers))
+        return LogData(Path(path), meta, list(table.names), table.t, columns, list(log.markers))
