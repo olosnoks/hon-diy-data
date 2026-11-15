@@ -7,7 +7,7 @@ This is the view tuners live in: "what was the average short-term trim in the
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -52,6 +52,16 @@ class Bins:
         return cls(tuple(edges), tuple(p))
 
     @classmethod
+    def from_axis(cls, axis: Any, clamp: bool = True) -> "Bins":
+        """Cells for a ROM table axis: a ``hondalog.tuning`` ``AxisValues``
+        (``editor.axis("x")``) or anything else with ``values``. Raises
+        ValueError when the axis has no real breakpoints (labels only) or
+        they do not rise."""
+        if not getattr(axis, "numeric", True):
+            raise ValueError("this axis has no numeric breakpoints in the definition")
+        return cls.from_breakpoints(np.asarray(getattr(axis, "values", axis), float).tolist(), clamp)
+
+    @classmethod
     def linear(cls, lo: float, hi: float, n: int) -> "Bins":
         return cls.from_edges(np.linspace(lo, hi, n + 1).tolist())
 
@@ -65,8 +75,9 @@ class Bins:
         return idx
 
 
-#: Generic axes. They are *not* read from a ROM: pass the real fuel table's
-#: axes to ``Bins.from_breakpoints`` once W5 can read them.
+#: Generic axes, for when no ROM definition is loaded. With one, use the real
+#: table's axes: ``table_bins(session.table("fuel"))`` or
+#: ``TableHistogram.for_table(...)``, so a histogram cell is a table cell.
 RPM_500 = Bins.from_breakpoints(list(range(500, 7501, 500)))
 RPM_250 = Bins.from_breakpoints(list(range(500, 7501, 250)))
 MAP_KPA_10 = Bins.from_breakpoints(list(range(20, 101, 10)))
@@ -74,6 +85,13 @@ MAP_KPA_5 = Bins.from_breakpoints(list(range(15, 106, 5)))
 TPS_10 = Bins.from_breakpoints(list(range(0, 101, 10)))
 PRESETS = {"rpm 500": RPM_500, "rpm 250": RPM_250, "map 10 kPa": MAP_KPA_10,
            "map 5 kPa": MAP_KPA_5, "tps 10 %": TPS_10}
+
+
+def table_bins(editor: Any, clamp: bool = True) -> tuple[Bins, Bins]:
+    """(x bins, y bins) of a ROM table: ``editor`` is a
+    ``hondalog.tuning.TableEditor`` (anything with ``axis("x")`` / ``axis("y")``).
+    The histogram grid then has the table's shape, cell for cell."""
+    return Bins.from_axis(editor.axis("x"), clamp), Bins.from_axis(editor.axis("y"), clamp)
 
 
 class TableHistogram:
@@ -131,6 +149,21 @@ class TableHistogram:
     def from_table(cls, table: Table, x: str, y: str, z: str, x_bins: Bins, y_bins: Bins,
                    mask: BoolArray | None = None) -> "TableHistogram":
         return cls(table[x], table[y], table[z], x_bins, y_bins, mask, table.t)
+
+    @classmethod
+    def for_table(cls, table: Table, editor: Any, z: str, x: str = "rpm", y: str = "map",
+                  mask: BoolArray | None = None, fallback: tuple[Bins, Bins] | None = None
+                  ) -> "TableHistogram":
+        """``z`` binned on a ROM table's own axes (see ``table_bins``). With
+        ``fallback`` bins, a table whose definition has no usable axes gets
+        those instead of an error."""
+        try:
+            x_bins, y_bins = table_bins(editor)
+        except ValueError:
+            if fallback is None:
+                raise
+            x_bins, y_bins = fallback
+        return cls.from_table(table, x, y, z, x_bins, y_bins, mask)
 
     def stat(self, name: str = "mean", min_hits: int = 1) -> FloatArray:
         """One statistic as a grid. Cells with fewer than ``min_hits`` samples are NaN."""
