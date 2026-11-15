@@ -1,4 +1,4 @@
-"""Log viewer: open a CSV, scrub through it, see the markers."""
+"""Log viewer: open a log (.hlog, old .csv, .msl, .mlg), scrub through it, see the markers."""
 
 from __future__ import annotations
 
@@ -45,7 +45,10 @@ class Replay(QWidget):
         self.next_btn.clicked.connect(lambda: self._jump_marker(+1))
         fit_btn = QPushButton("Show all")
         fit_btn.clicked.connect(self._show_all)
-        for b in (self.prev_btn, self.next_btn, fit_btn):
+        self.export_btn = QPushButton("Export…")
+        self.export_btn.setEnabled(False)
+        self.export_btn.clicked.connect(self.export_dialog)
+        for b in (self.prev_btn, self.next_btn, fit_btn, self.export_btn):
             bar.addWidget(b)
         self.file_label = QLabel("No log open. Logs are in " + str(log_dir()))
         self.file_label.setStyleSheet(f"color:{theme.DIM};")
@@ -98,9 +101,31 @@ class Replay(QWidget):
 
     def open_dialog(self) -> None:
         start = self.settings.value("replay/dir", str(log_dir()))
-        path, _ = QFileDialog.getOpenFileName(self, "Open log", start, "hondalog CSV (*.csv)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open log", start, "Logs (*.hlog *.csv *.msl *.mlg);;All files (*)")
         if path:
             self.open(path)
+
+    def export_dialog(self) -> None:
+        """Save the open log in another tool's format (MegaLogViewer, CSV, NumPy)."""
+        if self.log is None:
+            return
+        from ..data import open_log
+        from ..export import FORMATS, export_log
+        kinds = ";;".join(f"{label} (*{ext})" for ext, label in FORMATS.items())
+        start = str(Path(self.log.path).with_suffix(".mlg"))
+        path, chosen = QFileDialog.getSaveFileName(self, "Export log", start, kinds)
+        if not path:
+            return
+        if not Path(path).suffix:
+            path += chosen[chosen.rfind("*") + 1:-1]
+        try:
+            with open_log(self.log.path) as log:
+                export_log(log, path)
+        except Exception as exc:
+            QMessageBox.warning(self, "hondalog", f"Could not export to {path}:\n{exc}")
+            return
+        self.file_label.setText(f"Exported {path}")
 
     def open(self, path) -> bool:
         try:
@@ -122,6 +147,7 @@ class Replay(QWidget):
             self._channels[name] = ch
 
         self.file_label.setText(str(path))
+        self.export_btn.setEnabled(True)
         meta = log.meta
         self.meta_label.setText("\n".join(
             f"{k}: {meta[k]}" for k in ("started", "ecu_id", "address_map_version",
