@@ -97,6 +97,12 @@ class AdaptiveTiming:
         self.gap = self.gap_floor
         self.error_share = 0.0
 
+    def relax(self) -> None:
+        """The ECU is back after an outage: the errors piled up while it was
+        away say nothing about the line, so drop the backed-off gap."""
+        self.error_share = 0.0
+        self.gap = self.gap_floor
+
     # -- measurements --
 
     def on_success(self, overhead_s: float, chunk_gap_s: float) -> None:
@@ -117,7 +123,7 @@ class AdaptiveTiming:
         ibt = 4 * self.peak_chunk_gap + 2 * self.byte_s + 2 * self.usb_latency_s
         self.inter_byte_timeout = min(self.ibt_ceiling, max(self.ibt_floor, ibt))
         if self.error_share < _ERR_CLEAN and self.gap > self.gap_floor:
-            self.gap = max(self.gap_floor, self.gap * 0.9)
+            self.gap = max(self.gap_floor, self.gap * 0.8)
 
     def on_failure(self, short: bool = False, silent: bool = False) -> None:
         """A request failed. ``short``: the reply started, then stopped.

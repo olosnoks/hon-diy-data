@@ -2,3 +2,6 @@
 # Gives it a stable name, /dev/hondalog, and lets the dialout group open it.
 # Any other FT232R adapter you plug in gets the same name.
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="hondalog", GROUP="dialout", MODE="0660"
+# FTDI receive latency timer 16 ms -> 1 ms whenever an FTDI adapter is plugged in.
+# At 9600 baud the default costs up to 16 ms of dead time on every request.
+ACTION=="add", SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"
