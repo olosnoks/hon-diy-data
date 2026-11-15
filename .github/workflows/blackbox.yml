@@ -1,0 +1,41 @@
+name: blackbox
+
+on:
+  push:
+    paths: ["firmware/**", "hondalog/blackbox/**", "tests/test_bb_*", "tests/bbhost.py", ".github/workflows/blackbox.yml"]
+  pull_request:
+    paths: ["firmware/**", "hondalog/blackbox/**", "tests/test_bb_*", "tests/bbhost.py"]
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pytest numpy pyserial
+      - name: bbcore builds warning-free for the host
+        run: make -C firmware/blackbox/test/host
+      - name: C core against the Python mirror, simulator, reader, alignment
+        run: python -m pytest tests/test_bb_core.py tests/test_bb_host.py -q
+
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('firmware/blackbox/platformio.ini') }}
+      - run: pip install platformio
+      - name: Build for ESP32-S3
+        run: pio run -d firmware/blackbox
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-esp32s3
+          path: |
+            firmware/blackbox/.pio/build/esp32s3/firmware.bin
+            firmware/blackbox/.pio/build/esp32s3/bootloader.bin
+            firmware/blackbox/.pio/build/esp32s3/partitions.bin
