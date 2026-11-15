@@ -108,6 +108,13 @@ class StallCatcher:
         self._link_lost_at: float | None = None
         self._capture: list | None = None       # rows being collected after a trigger
         self._trigger: tuple[str, float, datetime] | None = None
+        self._forced: str | None = None
+        self._why = ""
+
+    def force(self, why: str) -> None:
+        """Make the next sample a trigger, whatever the RPM says. Used when
+        something else saw the stall first (the black box)."""
+        self._forced = why
 
     @property
     def capturing(self) -> bool:
@@ -138,7 +145,10 @@ class StallCatcher:
                 self._link_lost_at = sample.t
             if self._armed and sample.t - self._link_lost_at >= self.link_down_s:
                 reason = "link"
+        if reason is None and self._forced:
+            reason = "external"
         if reason:
+            self._why, self._forced = self._forced or "", None
             self._armed = False
             self._trigger = (reason, sample.t, sample.wall)
             self._capture = list(self._ring)
@@ -154,8 +164,8 @@ class StallCatcher:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         path = self.out_dir / f"stall_{wall:%Y%m%d_%H%M%S}.csv"
         header = dict(self.header)
-        header["stall_trigger"] = ("rpm dropped to 0" if reason == "rpm"
-                                   else "link lost (no reply from ECU)")
+        header["stall_trigger"] = {"rpm": "rpm dropped to 0", "external": self._why}.get(
+            reason, "link lost (no reply from ECU)")
         header["stall_time_s"] = f"{t:.3f}"
         header["stall_wall_time"] = wall.isoformat(timespec="milliseconds")
         header["window"] = f"{self.pre_s:g} s before, {self.post_s:g} s after"
@@ -205,6 +215,13 @@ class Recorder:
                                     if self._pending_marker else text)
             self.markers += 1
 
+    def external_trigger(self, why: str) -> None:
+        """Save a stall capture on the next sample because another source
+        (the black box) reported a trigger. No effect while one is running."""
+        with self._lock:
+            if self.active and not self._stall.capturing:
+                self._stall.force(why)
+
     def feed(self, sample: Sample) -> None:
         with self._lock:
             if not self.active:
@@ -213,7 +230,8 @@ class Recorder:
             reason, event = self._stall.feed(sample, marker)
             if reason:
                 # put the tag on the trigger row in both files
-                tag = "STALL (rpm 0)" if reason == "rpm" else "STALL (link lost)"
+                tag = {"rpm": "STALL (rpm 0)", "external": f"STALL ({self._stall._why})"}.get(
+                    reason, "STALL (link lost)")
                 marker = f"{marker} | {tag}" if marker else tag
                 self._stall._capture[-1] = (sample, marker)
             self._log.write(sample, marker)
@@ -244,7 +262,13 @@ class LogData:
 
 
 def read_log(path) -> LogData:
+    """Read a hondalog CSV. A black box capture (``.bbx``) is opened through
+    ``hondalog.blackbox.open_event``, merged with its ECU log."""
     import numpy as np
+
+    if str(path).lower().endswith(".bbx"):
+        from .blackbox.importer import open_event
+        return open_event(path)
 
     log = LogData(Path(path))
     with open(path, newline="", encoding="utf-8", errors="replace") as fh:
