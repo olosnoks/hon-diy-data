@@ -403,3 +403,63 @@ def test_table_model_is_the_rom_session_with_the_demo_as_fallback(tmp_path):
     session = build_session(rom=rom)                                         # the app's --rom
     assert session.tables.loaded and session.obsmap.rpm_axis.tolist() == DEMO_RPM
 
+
+OLD_CSV = "# hondalog 0.1.0\n# started: 2026-11-10T07:58:01\ntime_s,wall_time,link,rpm,marker\n" + "".join(
+    f"{i / 10:.1f},x,1,{750 + i},{'cold start' if i == 5 else ''}\n" for i in range(1, 40))
+
+
+def test_drive_picker_lists_searches_and_imports(app, tmp_path):
+    """Replay's Open: drives and captures from the database, a search box,
+    and "Import file" for logs from before (or from other tools)."""
+    from datetime import datetime
+    from hondalog.data import Column, new_drive
+    from hondalog.ui.drivepicker import DrivePicker
+    database = tmp_path / "hondalog.db"
+    refs = []
+    for day, notes in ((10, "idle hunting"), (12, "")):
+        started = datetime(2026, 11, day, 7, 12).timestamp()
+        with new_drive(database, {"started_unix": started, "epoch_unix": started, "notes": notes}) as w:
+            w.add_stream("ecu/00+2", [Column("rpm", units="rpm")], source="ecu", raw_len=2)
+            for i in range(300):
+                w.append("ecu/00+2", i * 0.1, [800.0 if i < 200 else 0.0], b"\x00\x00")
+            if day == 12:
+                w.capture("stall", 20.0, 5.0, 25.0, reason="rpm", message="rpm dropped to 0",
+                          wall=datetime(2026, 11, 12, 7, 12, 20), meta={"stall_time_s": "20.000"})
+        refs.append(w.ref)
+    (tmp_path / "ev000007.bbx").write_bytes(b"not read here")
+    logs = wired.DriveReader(directory=tmp_path)
+    assert isinstance(logs, ad.LogReader) and logs.database == database
+
+    picker = DrivePicker(logs)
+    names = [picker.tree.topLevelItem(i).text(0).strip() for i in range(picker.tree.topLevelItemCount())]
+    assert names == ["drive_2026_11_12_0712", "stall_20261112_071220", "drive_2026_11_10_0712", "ev000007.bbx"]
+    top = picker.tree.topLevelItem(0)
+    assert top.text(1) == "2026-11-12 07:12:00" and top.text(2) == "30 s" and top.text(3) == "1 stall"
+    assert picker.tree.topLevelItem(1).text(0).startswith("    ") and "rpm dropped" in picker.tree.topLevelItem(1).text(3)
+    assert picker.open_btn.isEnabled() and picker.tree.currentItem() is top
+    picker.search.setText("hunting")
+    assert picker.tree.topLevelItemCount() == 1 and picker.tree.topLevelItem(0).text(3) == "idle hunting"
+    picker.search.setText("zzz")
+    assert picker.tree.topLevelItemCount() == 0 and not picker.open_btn.isEnabled() and "Nothing" in picker.empty.text()
+    picker.search.setText("stall_2026")
+    picker._accept()
+    assert picker.chosen == refs[1].__class__(database, refs[1].drive, "stall_20261112_071220")
+    view = logs.read(picker.chosen)
+    assert view.trigger_t == 0.0 and view.title == "stall_20261112_071220" and view.span() == pytest.approx((-15, 5))
+
+    old = tmp_path / "log_20261110_075801.csv"
+    old.write_text(OLD_CSV)
+    picker = DrivePicker(logs)
+    assert picker.import_path(old) and picker.chosen.name == "drive_2026_11_10_0758"
+    view = logs.read(picker.chosen)
+    assert view.markers == [(pytest.approx(0.4), "cold start")] and view.meta["imported_from"] == str(old)
+    assert "drive_2026_11_10_0758" in [r.name for r in logs.drives()]
+    bad = tmp_path / "junk.csv"
+    bad.write_text("# nothing\n")
+    picker = DrivePicker(logs)
+    assert not picker.import_path(bad) and picker.chosen is None and "Cannot import" in picker.empty.text()
+
+    empty = DrivePicker(wired.DriveReader(directory=tmp_path / "nowhere"))
+    assert empty.tree.topLevelItemCount() == 0 and "No drives recorded yet" in empty.empty.text()
+    for dialog in (picker, empty):
+        dialog.deleteLater()

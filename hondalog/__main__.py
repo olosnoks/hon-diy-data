@@ -14,8 +14,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="hondalog", description="Honda K-line data logger")
     ap.add_argument("--port", help="serial port, e.g. /dev/hondalog, /tmp/hondalog-sim or sim:")
     ap.add_argument("--connect", action="store_true", help="connect on start")
-    ap.add_argument("--open", metavar="LOG", help="open a log (.hlog .csv .msl .mlg) or a black box "
-                                                  "capture (.bbx) in the replay screen")
+    ap.add_argument("--open", metavar="DRIVE", help="open a drive or capture by name (see hondalog-log "
+                                                    "list), a log file (.csv .msl .mlg) or a black box "
+                                                    "capture (.bbx) in the replay screen")
     ap.add_argument("--bb", metavar="PORT", help="black box port (default: /dev/hondalog-bb if "
                                                  "present; the simulator next to a simulated ECU)")
     ap.add_argument("--rom", metavar="BIN", help="ROM image to edit on the Tune screen")

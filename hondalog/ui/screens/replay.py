@@ -14,7 +14,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import QFileDialog, QGraphicsItem, QWidget
+from PySide6.QtWidgets import QGraphicsItem, QWidget
 
 from .. import adapters as ad
 from .. import paint
@@ -542,11 +542,11 @@ class ReplayScreen(QWidget):
         return True
 
     def open_dialog(self) -> None:
-        recent = self.session.logs.recent()
-        start = str(recent[0].parent) if recent else ""
-        path, _ = QFileDialog.getOpenFileName(self, "Open log", start, "hondalog CSV (*.csv)")
-        if path:
-            self.open(path)
+        """The drive picker: drives and captures from the database, or a file to import."""
+        from ..drivepicker import DrivePicker
+        picker = DrivePicker(self.session.logs, self)
+        if picker.exec() and picker.chosen is not None:
+            self.open(picker.chosen)
 
     def show_view(self, view: ad.LogView) -> None:
         self.view = view
@@ -582,7 +582,7 @@ class ReplayScreen(QWidget):
 
     def _refresh_live(self, now: float, first: bool = False) -> None:
         bus = self.session.bus
-        view = ad.LogView(path=None, title="live", note="last 40 s · O opens a file",
+        view = ad.LogView(path=None, title="live", note="last 40 s · O opens a drive",
                           live=True)
         for lane in self.block.lanes:
             state = bus.channel(lane.cid)
