@@ -166,6 +166,11 @@ def gui(docs: Path):
         check(session.recording.marks == 2, "two markers dropped")
         n_tiles = len(win.sensors.tiles)
         check(n_tiles >= 32, f"{n_tiles} sensor tiles on one screen")
+        check(len(session.bus.channels("MATH")) >= 5 and session.bus.channel("inj_duty").gen > 3,
+              "math channels are live as their own group")
+        check("fast" in session.ecu.link_text(), f"link: {session.ecu.link_text()}")
+        spin(1.2)
+        win.grab().save(str(shots / "sim-sensors.png"))
 
         win.show_screen(RAW)
         mapper = session.mapper
@@ -176,6 +181,8 @@ def gui(docs: Path):
         moved = int((mapper.changes > 0).sum())
         check(moved > 5 and (mapper.cur >= 0).all(), f"mapper saw {moved} bytes change, all 256 read")
         check("checksum OK" in mapper.console(), "hex console round trip")
+        mapper.send(protocol.parse_hex("21 04 00"), True)
+        check(spin(3, lambda: "blocked" in mapper.console()), "a frame that is not a read is refused")
         mapper.export(TMP / "scan.txt")
         check((TMP / "scan.txt").stat().st_size > 1000, "sweep export")
         spin(0.3)

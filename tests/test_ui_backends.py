@@ -16,10 +16,8 @@ from hondalog.ui.session import build_session
 def test_implementations_satisfy_the_protocols():
     ecu = be.PollerSource()
     assert isinstance(ecu, ad.ChannelSource) and isinstance(ecu, ad.Connectable)
-    assert isinstance(be.SimBlackBox(ecu), ad.ChannelSource)
     assert isinstance(be.DemoSource("ECU"), ad.ChannelSource)
     assert isinstance(be.LimitAlarms(), ad.AlarmSource)
-    assert isinstance(be.CsvRecording(ecu), ad.Recording)
     assert isinstance(be.NullRecording(), ad.Recording)
     assert isinstance(be.CsvLogReader(), ad.LogReader)
     assert isinstance(be.HistogramMap(), ad.ObservedMap)

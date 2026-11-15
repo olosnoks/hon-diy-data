@@ -320,7 +320,9 @@ def test_read_only_tables_explain_themselves(app, settings):
         spin(app, win)
         assert not win.tune.inc_btn.isEnabled() and not win.tune.chip.write_btn.isEnabled()
         assert "P28" in win.tune.chip.text
-        assert len(win.sensors.tiles) == 32
+        # 24 ECU slots + 8 black box + the map's math channels (W3) as their own group
+        math = len(session.bus.channels("MATH"))
+        assert math >= 5 and len(win.sensors.tiles) == 32 + math
         assert win.session.ecu_status.state == "off"
     finally:
         win.close()

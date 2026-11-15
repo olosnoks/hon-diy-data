@@ -397,6 +397,13 @@ class RawScreen(QWidget):
         self.sum_btn = Button("+ checksum", parent=self.console)
         self.sum_btn.setCheckable(True)
         self.sum_btn.setChecked(True)
+        # W1's read-only guard: off = only read requests go out
+        self.expert_btn = Button("Expert", parent=self.console)
+        self.expert_btn.setCheckable(True)
+        self.expert_btn.setToolTip("Expert unlock: let the console send frames that are not "
+                                   "reads. Every such frame is written to the log header.")
+        self.expert_btn.setVisible(hasattr(self.mapper, "set_expert"))
+        self.expert_btn.clicked.connect(self.toggle_expert)
         self.send_btn = Button("Send", kind="primary", parent=self.console)
         self.sweep_btn.clicked.connect(self.toggle_sweep)
         self.clear_btn.clicked.connect(self.mapper.clear_changes)
@@ -411,6 +418,11 @@ class RawScreen(QWidget):
         self._map_version = -1
 
     # ---- actions ----
+
+    def toggle_expert(self) -> None:
+        setter = getattr(self.mapper, "set_expert", None)
+        if setter is not None:
+            setter(self.expert_btn.isChecked())
 
     def toggle_sweep(self) -> None:
         self.mapper.set_sweeping(not self.mapper.sweeping)
@@ -447,6 +459,8 @@ class RawScreen(QWidget):
             self.sweep_btn.icon_path = "dot" if m.sweeping else "off"
             self.sweep_btn.setEnabled(m.available())
             self.send_btn.setEnabled(m.available())
+            self.expert_btn.setEnabled(m.available())
+            self.expert_btn.setChecked(bool(getattr(m, "expert", False)))
             self._status = (f"0x00–0xFF · sweep {m.sweeps} · {m.sweep_s:.1f} s / sweep"
                             if m.available() else "not connected · click the ECU chip")
             self.console.set_rx(m.console())
@@ -503,8 +517,11 @@ class RawScreen(QWidget):
         sw, bw = self.send_btn.sizeHint().width(), self.sum_btn.sizeHint().width()
         self.send_btn.setGeometry(left - 12 - sw, 28, sw, 40)
         self.sum_btn.setGeometry(left - 12 - sw - 8 - bw, 28, bw, 40)
-        self.tx.setGeometry(38, 28, left - 12 - sw - 8 - bw - 8 - 38, 40)
-        for b in (self.send_btn, self.sum_btn):
+        ew = self.expert_btn.sizeHint().width() + 8 if self.expert_btn.isVisibleTo(self.console) else 0
+        if ew:
+            self.expert_btn.setGeometry(left - 12 - sw - 8 - bw - ew, 28, ew - 8, 40)
+        self.tx.setGeometry(38, 28, left - 12 - sw - 8 - bw - ew - 8 - 38, 40)
+        for b in (self.send_btn, self.sum_btn, self.expert_btn):
             b.setFixedHeight(40)
         rx = 8 + left + 8
         rw = w - 8 - rx

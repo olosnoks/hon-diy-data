@@ -117,40 +117,63 @@ def test_cli_find(env):
 
 
 def test_ui_wiring_alarm_readout_and_finder(env):
+    """The same wiring through the 1.0 shell: the alarm engine's state reaches
+    the window through the AlarmSource adapter, and the raw tools' sweep
+    history feeds the correlation finder."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from hondalog import ui  # noqa: F401
     from PySide6.QtWidgets import QApplication
-    from hondalog.ui.main_window import MainWindow
+    from hondalog.ui import scene3d
+    from hondalog.ui.main_window import ALARMS, Shell
+    from hondalog.ui.session import build_session
+    if QApplication.instance() is None:
+        scene3d.default_surface_format()
     app = QApplication.instance() or QApplication([])
-    win = MainWindow()
+    session = build_session()
+    win = Shell(session)
     try:
-        assert win.pipeline is not None and len(win.pipeline.alarms) >= 4
-        amap = win.amap
+        ecu, pipeline, bus = session.ecu, session.ecu.live.pipeline, session.bus
+        assert len(pipeline.alarms.rules) >= 4
+        amap = ecu.amap
+        kinds = []
+
+        def feed(i, **kw):
+            frame = pipeline.feed(sample(i * 0.1, **healthy(amap, **kw)))
+            bus.publish(frame.values, t=bus.now())
+            if frame.events:
+                ecu.frames.append(frame)
+            kinds.extend(e.kind for e in session.pump(bus.now()))
+            win.strip.sync(session.alarms, bus.now())
+
         for i in range(40):
-            frame = win.pipeline.feed(sample(i * 0.1, **healthy(amap, ect=112.0)))
-            win._alarm_events(frame.events)
-        assert "CRITICAL" in win.alarm_label.text() and "Coolant 112" in win.alarm_label.text()
-        win.acknowledge_alarms()
-        for i in range(40, 50):
-            win._alarm_events(win.pipeline.feed(sample(i * 0.1, **healthy(amap))).events)
-        assert win.alarm_label.text() == ""
+            feed(i, ect=112.0)
+        assert kinds == ["alarm"]
+        top = session.alarms.active()[0]
+        assert top.severity == "alarm" and "Coolant 112" in top.limit_text and top.label == "COOLANT"
+        assert session.alarms.state("ect") == "alarm" and session.alarms.unacked("ect")
+        win.show_screen(ALARMS)
+        win.frame()
+        session.acknowledge()                       # what Esc does
+        assert not session.alarms.unacked("ect")
+        for i in range(40, 120):
+            feed(i)
+        assert session.alarms.active() == [] and session.alarms.history()[0].channel_id == "ect"
+
         # scanner history -> correlation finder
         import numpy as np
-        from datetime import datetime, timedelta
         from mapping_helpers import ram
-        raw = win.rawtools
-        raw.poller = types.SimpleNamespace(amap=amap)
-        raw.ref_combo.addItems(["rpm"])
-        raw.rank_addresses()
-        assert "sweep continuously" in raw.console.toPlainText()
-        t0 = datetime(2026, 11, 15, 12, 0, 0)
-        raw._history = [(t0 + timedelta(seconds=i), ram(rpm=800 + 150 * (i % 9), noise=i))
-                        for i in range(30)]
-        assert len(raw.sweep_recording()) == 30
-        raw.rank_addresses()
-        assert "0x90 u16le" in raw.console.toPlainText()
-        raw.poller = None
+        mapper = session.mapper
+        assert mapper.rank_against("rpm") == [] and "sweep continuously" in mapper.console()
+        for i in range(30):
+            mapper._hist[:-1] = mapper._hist[1:]
+            mapper._hist[-1] = ram(rpm=800 + 150 * (i % 9), noise=i)
+            mapper._sweep_t.append(float(i))
+        mapper.minv[:], mapper.maxv[:] = 0, 255
+        assert len(mapper.sweep_recording()) == 30
+        found = mapper.rank_against("rpm")
+        assert "0x90 u16le" in mapper.console() and 0x90 in [c.addr for c in found]
+        assert isinstance(np.asarray(mapper.history(0x90)), np.ndarray)
     finally:
         win.close()
         app.processEvents()

@@ -192,6 +192,11 @@ class Shell(QMainWindow):
         if st.state in (ad.SILENT, ad.LOST) and st.detail:
             menu.addAction(f"Last error: {st.detail[:90]}").setEnabled(False)
             menu.addSeparator()
+        link_text = getattr(s.ecu, "link_text", None)
+        if link_text is not None and link_text():
+            for part in link_text().split(" · "):
+                menu.addAction(part).setEnabled(False)      # rates per class, wire load, errors
+            menu.addSeparator()
         if s.connected:
             menu.addAction(f"Disconnect {s.port}", s.disconnect)
         else:
@@ -202,6 +207,8 @@ class Shell(QMainWindow):
                 if device == last:
                     menu.setDefaultAction(action)
             menu.addAction("Other port\u2026", self.ask_port)
+            if hasattr(s.ecu, "first_contact"):
+                menu.addAction("Run first contact\u2026", self.first_contact)
         menu.addSeparator()
         auto = QAction("Record on connect", menu, checkable=True)
         auto.setChecked(s.auto_record)
@@ -212,6 +219,18 @@ class Shell(QMainWindow):
         menu.addAction("Edit address map", self.edit_map)
         menu.addAction("Open log folder", self.open_logs)
         menu.exec(pos)
+
+    def first_contact(self) -> None:
+        """W1's first-contact sequence on the last port, in the background.
+        The verdict comes back through the status line; the report is a file."""
+        port = str(self.settings.value("port/last", "")) or "/dev/hondalog"
+        port, ok = QInputDialog.getText(self, "hondalog", "First contact on port (key ON, about "
+                                        "15 s, read-only):", text=port)
+        if not ok or not port.strip():
+            return
+        problem = self.session.ecu.first_contact(port.strip())
+        self._fc_seen = False
+        self.say(problem or f"First contact on {port.strip()} …")
 
     def ask_port(self) -> None:
         port, ok = QInputDialog.getText(self, "hondalog", "Serial port (e.g. /dev/ttyUSB0):",
@@ -295,8 +314,17 @@ class Shell(QMainWindow):
         if now - self._info_t >= 1.0:
             self._info_t = now
             n, unverified = s.counts()
+            link = getattr(s.ecu, "link_text", lambda: "")()
             self.tabs.set_info(f"{s.port or 'no port'} · map {s.map_name()} · {n} ch "
-                               f"· {unverified} unverified")
+                               f"· {unverified} unverified" + (f" · {link}" if link else ""))
+            report = getattr(s.ecu, "first_contact_report", None)
+            if report is not None and not getattr(self, "_fc_seen", True):
+                self._fc_seen = True
+                where = getattr(report, "path", None)
+                self.say(f"First contact: {report.verdict}. {report.summary}"
+                         + (f"  Report: {where}" if where else ""))
+            elif getattr(s.ecu, "first_contact_running", lambda: False)():
+                self.say(s.ecu.first_contact_progress())
         self.stack.currentWidget().refresh(now)
         perf = self.perf
         if perf is None and not self.flush_paint:

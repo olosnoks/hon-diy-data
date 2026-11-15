@@ -31,10 +31,12 @@ class UiEvent:
 
 class Session:
     def __init__(self, ecu, blackbox, alarms, recording, logs, obsmap, mapper, tables,
-                 demo: bool = False, auto_record: bool = True):
+                 demo: bool = False, auto_record: bool = True, extra_sources=()):
         self.bus = ChannelBus()
         self.ecu: ad.ChannelSource = ecu
         self.blackbox: ad.ChannelSource = blackbox
+        #: more ChannelSources (math channels): started and stopped with the rest
+        self.extra_sources: list[ad.ChannelSource] = list(extra_sources)
         self.alarms: ad.AlarmSource = alarms
         self.recording: ad.Recording = recording
         self.logs: ad.LogReader = logs
@@ -59,9 +61,13 @@ class Session:
             self._started = True
             self.ecu.start(self.bus)
             self.blackbox.start(self.bus)
+            for source in self.extra_sources:
+                source.start(self.bus)
 
     def close(self) -> None:
         self.recording.stop()
+        for source in self.extra_sources:
+            source.stop()
         self.blackbox.stop()
         self.ecu.stop()
 
@@ -160,8 +166,12 @@ class Session:
         events: list[UiEvent] = []
         bus = self.bus
         bus.tick(now)
+        # W3's alarm rules say themselves whether they want a marker (and the
+        # live path drops it); the plain limit checker gets one from here
+        auto_mark = not getattr(self.alarms, "marks_itself", False)
         for alarm in self.alarms.evaluate(bus, now):
-            n = self.recording.mark(f"ALARM {alarm.source} {alarm.label} {alarm.limit_text}")
+            n = (self.recording.mark(f"ALARM {alarm.source} {alarm.label} {alarm.limit_text}")
+                 if auto_mark or alarm.source == "BB" else 0)
             events.append(UiEvent("alarm", f"{alarm.source} {alarm.label} {alarm.value_text}"
                                            f" — {alarm.limit_text}"
                                            + (f" (auto-mark {n})" if n else ""), alarm))
@@ -186,8 +196,9 @@ class Session:
                 self.disconnect()
                 events.append(UiEvent("message", f"Link stopped: {error}"))
             for cap in self.recording.poll():
-                cause = ("RPM dropped to 0." if cap.reason == "rpm"
-                         else "ECU went silent.")
+                cause = {"rpm": "RPM dropped to 0.", "link": "ECU went silent."}.get(
+                    cap.reason) or (cap.message[:1].upper() + cap.message[1:] + "."
+                                    if cap.message else "Capture saved.")
                 try:
                     summary = self.logs.analyze(self.logs.read(cap.path)).summary
                 except (OSError, ValueError):
@@ -200,9 +211,18 @@ class Session:
 
 
 def build_session(demo: bool = False, log_dir=None, writable_tables: bool = False,
-                  demo_clock=None) -> Session:
-    """Wire the adapters that exist today. The integration step edits this
-    one function to plug in W1-W5 (see docs/ui-adapters.md)."""
+                  demo_clock=None, rom=None, definition=None, blackbox_port=None) -> Session:
+    """Wire one object per adapter role.
+
+    Real use binds the tracks' backends (``wired.py``): the W1 link through
+    ``hondalog.live.LiveSession``, W2's black box reader, W3's math channels,
+    alarms and mapping tools, W4's recorder, trigger engine, log reader and
+    histogram, W5's ROM tables. ``demo=True`` keeps the simulated car from
+    ``backends.py``: nothing touches a port or writes a log.
+
+    ``rom`` / ``definition`` open a ROM image for the Tune screen; without
+    them (or if they cannot be read) the sample tables stay.
+    """
     from . import backends as be
 
     if demo:
@@ -211,18 +231,26 @@ def build_session(demo: bool = False, log_dir=None, writable_tables: bool = Fals
         recording = be.NullRecording(on_mark=None)
         obsmap = be.HistogramMap()
         obsmap.load_demo()
-    else:
-        ecu = be.PollerSource()
-        blackbox = be.SimBlackBox(ecu)
-        recording = be.CsvRecording(ecu, log_dir)
-        obsmap = be.HistogramMap()
-    mapper = be.DemoMapper(ecu) if demo else be.PollerMapper(ecu)
-    session = Session(ecu, blackbox, be.LimitAlarms(), recording, None, obsmap,
-                      mapper, be.DemoTableModel(writable=writable_tables or demo),
-                      demo=demo)
+        session = Session(ecu, blackbox, be.LimitAlarms(), recording, None, obsmap,
+                          be.DemoMapper(ecu), be.DemoTableModel(writable=True), demo=True)
+        session.logs = be.CsvLogReader(_lookup(session), log_dir)
+        return session
 
+    from . import wired
+
+    ecu = wired.LinkSource(out_dir=log_dir)
+    tables = wired.RomTableModel(be.DemoTableModel(writable=writable_tables))
+    if rom:
+        tables.open(rom, definition)
+    session = Session(ecu, wired.BlackboxSource(ecu, blackbox_port), wired.PipelineAlarms(ecu),
+                      wired.LiveRecording(ecu, log_dir), None, wired.LogHistogramMap(tables),
+                      wired.MappingSession(ecu), tables, extra_sources=[wired.MathSource(ecu)])
+    session.logs = wired.HlogReader(_lookup(session), log_dir)
+    return session
+
+
+def _lookup(session: Session):
     def lookup(cid):
         state = session.bus.channel(cid)
         return state.spec if state is not None else None
-    session.logs = be.CsvLogReader(lookup, log_dir)
-    return session
+    return lookup

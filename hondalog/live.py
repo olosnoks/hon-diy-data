@@ -232,7 +232,8 @@ class LiveSession:
             if not poller.clock.virtual:
                 # wall time of session time 0, from the same clock the stamps use
                 epoch = datetime.fromtimestamp(time.time() - (poller.clock.now() - poller.t0))
-        recorder = Recorder(self.amap, ecu_id, port, out_dir or self.out_dir, epoch=epoch,
+        folder = Path(out_dir) if out_dir else self.out_dir
+        recorder = Recorder(self.amap, ecu_id, port, folder, epoch=epoch,
                             meta=self.log_meta(), **{**self.recorder_opts, **opts})
         recorder.on_fired = self._on_fired
         self.recorder = recorder

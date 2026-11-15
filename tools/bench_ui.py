@@ -45,6 +45,9 @@ def main(argv=None) -> int:
     ap.add_argument("--only", nargs="*", choices=SCENARIOS, help="run just these")
     ap.add_argument("--json", metavar="FILE", help="also write the results as JSON")
     ap.add_argument("--check", action="store_true", help="exit 1 if a target is missed")
+    ap.add_argument("--no-blackbox", action="store_true",
+                    help="leave the simulated black box out: its 1 kHz model runs in this "
+                         "process and costs about 6 %% of a core that the real box does not")
     args = ap.parse_args(argv)
     if not args.onscreen:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -61,7 +64,7 @@ def main(argv=None) -> int:
     app = QApplication([])
     app.setStyle("Fusion")
     theme.apply(app)
-    session = build_session()
+    session = build_session(blackbox_port="off" if args.no_blackbox else None)
     win = mw.Shell(session, QSettings(str(TMP / "ui.ini"), QSettings.IniFormat), profile=True)
     theme.T.set(args.theme)
     win.resize(1366, 768)
@@ -80,19 +83,8 @@ def main(argv=None) -> int:
         print("simulator did not connect", file=sys.stderr)
         return 2
 
-    # Stamp the moment reply bytes come off the (simulated) wire, so latency
-    # is byte-to-pixel and not publish-to-pixel.
-    transport = session.ecu.poller.transport
-    last_rx = [time.monotonic()]
-    read = transport.read
-
-    def stamped(size, timeout):
-        data = read(size, timeout)
-        if data:
-            last_rx[0] = time.monotonic()
-        return data
-    transport.read = stamped
-    session.ecu.wire_clock = lambda: last_rx[0]
+    # Latency is byte-to-pixel: the link stamps each read with the moment its
+    # last reply byte arrived (BlockRead.mono) and publishes that as the wire time.
     run(2.0)                                # let sparklines, history and the map fill a little
 
     gl_ok, gl_reason = scene3d.gl_status()

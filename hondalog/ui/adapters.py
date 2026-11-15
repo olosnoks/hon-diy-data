@@ -137,9 +137,10 @@ class StallStatus:
 @dataclass
 class StallCapture:
     path: Path
-    reason: str                 # "rpm" or "link"
+    reason: str                 # "rpm", "link", "external" (black box), "alarm", "manual"
     wall: object                # datetime of the trigger
     t: float = 0.0
+    message: str = ""           # the rule's own words: "rpm dropped to 0"
 
 
 @runtime_checkable

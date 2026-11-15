@@ -14,7 +14,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="hondalog", description="Honda K-line data logger")
     ap.add_argument("--port", help="serial port, e.g. /dev/hondalog, /tmp/hondalog-sim or sim:")
     ap.add_argument("--connect", action="store_true", help="connect on start")
-    ap.add_argument("--open", metavar="CSV", help="open a log in the replay screen")
+    ap.add_argument("--open", metavar="LOG", help="open a log (.hlog .csv .msl .mlg) or a black box "
+                                                  "capture (.bbx) in the replay screen")
+    ap.add_argument("--bb", metavar="PORT", help="black box port (default: /dev/hondalog-bb if "
+                                                 "present; the simulator next to a simulated ECU)")
+    ap.add_argument("--rom", metavar="BIN", help="ROM image to edit on the Tune screen")
+    ap.add_argument("--definition", metavar="FILE",
+                    help="ROM definition for --rom (.toml or TunerPro .xdf)")
     ap.add_argument("--demo", action="store_true",
                     help="simulated car and black box, no cable needed (nothing is recorded)")
     ap.add_argument("--theme", choices=("daylight", "night"), help="start in this theme")
@@ -43,7 +49,11 @@ def main(argv=None) -> int:
     theme.apply(app)
     signal.signal(signal.SIGINT, signal.SIG_DFL)      # Ctrl+C in the terminal quits
 
-    session = build_session(demo=args.demo)
+    session = build_session(demo=args.demo, rom=args.rom, definition=args.definition,
+                            blackbox_port=args.bb)
+    problem = getattr(session.tables, "problem", "")
+    if problem:
+        print(f"hondalog: {problem}; showing the sample tables", file=sys.stderr)
     win = Shell(session, profile=args.profile)
     if args.theme:
         theme.T.set(args.theme)

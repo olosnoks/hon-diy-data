@@ -1,11 +1,14 @@
-"""Adapter implementations against what main has today.
+"""Demo data and the small stand-ins the screens were built against.
 
-Real:      PollerSource (hondalog.poller), CsvRecording (hondalog.logger),
-           CsvLogReader (hondalog.logger.read_log).
-Stopgaps:  SimBlackBox / DemoSource (no black-box reader on main yet),
-           LimitAlarms, HistogramMap, PollerMapper's wizard, DemoTableModel,
-           the order-of-loss analysis. Each is the smallest thing that makes
-           its screen work; the integration step swaps in W1-W5's versions.
+Real use is wired in ``wired.py`` (the W1-W5 backends). What stays here:
+
+    DemoSource, DemoMapper, DemoTableModel, NullRecording, demo_*   ``--demo``
+    PollerSource, PollerMapper      the bases ``wired.LinkSource`` and
+                                    ``wired.MappingSession`` build on
+    LimitAlarms                     plain limits (demo; the black box rails)
+    HistogramMap, CsvLogReader      demo mode
+    order_of_loss                   the forensics reading for any LogView
+    spec_from_channel, BLACKBOX_SPECS, PLACEHOLDERS, DEFAULT_LIMITS
 
 No widgets in here. See docs/ui-adapters.md.
 """
@@ -24,7 +27,7 @@ import numpy as np
 
 from .. import addressmap, protocol
 from .. import poller as pl
-from ..logger import Recorder, log_dir, read_log
+from ..logger import log_dir, read_log
 from ..protocol import ProtocolError
 from ..transport import BUILTIN_SIM, SIM_SYMLINK, list_ports, make_transport
 from . import adapters as ad
@@ -205,7 +208,7 @@ class PollerSource:
         return self.poller.ecu_id_text if self.poller is not None else ""
 
 
-# ---- black box (stopgap: simulated next to a simulated ECU) -----------------
+# ---- a ticking source (demo data) ------------------------------------------
 
 class _Ticker:
     """A daemon thread that calls self._step(bus_time) at a fixed rate."""
@@ -244,54 +247,6 @@ class _Ticker:
                 nxt = time.monotonic()
             elif delay > 0:
                 self._stop.wait(delay)
-
-
-class SimBlackBox(_Ticker):
-    """Black-box channels derived from a simulated ECU. With a real port it
-    reports 'not found' and its tiles stay hatched: main has no reader yet."""
-
-    name = "BB"
-    hz = 50.0
-
-    def __init__(self, ecu: PollerSource):
-        super().__init__()
-        self.ecu = ecu
-        self.mark_t = -1e9
-
-    def specs(self):
-        return [with_limits(s) for s in BLACKBOX_SPECS]
-
-    def _active(self) -> bool:
-        return self.ecu.poller is not None and is_sim_port(self.ecu.port)
-
-    def status(self) -> ad.SourceStatus:
-        if not self._active():
-            return ad.SourceStatus(ad.OFF, detail="not found")
-        return ad.SourceStatus(ad.OK, self.hz, simulated=True)
-
-    def _step(self, t: float) -> None:
-        if not self._active():
-            return
-        bus = self.bus
-
-        def val(cid, default):
-            st = bus.channel(cid)
-            return default if st is None or st.stale(t) else st.value
-
-        alive = self.ecu.poller.state == pl.OK
-        batt, rpm, inj = val("batt", 12.3), val("rpm", 0.0), val("inj", 0.0)
-        n = 0.02 * math.sin(t * 11.0) + 0.015 * math.sin(t * 29.3)
-        bus.publish({
-            "bbatt": batt - 0.04 + n, "ecub": batt - 0.18 + n if alive else 0.3,
-            "fpv": batt - 0.48 - n if rpm > 50 else 0.2, "ig1": batt - 0.26 + n,
-            "tach": rpm / 30.0, "igt": rpm / 30.0, "injp": inj + 0.06 if rpm > 50 else 0.0,
-            "bbmark": 1.0 if 0 <= t - self.mark_t < 1.0 else 0.0,
-        }, t=t, source="BB")
-        bus.set_timeout("BB", 0.5)
-
-    def note_mark(self) -> None:
-        if self.bus is not None:
-            self.mark_t = self.bus.now()
 
 
 # ---- demo data (the mockup's simulator, docs/design/mockup-src/shared.js) ----
@@ -529,104 +484,6 @@ class LimitAlarms:
 
 
 # ---- recording --------------------------------------------------------------
-
-class CsvRecording:
-    """Recording on top of hondalog.logger.Recorder (CSV log + stall catcher)."""
-
-    def __init__(self, ecu: PollerSource, out_dir=None):
-        self.ecu = ecu
-        self.out_dir = out_dir
-        self.rec: Recorder | None = None
-        self.path: Path | None = None
-        self.marks = 0
-        self._t0 = 0.0
-        self._last_mark: float | None = None
-        self._count = 0
-        self._last_file = ""
-        self._pending: list[ad.StallCapture] = []
-
-    @property
-    def active(self) -> bool:
-        return self.rec is not None
-
-    def start(self) -> str:
-        if self.rec is not None:
-            return ""
-        if self.ecu.poller is None:
-            return "Not connected: nothing to record"
-        try:
-            self.rec = Recorder(self.ecu.amap, self.ecu.ecu_id_text, self.ecu.port,
-                                out_dir=self.out_dir)
-        except OSError as exc:
-            return f"Cannot write the log file: {exc}"
-        self.path, self.marks, self._t0 = self.rec.path, 0, time.monotonic()
-        self._last_mark = None
-        self.ecu.sink = self.rec.feed
-        return ""
-
-    def stop(self) -> None:
-        rec, self.rec = self.rec, None
-        if rec is None:
-            return
-        self.ecu.sink = None
-        rec.stop()
-        self._harvest(rec)
-
-    def _harvest(self, rec: Recorder) -> None:
-        while not rec.events.empty():
-            ev = rec.events.get_nowait()
-            self._count += 1
-            self._last_file = ev.path.name
-            wall = datetime.now()
-            try:
-                wall = datetime.strptime(ev.path.stem, "stall_%Y%m%d_%H%M%S")
-            except ValueError:
-                pass
-            self._pending.append(ad.StallCapture(ev.path, ev.reason, wall, ev.t))
-
-    def mark(self, text: str | None = None) -> int:
-        if self.rec is None:
-            return 0
-        self.marks = self.rec.markers + 1
-        self.rec.mark(text or f"MARK {self.marks}")
-        self._last_mark = time.monotonic()
-        return self.marks
-
-    def elapsed_s(self) -> float:
-        return time.monotonic() - self._t0 if self.rec is not None else 0.0
-
-    def last_mark_age_s(self):
-        return None if self._last_mark is None else time.monotonic() - self._last_mark
-
-    def stall(self) -> ad.StallStatus:
-        rec = self.rec
-        st = ad.StallStatus(count=self._count, last_file=self._last_file)
-        if rec is None:
-            return st
-        catcher = rec._stall                # 0.1.0 has no public status; W4 will
-        st.pre_s, st.post_s = catcher.pre_s, catcher.post_s
-        trigger = catcher._trigger
-        if trigger is not None:
-            st.state = "saving"
-            st.buffer_s = st.pre_s
-            poller = self.ecu.poller
-            now_t = time.monotonic() - poller.t0 if poller is not None else trigger[1]
-            st.post_left_s = max(0.0, st.post_s - (now_t - trigger[1]))
-            return st
-        try:
-            ring = catcher._ring
-            st.buffer_s = min(st.pre_s, ring[-1][0].t - ring[0][0].t) if ring else 0.0
-        except IndexError:
-            pass
-        st.state = "armed" if catcher._armed else "standby"
-        return st
-
-    def poll(self):
-        if self.rec is not None:
-            self._harvest(self.rec)
-        out, self._pending = self._pending, []
-        return out
-
 
 class NullRecording:
     """Demo mode: marks are counted, nothing is written."""
