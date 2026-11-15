@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=hondalog
+GenericName=Honda ECU data logger
+Comment=Log live data from a Honda ECU over a KKL K-line cable
+Exec=/usr/local/bin/hondalog
+Icon=hondalog
+Terminal=false
+Categories=Utility;Electronics;
+StartupWMClass=hondalog

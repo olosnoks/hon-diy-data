@@ -1,0 +1,4 @@
+# hondalog: KKL 409.1 K-line cable (FTDI FT232R, USB id 0403:6001).
+# Gives it a stable name, /dev/hondalog, and lets the dialout group open it.
+# Any other FT232R adapter you plug in gets the same name.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="hondalog", GROUP="dialout", MODE="0660"

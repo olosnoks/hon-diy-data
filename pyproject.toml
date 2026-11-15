@@ -1,0 +1,19 @@
+[project]
+name = "hondalog"
+version = "0.1.0"
+description = "Live data logger for pre-2002 Honda ECUs over a KKL K-line cable"
+requires-python = ">=3.11"
+dependencies = ["PySide6", "pyqtgraph", "pyserial", "numpy"]
+
+[project.scripts]
+hondalog = "hondalog.__main__:main"
+hondalog-sim = "hondalog.sim:main"
+
+[tool.setuptools]
+packages = ["hondalog", "hondalog.ui"]
+
+[tool.setuptools.package-data]
+hondalog = ["data/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
