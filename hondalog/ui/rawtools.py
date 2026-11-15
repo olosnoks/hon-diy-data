@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFileDialog, QGroupBox,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QGroupBox,
                                QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPlainTextEdit,
                                QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
@@ -222,6 +222,19 @@ class RawTools(QWidget):
         self.export_btn.clicked.connect(self.export_dialog)
         row.addWidget(self.export_btn)
         lay.addLayout(row)
+
+        # Correlation finder (logic in hondalog.mapping.correlate; results go to the console).
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Find what moves with"))
+        self.ref_combo = QComboBox()
+        self.ref_combo.setToolTip("Sweep continuously while the signal changes, then rank every "
+                                  "address (8 and 16 bit, both byte orders) against this channel.")
+        row.addWidget(self.ref_combo)
+        self.rank_btn = QPushButton("Rank addresses")
+        self.rank_btn.clicked.connect(self.rank_addresses)
+        row.addWidget(self.rank_btn)
+        row.addStretch(1)
+        lay.addLayout(row)
         return box
 
     def _cont_toggled(self, on: bool) -> None:
@@ -334,6 +347,34 @@ class RawTools(QWidget):
         self._paint_grid()
         self.sc_status.setText("changes cleared")
 
+    # ---- correlation finder ----
+
+    def sweep_recording(self):
+        """The sweeps since 'Clear changes' as a mapping.SweepRecording."""
+        from ..mapping.sweeps import SweepRecording
+        rec = SweepRecording()
+        if self._history:
+            t0 = self._history[0][0]
+            for wall, values in self._history:
+                rec.append(values, np.full(256, (wall - t0).total_seconds()))
+        return rec
+
+    def rank_addresses(self) -> None:
+        from ..mapping import correlate
+        name = self.ref_combo.currentText()
+        if self.poller is None or not name:
+            return
+        rec = self.sweep_recording()
+        if len(rec) < 8:
+            self._log("-- finder: sweep continuously for a while first (need 8+ sweeps)")
+            return
+        matches = correlate.rank_against_channel(rec, self.poller.amap, name, top=8)
+        self._log(f"-- finder: addresses that move with {name} over {len(rec)} sweeps")
+        for match in matches:
+            self._log(f"   {match}")
+        if not matches:
+            self._log(f"   nothing: {name} did not change during the sweeps")
+
     # ---- export ----
 
     def export_dialog(self) -> None:
@@ -385,8 +426,12 @@ class RawTools(QWidget):
     def set_poller(self, poller) -> None:
         self.poller = poller
         on = poller is not None
-        for w in (self.send_btn, self.rd_btn, self.sweep_btn, self.cont_btn, self.hex_in):
+        for w in (self.send_btn, self.rd_btn, self.sweep_btn, self.cont_btn, self.hex_in,
+                  self.rank_btn, self.ref_combo):
             w.setEnabled(on)
+        if on and self.ref_combo.count() != len(poller.amap.channels):
+            self.ref_combo.clear()
+            self.ref_combo.addItems([c.name for c in poller.amap.channels if c.kind == "value"])
         if not on:
             self._pending.clear()
             self._scan_active = False

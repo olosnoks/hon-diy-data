@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QCombo
                                QPlainTextEdit, QPushButton, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import __version__, addressmap, poller as pl
+from ..live import LivePipeline
 from ..logger import Recorder, log_dir
 from ..transport import make_transport, list_ports
 from . import theme
@@ -56,6 +57,7 @@ class MainWindow(QMainWindow):
         self.poller: pl.Poller | None = None
         self.recorder: Recorder | None = None
         self.amap = None
+        self.pipeline: LivePipeline | None = None    # math channels + alarms (W3)
         self._ready_seen = False
         self._tick_n = 0
 
@@ -86,6 +88,10 @@ class MainWindow(QMainWindow):
         logs.setFlat(True)
         logs.clicked.connect(lambda: (log_dir().mkdir(parents=True, exist_ok=True),
                                       QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir())))))
+        self.alarm_label = QLabel()                  # minimal alarm readout until the new UI
+        self.alarm_label.setToolTip("Highest-priority active alarm. Click to acknowledge.")
+        self.alarm_label.mousePressEvent = lambda _e: self.acknowledge_alarms()
+        self.statusBar().addPermanentWidget(self.alarm_label)
         self.statusBar().addPermanentWidget(self.map_label)
         self.statusBar().addPermanentWidget(edit)
         self.statusBar().addPermanentWidget(logs)
@@ -191,6 +197,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "hondalog", "Your address map has a problem, so the "
                                 f"built-in default is used instead:\n\n{problem}")
         self.amap = amap
+        self.pipeline = LivePipeline(amap)
         self.dashboard.set_map(amap)
         self.replay.set_map(amap)
         unverified = sum(1 for c in amap.channels if not c.verified)
@@ -225,6 +232,8 @@ class MainWindow(QMainWindow):
             self.port_combo.setEditText(port)
         self.settings.setValue("port/last", port)
         self._ready_seen = False
+        if self.pipeline is not None:
+            self.pipeline.reset()
         self.poller = pl.Poller(make_transport(port, self.amap.framing), self.amap)
         self.poller.port_name = port
         self.poller.start()
@@ -322,7 +331,40 @@ class MainWindow(QMainWindow):
     def _drain(self) -> None:
         samples = self.poller.samples
         while samples:
-            self.dashboard.add_sample(samples.popleft())
+            sample = samples.popleft()
+            if self.pipeline is not None:
+                self._alarm_events(self.pipeline.feed(sample).events)
+            self.dashboard.add_sample(sample)
+
+    # ---- alarms (logic lives in hondalog.alarms; this is only the readout) ----
+
+    def _alarm_events(self, events) -> None:
+        for event in events:
+            if event.kind == "raised":
+                if "marker" in event.actions and self.recorder is not None:
+                    self.recorder.mark(event.marker_text)
+                    if self.poller is not None:
+                        self.dashboard.add_marker(event.t, event.name)
+                if "beep" in event.actions:
+                    QApplication.beep()
+            self.statusBar().showMessage(event.marker_text, 8000)
+        if events:
+            self._show_alarm()
+
+    def _show_alarm(self) -> None:
+        top = self.pipeline.alarms.top() if self.pipeline is not None else None
+        if top is None:
+            self.alarm_label.setText("")
+            return
+        color = theme.BAD if top.severity == "critical" else theme.WARN
+        more = len(self.pipeline.alarms.active()) - 1
+        text = top.message + (" ?" if top.unverified else "") + (f"  (+{more})" if more else "")
+        self.alarm_label.setText(f"<b style='color:{color}'>{top.severity.upper()}: {text}</b>")
+
+    def acknowledge_alarms(self) -> None:
+        if self.pipeline is not None:
+            self._alarm_events(self.pipeline.alarms.acknowledge())
+            self._show_alarm()
 
     def tick(self) -> None:
         self._tick_n += 1
