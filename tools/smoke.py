@@ -2,7 +2,8 @@
 """End-to-end smoke test against hondalog-sim on a real pty. No car needed.
 
 Part 1 (no GUI): LiveSession (poller -> pipeline -> recorder) on the sim pty:
-                 native log with raw bytes, math channels, stall capture (RPM to 0).
+                 a drive in the database with raw bytes, math channels, and a
+                 stall capture (RPM to 0) that plain sqlite3 can see.
 Part 1b:         the same with the ECU going silent (power cut).
 Part 2 (offscreen GUI): main window at 1366x768 against a second sim run,
         marker, memory sweep, stall banner, replay; saves screenshots to
@@ -12,6 +13,7 @@ Part 2 (offscreen GUI): main window at 1366x768 against a second sim run,
 """
 
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -67,15 +69,17 @@ def headless():
         end = time.monotonic() + 30
         while rec.events.empty() and time.monotonic() < end:
             time.sleep(0.1)
-        check(not rec.events.empty(), "stall capture written")
+        check(not rec.events.empty(), "stall capture saved")
         event = rec.events.get()
     finally:
         live.close()
         sim.terminate()
         sim.wait()
     log, stall = read_log(rec.path), read_log(event.path)
+    check(rec.path.db == TMP / "logs" / "hondalog.db" and rec.path.db.is_file(),
+          f"recorded into {rec.path.db.name} as {rec.path.name}")
     check(len(log.t) > 100 and log.meta["address_map_tag"] == amap.version_tag,
-          f"log {rec.path.name}: {len(log.t)} rows, header has map version and hash")
+          f"drive {rec.path.name}: {len(log.t)} rows, header has map version and hash")
     with open_log(rec.path) as native:
         raw = [s for s in native.streams.values() if s.info.raw_len]
         check(len(raw) >= 5 and all(s.rows > 3 for s in raw) and "math" in native.streams,
@@ -87,10 +91,20 @@ def headless():
     st = float(stall.meta["stall_time_s"])
     check(event.reason == "rpm" and stall.data["rpm"][-1] == 0,
           f"{event.path.name}: trigger '{stall.meta['stall_trigger']}' at {st:.1f} s")
-    with open_log(event.path) as cap:       # every stream has its own times: ask the file
+    with open_log(event.path) as cap:       # every stream has its own times: ask the capture
         before, after = event.t - cap.t0, cap.t1 - event.t
     check(after >= 10.0 and before > 8.0,
           f"stall window: {before:.1f} s before, {after:.1f} s after")
+    # the capture landed in the database: ask it with nothing but sqlite3
+    conn = sqlite3.connect(rec.path.db)
+    row = conn.execute("SELECT name, drive, reason, rows, t_trigger - t_start, t_end - t_trigger FROM stalls").fetchone()
+    check(row is not None and row[:3] == (event.path.name, rec.path.name, "rpm") and row[3] == event.rows,
+          f"stalls view: {row[0]} in {row[1]}, {row[3]} rows, {row[4]:.1f} s before, {row[5]:.1f} s after")
+    last = conn.execute(f"SELECT count(*), max(rpm), min(rpm) FROM {rec.path.name} WHERE t > ?", (event.t - 5,)).fetchone()
+    check(last[0] > 20 and last[2] == 0, f"view {rec.path.name}: {last[0]} rows in the stall's last 5 s and after")
+    status, ended, stalls = conn.execute("SELECT status, ended, stalls FROM drive_summary").fetchone()
+    check(status == "complete" and ended and stalls == 1, f"drive_summary: {status}, ended {ended}, {stalls} stall")
+    conn.close()
     return event.path
 
 
@@ -108,7 +122,7 @@ def headless_power_cut():
         end = time.monotonic() + 30
         while rec.events.empty() and time.monotonic() < end:
             time.sleep(0.1)
-        check(not rec.events.empty(), "stall capture written")
+        check(not rec.events.empty(), "stall capture saved")
         event = rec.events.get()
         check(poller.state == "no reply" and "echo only" in poller.last_error,
               f"link state '{poller.state}', last error: {poller.last_error}")
@@ -197,14 +211,14 @@ def gui(docs: Path):
         win.open_stall()
         view = win.replay.view
         check(win.current() == REPLAY and view is not None and view.trigger_t is not None
-              and len(view.markers) >= 1, "stall file opens in replay with markers and a trigger")
+              and len(view.markers) >= 1, "stall capture opens in replay with markers and a trigger")
         check(len(win.replay.forensics.loss) >= 1, "order of loss computed: "
               + "; ".join(f"{r.signal} {r.t:+.1f}s" for r in win.replay.forensics.loss[:3]))
         spin(0.5)
         win.grab().save(str(shots / "sim-replay.png"))
         session.disconnect()
         print(f"  window {win.width()}x{win.height()}, last poll rate {rate:.1f} Hz, "
-              f"stall file {stall_path.name}")
+              f"stall capture {stall_path.name} in {stall_path.db.name}")
     finally:
         win.close()
         sim.terminate()
