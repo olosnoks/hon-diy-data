@@ -5,12 +5,13 @@ import time
 import numpy as np
 import pytest
 
-from hondalog.analysis import (Bins, Comparison, Expr, ExprError, Filter, FilterSet, LodPyramid,
+from hondalog.analysis import (Bins, Comparison, ExprError, Filter, FilterSet, LodPyramid,
                                ReplaySession, ScatterModel, TableHistogram, envelope, event_time,
                                first_crossing, span_stats, value_at)
 from hondalog.analysis import cursors, filters, histogram
 from hondalog.analysis.lod import decimate_points
 from hondalog.analysis.report import capture_report, write_report
+from hondalog.expr import compile_expr
 from hondalog.data import Column, Log, Stream, StreamInfo
 from hondalog.data.model import Event, Series, Table
 
@@ -24,47 +25,75 @@ def mem_log(columns, t, events=(), meta=None, name="ecu"):
     return Log(meta or {}, [Stream(info, data=rows)], events)
 
 
-# ---- expressions ----
+# ---- expressions (the one evaluator, hondalog.expr, as filters and triggers use it) ----
 
 def test_expr_on_columns():
     t = np.arange(10.0)
     env = {"t": t, "ect": np.linspace(70, 97, 10), "closed_loop": np.array([1.0, 0] * 5), "tps": t * t}
-    assert Expr("ect > 80 and closed_loop").mask(env).tolist() == [False] * 4 + [True, False] * 3
-    assert Expr("[ect] > 80 && !closed_loop || t == 0").mask(env).tolist() == [True] + [False] * 4 + [True, False, True, False, True]
-    assert Expr("abs(rate(tps)) < 5").mask(env).tolist() == [True, True, True] + [False] * 7
-    assert Expr("80 < ect <= 85").mask(env).sum() == 2
-    assert Expr("between(ect, 73, 79)").mask(env).tolist() == [False, True, True, True] + [False] * 6
-    assert Expr("1").mask(env).all() and len(Expr("0").mask(env)) == 10
-    np.testing.assert_allclose(Expr("ect * 2 - 1 if closed_loop else -ect")(env)[:2], [139, -73])
-    np.testing.assert_allclose(Expr("max(min(tps, 9), 4) ** 2 / 2 % 7")(env)[:4], [1, 1, 1, 5.5])
-    assert np.isnan(Expr("prev(tps)")(env)[0]) and Expr("prev(tps, 2)")(env)[2] == 0
-    assert Expr("smooth(tps, 3)")(env)[1] == pytest.approx((0 + 1 + 4) / 3)
-    assert Expr("ect > 80 and closed_loop").names == {"ect", "closed_loop"}
-    with pytest.raises(ExprError, match="no channel named egt"):
-        Expr("egt > 700").mask(env)
+
+    def mask(text):
+        return compile_expr(text).mask(env, t).tolist()
+
+    def col(text):
+        return compile_expr(text).eval_array(env, t)
+
+    assert mask("ect > 80 and closed_loop") == [False] * 4 + [True, False] * 3
+    assert mask("[ect] > 80 && !closed_loop || t == 0") == [True] + [False] * 4 + [True, False, True, False, True]
+    # rate() is the change since the previous row (the same number live and on
+    # replay), so the first row has no rate and does not pass
+    assert mask("abs(rate(tps)) < 5") == [False, True, True] + [False] * 7
+    assert sum(mask("80 < ect <= 85")) == 2
+    assert mask("between(ect, 73, 79)") == [False, True, True, True] + [False] * 6
+    assert all(mask("1")) and len(mask("0")) == 10 and not any(mask("0"))
+    np.testing.assert_allclose(col("ect * 2 - 1 if closed_loop else -ect")[:2], [139, -73])
+    np.testing.assert_allclose(col("max(min(tps, 9), 4) ** 2 / 2 % 7")[:4], [1, 1, 1, 5.5])
+    assert np.isnan(col("prev(tps)")[0]) and col("prev(tps, 2)")[2] == 0
+    # smooth() looks back only, so it can run live: mean of the last 3 rows
+    assert col("smooth(tps, 3)")[2] == pytest.approx((0 + 1 + 4) / 3)
+    assert col("smooth(tps, 3)")[1] == pytest.approx((0 + 1) / 2)
+    assert compile_expr("ect > 80 and closed_loop").deps == {"ect", "closed_loop"}
+    with pytest.raises(ExprError, match="no column named 'egt'"):
+        compile_expr("egt > 700").mask(env, t)
 
 
 def test_expr_nan_and_live_values():
-    env = {"t": np.arange(3.0), "x": np.array([1.0, np.nan, 3.0])}
-    assert Expr("x > 0").mask(env).tolist() == [True, False, True]
-    assert Expr("x").mask(env).tolist() == [True, False, True]         # NaN is not "true"
-    assert Expr("not (x > 2)").mask(env).tolist() == [True, True, False]
-    assert Expr("isnan(x)").mask(env).tolist() == [False, True, False]
-    stall = Expr("rpm < 50")
+    t = np.arange(3.0)
+    env = {"t": t, "x": np.array([1.0, np.nan, 3.0])}
+
+    def mask(text):
+        return compile_expr(text).mask(env, t).tolist()
+
+    assert mask("x > 0") == [True, False, True]
+    assert mask("x") == [True, False, True]                 # NaN is not "true"
+    # unknown stays unknown through "not": a row without a value never passes
+    assert mask("not (x > 2)") == [True, False, False]
+    assert mask("!valid(x)") == [False, True, False]
+    stall = compile_expr("rpm < 50")
     assert stall.test({"rpm": 0}) and not stall.test({"rpm": 800})
     assert not stall.test({"rpm": None}) and not stall.test({})        # unknown is never true
-    assert Expr("link == 0").test({"link": 0}) and not Expr("link == 0").test({"link": 1})
-    assert Expr("batt < 11 or ect > 105").test({"batt": 12.5, "ect": 110})
-    assert not Expr("rate(rpm) > 5").test({"rpm": 3})                  # needs a whole log
-    assert Expr("pi > 3 and true and not false").test({})
+    assert stall.truth({"rpm": None}) is None
+    link_lost = compile_expr("link == 0")
+    assert link_lost.test({"link": 0}) and not link_lost.test({"link": 1})
+    assert compile_expr("batt < 11 or ect > 105").test({"batt": 12.5, "ect": 110})
+    # and/or go left to right and stop as soon as the answer is known; an
+    # unknown value that has to be looked at makes the whole condition unknown
+    assert compile_expr("ect > 105 or batt < 11").test({"batt": None, "ect": 110})
+    assert compile_expr("batt < 11 or ect > 105").truth({"batt": None, "ect": 110}) is None
+    assert compile_expr("true and not false").test({})
+    # functions with history run on live values too, one reading at a time
+    falling = compile_expr("rate(rpm) < -1000")
+    assert falling.stateful and falling.deps == {"rpm"}
+    assert [falling.test({"rpm": v}, ts) for ts, v in
+            [(0.0, 900), (0.1, 880), (0.2, 600), (0.3, None), (0.4, 590)]] == [False, False, True, False, False]
 
 
 @pytest.mark.parametrize("text", ["", "__import__('os').system('true')", "rpm.real", "rpm[0]",
                                   "lambda: 1", "'a' == 'a'", "open('x')", "rpm >", "min(1)",
-                                  "[x for x in y]", "rpm @ 2", "rpm << 2", "f(x=1)", "True"])
+                                  "[x for x in y]", "rpm @ 2", "f(x=1)", "rpm; 1", "exec(1)",
+                                  "rpm if", "rpm = 2"])
 def test_expr_rejects_everything_else(text):
     with pytest.raises(ExprError):
-        Expr(text)
+        compile_expr(text)
 
 
 # ---- filters ----

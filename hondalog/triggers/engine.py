@@ -27,19 +27,26 @@ Rules that share a ``group`` disarm together. The two stall rules do: after
 "rpm dropped to 0" the driver turns the key off, the ECU goes silent, and
 that must not produce a second capture.
 
-A value of None means "unknown" (ECU silent). Comparisons with unknown are
-false, so ``rpm < 50`` cannot fire while the link is down.
+A value of None means "unknown" (ECU silent). A condition whose value is
+unknown counts as false, so ``rpm < 50`` cannot fire while the link is down.
+
+Conditions are ``hondalog.expr`` expressions, the same language as math
+channels and alarms, including the functions with history: ``rate(rpm) <
+-1500``, ``avg(batt, 500) < 11``, ``held(tps > 80, 2000)``. Such a function
+needs to see each new reading exactly once, and the engine is fed several
+times between two readings of the same channel (other reads, black box
+frames). So a condition with history is only stepped by a feed that brings
+one of the channels it names; in between it keeps its last answer.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 
-from ..analysis.expr import Expr
+from ..expr import Expr, compile_expr
 
 ACTIONS = ("capture", "mark", "notify")
-Condition = Callable[[Mapping[str, Any]], bool]
 
 
 @dataclass(frozen=True)
@@ -65,7 +72,7 @@ class TriggerRule:
             raise ValueError("a trigger rule needs a name")
         for text in (self.when, self.arm_when, self.rearm_when):
             if text:
-                Expr(text)              # raises ExprError now, not in the car
+                compile_expr(text)      # raises ExprError now, not in the car
         if not self.when:
             raise ValueError(f"rule {self.name!r}: 'when' is empty")
         unknown = [a for a in self.actions if a not in ACTIONS]
@@ -123,12 +130,30 @@ class Capture:
         return self.fired[0].t
 
 
+class _Condition:
+    """One compiled condition and its last answer."""
+
+    __slots__ = ("expr", "last", "_deps", "_history")
+
+    def __init__(self, text: str):
+        self.expr: Expr = compile_expr(text)
+        self._deps = self.expr.deps
+        self._history = self.expr.stateful
+        self.last = False
+
+    def __call__(self, env: Mapping[str, Any], t: float, changed: Collection[str] | None) -> bool:
+        if self._history and (changed is None or self._deps.isdisjoint(changed)):
+            return self.last            # nothing new for its history: keep the answer
+        self.last = self.expr.test(env, t)
+        return self.last
+
+
 class _RuleState:
     def __init__(self, rule: TriggerRule):
         self.rule = rule
-        self.when: Condition = Expr(rule.when).test
-        self.arm: Condition | None = Expr(rule.arm_when).test if rule.arm_when else None
-        self.rearm: Condition | None = Expr(rule.rearm_when).test if rule.rearm_when else None
+        self.when = _Condition(rule.when)
+        self.arm = _Condition(rule.arm_when) if rule.arm_when else None
+        self.rearm = _Condition(rule.rearm_when) if rule.rearm_when else None
         self.armed = self.arm is None
         self.true_since: float | None = None
         self.fired = 0
@@ -176,22 +201,30 @@ class TriggerEngine:
     def capturing(self) -> bool:
         return self.capture is not None
 
-    def feed(self, t: float, values: Mapping[str, Any] | None = None) -> tuple[list[Fired], Capture | None]:
+    def feed(self, t: float, values: Mapping[str, Any] | None = None,
+             changed: Collection[str] | None = None) -> tuple[list[Fired], Capture | None]:
         """Take new values (None = unknown) and evaluate every rule at time t.
 
-        Returns (rules that fired now, capture that completed now or None).
+        ``changed`` names the channels that were read just now; left out, it
+        is the keys of ``values``. Returns (rules that fired now, capture that
+        completed now or None).
         """
         if values:
             self.values.update(values)
+            if changed is None:
+                changed = values.keys()
         env = self.values
         fired: list[Fired] = []
         for state in self._states.values():
             rule = state.rule
             if not rule.enabled:
                 continue
-            if state.arm is not None and not state.armed and state.arm(env):
+            # every condition sees every feed, so its history has no holes
+            arm = state.arm(env, t, changed) if state.arm is not None else False
+            rearm = state.rearm(env, t, changed) if state.rearm is not None else False
+            if arm and not state.armed:
                 state.armed = True
-            if state.when(env):
+            if state.when(env, t, changed):
                 if state.true_since is None:
                     state.true_since = t
                 if state.armed and t - state.true_since >= rule.hold_s:
@@ -204,7 +237,7 @@ class TriggerEngine:
                 state.true_since = None
                 if state.arm is None and not state.armed and state.rearm is None:
                     state.armed = True
-            if state.arm is None and not state.armed and state.rearm is not None and state.rearm(env):
+            if state.arm is None and not state.armed and rearm:
                 state.armed = True
         for event in fired:
             self._opened(event)
@@ -258,7 +291,8 @@ class TriggerEngine:
 def scan(rules: Sequence[TriggerRule], t: Sequence[float], columns: Mapping[str, Any]) -> list[Fired]:
     """Run rules over a finished log: ``t`` and ``columns`` are a Table's arrays.
     NaN counts as unknown. Returns every firing, for "where would this rule
-    have triggered" previews."""
+    have triggered" previews. Every row counts as a new reading of every
+    column, as it does for a math channel on replay."""
     engine = TriggerEngine(rules)
     names = list(columns)
     arrays = [columns[n] for n in names]

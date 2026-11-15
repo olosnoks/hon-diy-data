@@ -1,8 +1,12 @@
-"""Offline analysis on logs. No Qt in here: the UI draws what these modules compute."""
+"""Offline analysis on logs. No Qt in here: the UI draws what these modules compute.
+
+Filter and trigger conditions use the one evaluator in ``hondalog.expr``
+(re-exported here as ``Expr`` / ``compile_expr`` / ``ExprError``).
+"""
 
 from .compare import Comparison, Overlay, event_time, first_crossing
+from ..expr import Expr, ExprError, compile_expr
 from .cursors import SpanStats, span_stats, value_at
-from .expr import Expr, ExprError, compile_expr
 from .filters import Filter, FilterSet
 from .histogram import Bins, TableHistogram
 from .lod import Envelope, LodPyramid, envelope

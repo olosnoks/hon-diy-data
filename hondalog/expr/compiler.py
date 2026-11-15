@@ -474,6 +474,18 @@ class Expr:
         r = self.eval(values, t)
         return None if r is None else r != 0.0
 
+    def test(self, values: Values, t: float = 0.0) -> bool:
+        """``truth`` for callers that act on it: unknown counts as false, so
+        ``rpm < 50`` cannot fire a trigger while the ECU is silent."""
+        r = self.eval(values, t)
+        return r is not None and r != 0.0
+
+    def mask(self, columns: Mapping[str, Any], t: Any = None) -> np.ndarray:
+        """``eval_array`` as a boolean column for filters: true where the
+        expression is non-zero, false where it is zero or has no value."""
+        out = self.eval_array(columns, t)
+        return np.asarray(np.nan_to_num(out, nan=0.0) != 0.0)
+
     def reset(self) -> None:
         """Forget all window history (new session, new log, seek in replay)."""
         for state in self._states:

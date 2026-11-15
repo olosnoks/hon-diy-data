@@ -1,4 +1,10 @@
-"""Named filters: boolean expressions that gate histograms, scatter plots and exports."""
+"""Named filters: boolean expressions that gate histograms, scatter plots and exports.
+
+The text is a ``hondalog.expr`` expression over the log's channels, the same
+language as math channels, alarms and triggers: ``ect > 80 and closed_loop``,
+``abs(rate(tps)) < 5``, ``[rpm] > 3000 && [map] < 40``. A row where the
+expression has no value (a channel is NaN there) does not pass.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +14,7 @@ from typing import Any, Iterable, Mapping
 import numpy as np
 
 from ..data.model import BoolArray, Table
-from .expr import Expr
+from ..expr import Expr, compile_expr
 
 
 @dataclass
@@ -21,7 +27,7 @@ class Filter:
     _compiled: Expr | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        self._compiled = Expr(self.expr)         # raises ExprError on bad text
+        self._compiled = compile_expr(self.expr)     # raises ExprError on bad text
 
     @property
     def compiled(self) -> Expr:
@@ -29,7 +35,7 @@ class Filter:
         return self._compiled
 
     def mask(self, table: Table) -> BoolArray:
-        return self.compiled.mask(table.env(), len(table))
+        return self.compiled.mask(table.env(), table.t)
 
     def to_json(self) -> dict[str, Any]:
         return {"name": self.name, "expr": self.expr, "enabled": self.enabled}
@@ -85,7 +91,7 @@ class FilterSet:
         """Channel names the enabled filters need in the table."""
         names: set[str] = set()
         for flt in self.active:
-            names |= flt.compiled.names
+            names |= flt.compiled.deps
         names.discard("t")
         return names
 

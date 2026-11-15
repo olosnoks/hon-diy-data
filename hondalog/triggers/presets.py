@@ -73,6 +73,19 @@ def external_rule(why: str, rules: Iterable[TriggerRule] = ()) -> TriggerRule:
                        message=why, kind="stall", reason="external", group="stall")
 
 
+def alarm_rule(name: str, message: str = "", severity: str = "critical",
+               rules: Iterable[TriggerRule] = ()) -> TriggerRule:
+    """The one-off rule for an alarm whose actions include "capture"
+    (``hondalog.alarms``). The alarm engine has already done the deciding
+    (limits, hold time, hysteresis, latching); this only says what to save.
+    A trigger rule of the same name, if there is one, sets the window."""
+    own = next((r for r in rules if r.name == name), None)
+    pre_s, post_s = (own.pre_s, own.post_s) if own else (30.0, 10.0)
+    return TriggerRule(f"alarm_{name}", when="0", pre_s=pre_s, post_s=post_s,
+                       label=f"ALARM {name}", message=message or f"alarm {name}",
+                       kind="alarm", reason="alarm", severity=severity)
+
+
 def load_rules(path: str | Path) -> list[TriggerRule]:
     """Read rules from TOML::
 
