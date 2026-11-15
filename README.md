@@ -10,6 +10,47 @@ separate file when the engine stalls.
 
 ![dashboard](docs/screenshot.png)
 
+*Above: the working 0.1.0 app. Below: the 1.0 UI design that the rebuild targets.*
+
+## UI design (1.0, in progress)
+
+Mockups at the T430's native 1366x768, rendered from the
+[interactive design](https://claude.ai/artifact/UZP8DiarTkdK1RWKmk7vSS)
+(fake data). The full spec for the Qt build is in
+[docs/design/HANDOFF.md](docs/design/HANDOFF.md).
+
+The default is the Daylight theme, black on white, because a TN panel in
+sun loses its blacks first. Night is white on true black for dusk and the
+garage, and F9 switches between them. All text meets 7:1 contrast or
+better. Warning states use a shape as well as a colour, so they read
+without colour vision.
+
+### All sensors on one screen: 24 ECU + 8 black-box channels
+![All sensors, daylight](docs/mockups/sensors-daylight.png)
+![All sensors, night](docs/mockups/sensors-night.png)
+
+### Driving view
+![Driving view, daylight](docs/mockups/drive-daylight.png)
+![Driving view, night](docs/mockups/drive-night.png)
+
+### 3D observed map: RPM x MAP, live operating point and trail
+Built from your own logs, so it works on the stock P2P before any chip.
+The other modes are time-in-cell bars and stall approach paths.
+![Map 3D, night](docs/mockups/map3d-night.png)
+![Map 3D, daylight](docs/mockups/map3d-daylight.png)
+
+### Stall forensics replay: ECU and black box on one timeline
+![Stall forensics replay](docs/mockups/replay-stall-forensics.png)
+
+### Raw tools and guided memory mapper
+![Raw tools and mapper](docs/mockups/raw-tools-mapper.png)
+
+### Tuning table editor (chipped P28)
+![Tuning table editor](docs/mockups/tune-table-p28.png)
+
+### Status bar and alarm states
+![Alarm states](docs/mockups/alarms-states.png)
+
 **Read this first:** the address map is a guess. It is the kerpz P2T map,
 and nobody has checked it on a P2P. Every channel shows an amber `?` until
 you mark it verified. Until then, treat the numbers as "probably".
