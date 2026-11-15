@@ -437,7 +437,9 @@ editing), `live.py` (math + alarms per sample), `logger.py` (the recorder),
 (trigger engine, stall presets), `analysis/` (filters, table histogram,
 scatter, cursors, compare, plot decimation), `export/` (MLG, MSL, CSV,
 importers), `logtool.py` (`hondalog-log`), `blackbox/` (Track B: reader,
-simulator, file parser, alignment), `sim.py` (fake ECU), `ui/` (Qt).
+simulator, file parser, alignment), `tuning/` (ROM tools, no Qt), `sim.py`
+(fake ECU), `ui/` (Qt). The map of how they fit together is in
+`docs/ARCHITECTURE.md`.
 
 ## Link: how fast, and how it copes
 
@@ -518,6 +520,47 @@ silent=0.005,echo=0.005`), `--seed N` (runs repeat exactly), `--turnaround-ms`,
 `--iso-only`. Key `u` pulls the cable for 3 s. Bytes are paced at true 9600
 baud unless `--fast`. In the app, the ports `sim:` and `sim:flaky` are the
 same model in-process, with ISO 9141-2.
+
+## ROM tuning tools (chipped P28)
+
+`hondalog/tuning/` edits ROM files for the chipped OBD1 P28. There is no
+window for it yet; the command `hondalog-tune` covers the file work:
+
+```sh
+hondalog-tune demo-rom demo.bin                 # a made-up ROM to practise on
+hondalog-tune info demo.bin -d demo             # size, layout, hash, checksum
+hondalog-tune list -d demo                      # tables in a definition
+hondalog-tune show demo.bin -d demo fuel        # print a table
+hondalog-tune diff stock.bin tuned.bin -d p28.toml
+hondalog-tune convert p28.xdf p28.toml          # TunerPro XDF <-> native
+hondalog-tune burn-image tuned.bin -d p28.toml chip.bin
+hondalog-tune burn tuned.bin -d p28.toml --dry-run
+```
+
+`-d` takes a TunerPro `.xdf`, a native `.toml`, or `demo`.
+
+**No P28 definition ships with hondalog.** The table addresses depend on the
+base ROM (stock P28 or a Crome base), and none could be checked. The `demo`
+definition is an invented layout: fine for trying the tools, never for
+burning. `hondalog/tuning/data/demo.toml` shows the native format.
+
+Safety rules:
+
+- The ROM file you open is never written. Saving goes to a new file, and
+  each save also leaves a snapshot in `~/hondalog/roms/snapshots/`.
+- The first time a ROM is opened, a read-only copy goes to
+  `~/hondalog/roms/backups/`.
+- A burn image is refused if the definition says the checksum is wrong, if
+  the ROM is blank or the wrong size, or if its signature bytes do not match
+  the definition.
+- Burning needs `minipro` and a TL866II+ or T48. The sequence is erase,
+  blank check, write, verify, read back and compare. The 32 KB ROM goes on
+  the 64 KB SST27SF512 twice (`--layout upper` puts it at 0x8000 only).
+  Each burn is logged to `~/hondalog/roms/burns.jsonl`.
+
+Not tested on hardware: the burner, the Ostrich 2.0 driver, and any real
+P28 ROM. See the module docstrings in `hondalog/tuning/` for what each one
+is based on.
 
 ## Tests
 

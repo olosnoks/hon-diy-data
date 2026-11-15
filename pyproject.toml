@@ -13,15 +13,16 @@ hondalog-map = "hondalog.mapping.__main__:main"
 hondalog-log = "hondalog.logtool:main"
 hondalog-bb = "hondalog.blackbox.__main__:main"
 hondalog-bbsim = "hondalog.blackbox.sim:main"
+hondalog-tune = "hondalog.tuning.cli:main"
 
 [tool.setuptools]
 packages = ["hondalog", "hondalog.ui", "hondalog.link", "hondalog.diag", "hondalog.expr",
             "hondalog.mathch", "hondalog.alarms", "hondalog.mapping", "hondalog.bench",
             "hondalog.data", "hondalog.analysis", "hondalog.export", "hondalog.triggers",
-            "hondalog.blackbox"]
+            "hondalog.blackbox", "hondalog.tuning"]
 
 [tool.setuptools.package-data]
-hondalog = ["data/*"]
+hondalog = ["data/*", "tuning/data/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

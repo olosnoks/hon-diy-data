@@ -1,0 +1,223 @@
+<!-- Test fixture written for hondalog. Invented layout, not a real ECU. -->
+<XDFFORMAT version="1.60">
+  <XDFHEADER>
+    <flags>0x1</flags>
+    <fileversion>0.3</fileversion>
+    <deftitle>hondalog test fixture</deftitle>
+    <description>Line one&#013;&#010;Line two &amp; more</description>
+    <author>hondalog tests</author>
+    <BASEOFFSET offset="0" subtract="0" />
+    <DEFAULTS datasizeinbits="8" sigdigits="2" outputtype="1" signed="0" lsbfirst="0" float="0" />
+    <REGION type="0xFFFFFFFF" startaddress="0x0" size="0x8000" regionflags="0x0" name="Binary File" desc="This region describes the bin file edited by this XDF" />
+    <CATEGORY index="0x0" name="Fuel" />
+    <CATEGORY index="0x1" name="Spark" />
+    <CATEGORY index="0x2" name="Switches" />
+  </XDFHEADER>
+  <XDFTABLE uniqueid="0x100" flags="0x0">
+    <title>Main Fuel</title>
+    <description>Fuel against RPM and load.</description>
+    <CATEGORYMEM index="0" category="1" />
+    <XDFAXIS id="x" uniqueid="0x0">
+      <EMBEDDEDDATA mmedtypeflags="0x02" mmedaddress="0x1000" mmedelementsizebits="16" mmedcolcount="4" mmedmajorstridebits="0" mmedminorstridebits="0" />
+      <units>RPM</units>
+      <indexcount>4</indexcount>
+      <decimalpl>0</decimalpl>
+      <outputtype>1</outputtype>
+      <embedinfo type="1" />
+      <datatype>0</datatype>
+      <unittype>0</unittype>
+      <DALINK index="0" />
+      <MATH equation="X/4">
+        <VAR id="X" />
+      </MATH>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <EMBEDDEDDATA mmedelementsizebits="8" mmedcolcount="3" mmedmajorstridebits="0" mmedminorstridebits="0" />
+      <units>Load</units>
+      <indexcount>3</indexcount>
+      <outputtype>4</outputtype>
+      <datatype>0</datatype>
+      <unittype>0</unittype>
+      <DALINK index="0" />
+      <LABEL index="0" value="Low" />
+      <LABEL index="1" value="Mid" />
+      <LABEL index="2" value="High" />
+      <MATH equation="X">
+        <VAR id="X" />
+      </MATH>
+    </XDFAXIS>
+    <XDFAXIS id="z">
+      <EMBEDDEDDATA mmedaddress="0x1010" mmedelementsizebits="8" mmedrowcount="3" mmedcolcount="4" mmedmajorstridebits="0" mmedminorstridebits="0" />
+      <units>ms</units>
+      <decimalpl>2</decimalpl>
+      <min>0.000000</min>
+      <max>20.000000</max>
+      <outputtype>1</outputtype>
+      <MATH equation="0.05*value+1">
+        <VAR id="value" />
+      </MATH>
+    </XDFAXIS>
+  </XDFTABLE>
+  <XDFTABLE uniqueid="0x101" flags="0x0">
+    <title>Spark Advance</title>
+    <CATEGORYMEM index="0" category="2" />
+    <XDFAXIS id="x" uniqueid="0x0">
+      <EMBEDDEDDATA mmedelementsizebits="8" mmedcolcount="4" mmedmajorstridebits="0" mmedminorstridebits="0" />
+      <units>RPM</units>
+      <indexcount>4</indexcount>
+      <datatype>0</datatype>
+      <unittype>0</unittype>
+      <DALINK index="0" />
+      <LABEL index="0" value="1000" />
+      <LABEL index="1" value="2000" />
+      <LABEL index="2" value="4000" />
+      <LABEL index="3" value="6000" />
+      <MATH equation="X">
+        <VAR id="X" />
+      </MATH>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x1040" mmedelementsizebits="8" mmedcolcount="2" mmedmajorstridebits="0" mmedminorstridebits="0" />
+      <units>kPa</units>
+      <indexcount>2</indexcount>
+      <embedinfo type="1" />
+      <datatype>0</datatype>
+      <unittype>0</unittype>
+      <DALINK index="0" />
+      <MATH equation="X">
+        <VAR id="X" />
+      </MATH>
+    </XDFAXIS>
+    <XDFAXIS id="z">
+      <EMBEDDEDDATA mmedtypeflags="0x01" mmedaddress="0x1050" mmedelementsizebits="16" mmedrowcount="2" mmedcolcount="4" mmedmajorstridebits="0" mmedminorstridebits="96" />
+      <units>deg</units>
+      <decimalpl>1</decimalpl>
+      <outputtype>1</outputtype>
+      <MATH equation="X/10">
+        <VAR id="X" />
+      </MATH>
+    </XDFAXIS>
+  </XDFTABLE>
+  <XDFTABLE uniqueid="0x102" flags="0x0">
+    <title>Column Major</title>
+    <CATEGORYMEM index="0" category="1" />
+    <CATEGORYMEM index="1" category="2" />
+    <XDFAXIS id="x" uniqueid="0x0">
+      <indexcount>3</indexcount>
+      <MATH equation="X">
+        <VAR id="X" />
+      </MATH>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <indexcount>2</indexcount>
+      <MATH equation="X">
+        <VAR id="X" />
+      </MATH>
+    </XDFAXIS>
+    <XDFAXIS id="z">
+      <EMBEDDEDDATA mmedtypeflags="0x04" mmedaddress="0x1080" mmedelementsizebits="8" mmedrowcount="2" mmedcolcount="3" mmedmajorstridebits="0" mmedminorstridebits="0" />
+      <MATH equation="X*K">
+        <VAR id="X" />
+        <VAR id="K" type="address" address="0x1090" />
+      </MATH>
+    </XDFAXIS>
+  </XDFTABLE>
+  <XDFTABLE uniqueid="0x103" flags="0x0">
+    <title>Needs Cell Function</title>
+    <XDFAXIS id="x" uniqueid="0x0">
+      <indexcount>2</indexcount>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <indexcount>1</indexcount>
+    </XDFAXIS>
+    <XDFAXIS id="z">
+      <EMBEDDEDDATA mmedaddress="0x10A0" mmedelementsizebits="8" mmedrowcount="1" mmedcolcount="2" mmedmajorstridebits="0" mmedminorstridebits="0" />
+      <MATH equation="X*CELL(0;0;FALSE)">
+        <VAR id="X" />
+      </MATH>
+    </XDFAXIS>
+  </XDFTABLE>
+  <XDFTABLE uniqueid="0x104" flags="0x0">
+    <title>Header Only</title>
+  </XDFTABLE>
+  <XDFFUNCTION uniqueid="0x200" flags="0x0">
+    <title>Warmup Enrichment</title>
+    <CATEGORYMEM index="0" category="1" />
+    <XDFAXIS id="x" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x10B0" mmedelementsizebits="8" mmedcolcount="5" mmedmajorstridebits="8" mmedminorstridebits="0" />
+      <units>C</units>
+      <indexcount>5</indexcount>
+      <embedinfo type="1" />
+      <datatype>0</datatype>
+      <unittype>0</unittype>
+      <DALINK index="0" />
+      <MATH equation="X-40">
+        <VAR id="X" />
+      </MATH>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x10B8" mmedelementsizebits="8" mmedcolcount="5" mmedmajorstridebits="8" mmedminorstridebits="0" />
+      <units>%</units>
+      <indexcount>5</indexcount>
+      <decimalpl>1</decimalpl>
+      <embedinfo type="1" />
+      <datatype>0</datatype>
+      <unittype>0</unittype>
+      <DALINK index="0" />
+      <MATH equation="x/2.55">
+        <VAR id="x" />
+      </MATH>
+    </XDFAXIS>
+  </XDFFUNCTION>
+  <XDFCONSTANT uniqueid="0x300" flags="0x0">
+    <title>Rev Limit</title>
+    <description>Fuel cut.</description>
+    <CATEGORYMEM index="0" category="2" />
+    <EMBEDDEDDATA mmedaddress="0x10C0" mmedelementsizebits="16" mmedmajorstridebits="0" mmedminorstridebits="0" />
+    <units>RPM</units>
+    <decimalpl>0</decimalpl>
+    <rangehigh>9000.000000</rangehigh>
+    <datatype>0</datatype>
+    <unittype>0</unittype>
+    <DALINK index="0" />
+    <MATH equation="1875000/X">
+      <VAR id="X" />
+    </MATH>
+  </XDFCONSTANT>
+  <XDFCONSTANT uniqueid="0x301" flags="0x0">
+    <title>Injector Scale</title>
+    <EMBEDDEDDATA mmedtypeflags="0x10002" mmedaddress="0x10C4" mmedelementsizebits="32" mmedmajorstridebits="0" mmedminorstridebits="0" />
+    <units>cc</units>
+    <MATH equation="X">
+      <VAR id="X" />
+    </MATH>
+  </XDFCONSTANT>
+  <XDFCONSTANT uniqueid="0x302" flags="0x0">
+    <title>No Address</title>
+    <MATH equation="X">
+      <VAR id="X" />
+    </MATH>
+  </XDFCONSTANT>
+  <XDFFLAG uniqueid="0x400" flags="0x0">
+    <title>Closed Loop</title>
+    <CATEGORYMEM index="0" category="3" />
+    <EMBEDDEDDATA mmedaddress="0x10D0" mmedelementsizebits="8" />
+    <mask>0x04</mask>
+  </XDFFLAG>
+  <XDFFLAG uniqueid="0x401" flags="0x0">
+    <title>Closed Loop</title>
+    <CATEGORYMEM index="0" category="3" />
+    <EMBEDDEDDATA mmedaddress="0x10D0" mmedelementsizebits="8" />
+    <mask>0x80</mask>
+  </XDFFLAG>
+  <XDFPATCH uniqueid="0x500">
+    <title>Disable Something</title>
+    <CATEGORYMEM index="0" category="3" />
+    <XDFPATCHENTRY name="first" address="0x20" datasize="0x2" patchdata="00FF" basedata="1234" />
+    <XDFPATCHENTRY name="second" address="0x30" datasize="0x1" patchdata="AA" />
+  </XDFPATCH>
+  <XDFCHECKSUM uniqueid="0x600">
+    <title>Checksum</title>
+  </XDFCHECKSUM>
+  <XDFMYSTERY />
+</XDFFORMAT>

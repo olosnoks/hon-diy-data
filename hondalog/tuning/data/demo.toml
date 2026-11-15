@@ -1,0 +1,183 @@
+# hondalog demo definition.
+#
+# THIS IS NOT A P28. The layout is invented so the tuning tools can be tried
+# and tested without a real ROM or a real definition. Do not burn an image
+# made with it. Build the matching ROM with:  hondalog-tune demo-rom demo.bin
+#
+# It also shows the native format. Addresses are offsets into the 32 KB image.
+# X is the column axis, Y the row axis, Z the cells. "math" turns the stored
+# number X into the displayed value (same syntax as TunerPro XDF equations).
+
+format = "hondalog-definition"
+format_version = 1
+title = "hondalog synthetic demo ROM (not a real ECU)"
+description = "Invented layout for trying the editor. Not a P28."
+author = "hondalog"
+version = "1"
+base_offset = 0
+rom_size = 0x8000
+
+[defaults]
+bits = 8
+signed = false
+lsb_first = false
+
+# kind: none | sum8 | sum16 | xor8.   mode "balance": the byte at "store" is
+# chosen so the sum of [start, end) equals "target".   disabled = true means
+# the base ROM does not check it (as Crome bases do).
+[checksum]
+kind = "sum8"
+start = 0x0
+end = 0x8000
+store = 0x7FFF
+mode = "balance"
+target = 0
+status = "unverified"
+note = "Demo rule. The real P28 checksum has not been confirmed."
+
+[[signature]]
+address = 0x10
+data = "484c44454d4f"      # "HLDEMO"
+name = "demo marker"
+
+[[category]]
+index = 0
+name = "Fuel"
+[[category]]
+index = 1
+name = "Ignition"
+[[category]]
+index = 2
+name = "Limits"
+
+[[table]]
+id = "fuel"
+title = "Fuel (low cam)"
+description = "Injector time against RPM and manifold pressure."
+categories = ["Fuel"]
+  [table.x]
+  address = 0x4000
+  bits = 16
+  count = 10
+  units = "rpm"
+  decimals = 0
+  [table.y]
+  address = 0x4014
+  count = 8
+  math = "X*0.5"
+  units = "kPa"
+  decimals = 0
+  [table.z]
+  address = 0x4020
+  rows = 8
+  cols = 10
+  math = "X*0.064"
+  units = "ms"
+  decimals = 2
+
+[[table]]
+id = "ignition"
+title = "Ignition (low cam)"
+categories = ["Ignition"]
+  [table.x]
+  address = 0x4000
+  bits = 16
+  count = 10
+  units = "rpm"
+  decimals = 0
+  [table.y]
+  address = 0x4014
+  count = 8
+  math = "X*0.5"
+  units = "kPa"
+  decimals = 0
+  [table.z]
+  address = 0x4080
+  rows = 8
+  cols = 10
+  signed = true
+  math = "X*0.25"
+  units = "deg BTDC"
+  decimals = 1
+
+[[table]]
+id = "target_lambda"
+title = "Target lambda"
+categories = ["Fuel"]
+  [table.x]
+  address = 0x4000
+  bits = 16
+  count = 10
+  units = "rpm"
+  [table.y]
+  address = 0x4014
+  count = 8
+  math = "X*0.5"
+  units = "kPa"
+  [table.z]
+  address = 0x40E0
+  rows = 8
+  cols = 10
+  math = "X/128"
+  units = "lambda"
+  decimals = 2
+
+[[table]]
+id = "ect_fuel"
+title = "Coolant fuel correction"
+categories = ["Fuel"]
+curve = true
+  [table.x]
+  address = 0x4140
+  count = 8
+  math = "X-40"
+  units = "C"
+  decimals = 0
+  [table.z]
+  address = 0x4148
+  rows = 1
+  cols = 8
+  math = "X/128"
+  units = "x"
+  decimals = 2
+
+[[scalar]]
+id = "rev_limit"
+title = "Rev limit"
+categories = ["Limits"]
+address = 0x4160
+bits = 16
+units = "rpm"
+decimals = 0
+
+[[scalar]]
+id = "idle_target"
+title = "Idle target"
+categories = ["Limits"]
+address = 0x4162
+math = "X*10"
+units = "rpm"
+decimals = 0
+
+[[flag]]
+id = "closed_loop"
+title = "Closed loop enabled"
+categories = ["Fuel"]
+address = 0x4163
+mask = 0x01
+
+[[flag]]
+id = "knock_retard"
+title = "Knock retard enabled"
+categories = ["Ignition"]
+address = 0x4163
+mask = 0x02
+
+[[patch]]
+id = "skip_checksum"
+title = "Skip checksum test (demo)"
+  [[patch.entries]]
+  address = 0x0100
+  data = "0000"
+  base = "c3f0"
+  name = "jump over the test"
