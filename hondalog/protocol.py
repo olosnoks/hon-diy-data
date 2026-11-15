@@ -13,7 +13,9 @@ the request comes back as an echo before the ECU's reply.
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, fields, replace
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -29,11 +31,24 @@ class Framing:
     init_delay_s: float = 0.3
     reply_timeout_s: float = 0.2   # per request, after the last byte is sent
     inter_request_delay_s: float = 0.002
+    # ---- link timing (hondalog/link/timing.py). All optional. ----
+    # reply_timeout_s is the ceiling (and the starting value) of the response
+    # timeout; inter_request_delay_s is the floor of the gap between requests.
+    adaptive_timing: bool = True          # False = use the fixed values only
+    min_reply_timeout_s: float = 0.02     # floor of the adaptive response timeout
+    inter_byte_timeout_s: float = 0.05    # ceiling of the adaptive inter-byte timeout
+    max_inter_request_delay_s: float = 0.05   # ceiling of the adaptive gap
+    retries: int = 1                      # extra attempts per read, with backoff
+    turnaround_s: float = 0.002           # first guess of the ECU's think time
+    # ---- scheduler targets (hondalog/link/scheduler.py), reads per second ----
+    rate_fast_hz: float = 20.0
+    rate_medium_hz: float = 5.0
+    rate_slow_hz: float = 1.0
 
-    def with_overrides(self, table: dict) -> "Framing":
+    def with_overrides(self, table: Mapping[str, Any]) -> "Framing":
         """Return a copy with values replaced from a [protocol] config table."""
         known = {f.name for f in fields(self)}
-        changes = {}
+        changes: dict[str, Any] = {}
         for key, value in table.items():
             if key not in known:
                 raise ValueError(f"unknown protocol setting: {key}")
@@ -44,6 +59,9 @@ class Framing:
 
 
 DEFAULT = Framing()
+
+REQUEST_BYTES = 5      # 20 05 addr len cksum: echoed back on the one-wire K-line
+REPLY_OVERHEAD = 3     # header + length byte + checksum around the data
 
 
 class ProtocolError(Exception):
@@ -77,7 +95,7 @@ def with_checksum(data: bytes) -> bytes:
     return bytes(data) + bytes([checksum(data)])
 
 
-def verify(frame: bytes) -> bool:
+def verify(frame: bytes | bytearray) -> bool:
     """True if a complete frame (checksum included) sums to 0 modulo 256."""
     return len(frame) > 0 and (sum(frame) & 0xFF) == 0
 
@@ -94,7 +112,7 @@ def build_read_request(addr: int, length: int, framing: Framing = DEFAULT) -> by
 
 def reply_size(length: int, framing: Framing = DEFAULT) -> int:
     """Total reply bytes expected for a read of ``length`` data bytes."""
-    return length + 3
+    return length + REPLY_OVERHEAD
 
 
 def build_reply(data: bytes, framing: Framing = DEFAULT) -> bytes:
@@ -106,7 +124,7 @@ def build_reply(data: bytes, framing: Framing = DEFAULT) -> bytes:
 
 # ---- replies ----------------------------------------------------------------
 
-def strip_echo(buf: bytes, request: bytes) -> tuple[bytes, bool]:
+def strip_echo(buf: bytes | bytearray, request: bytes) -> tuple[bytes, bool]:
     """Drop our own request from the front of what was received.
 
     Returns (rest, echo_seen). Junk in front of the echo goes with it. If the
@@ -119,7 +137,7 @@ def strip_echo(buf: bytes, request: bytes) -> tuple[bytes, bool]:
     return buf[pos + len(request):], True
 
 
-def _candidates(rest: bytes, length: int, framing: Framing):
+def _candidates(rest: bytes, length: int, framing: Framing) -> Iterator[int]:
     """Offsets in ``rest`` where a reply header for this read could start."""
     want_len = (length + framing.reply_len_extra) & 0xFF
     for i in range(len(rest)):
