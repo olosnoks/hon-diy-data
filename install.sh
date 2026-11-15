@@ -63,6 +63,7 @@ fi
 echo "==> Commands: /usr/local/bin/hondalog, /usr/local/bin/hondalog-sim"
 sudo ln -sf "$PREFIX/bin/hondalog" /usr/local/bin/hondalog
 sudo ln -sf "$PREFIX/bin/hondalog-sim" /usr/local/bin/hondalog-sim
+sudo ln -sf "$PREFIX/bin/hondalog-tune" /usr/local/bin/hondalog-tune
 
 echo "==> udev rule: /dev/hondalog for the FTDI cable (0403:6001)"
 sudo install -m 644 "$SRC/packaging/99-hondalog.rules" /etc/udev/rules.d/99-hondalog.rules
