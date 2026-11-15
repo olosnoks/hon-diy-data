@@ -124,5 +124,5 @@ def test_module_and_launcher_entry_points(rom):
     assert out.returncode == 0 and "checksum: ok" in out.stdout
     out = subprocess.run(["/bin/sh", str(ROOT / "bin" / "hondalog-tune"), "--help"],
                          capture_output=True, text=True,
-                         env={"PATH": "/usr/bin:/bin:" + str(Path(sys.executable).parent)})
+                         env={"PATH": str(Path(sys.executable).parent) + ":/usr/bin:/bin"})
     assert out.returncode == 0 and "burn-image" in out.stdout
