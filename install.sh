@@ -18,7 +18,8 @@ ME=$(id -un)
 REQUIRED="python3 python3-numpy python3-serial python3-pyqtgraph
           python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets"
 # Nice to have; each is tried on its own and may be missing.
-OPTIONAL="python3-pyside6.qtsvg python3-pyside6.qtopenglwidgets python3-pyside6.qttest
+OPTIONAL="python3-pyside6.qtsvg python3-pyside6.qtopenglwidgets python3-pyside6.qtopengl
+          python3-opengl python3-pyside6.qttest python3-pytestqt
           qt6-qpa-plugins qt6-svg-plugins libxcb-cursor0 python3-pytest"
 
 deps_ok() {

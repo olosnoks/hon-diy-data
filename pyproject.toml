@@ -5,15 +5,19 @@ description = "Live data logger for pre-2002 Honda ECUs over a KKL K-line cable"
 requires-python = ">=3.11"
 dependencies = ["PySide6", "pyqtgraph", "pyserial", "numpy"]
 
+[project.optional-dependencies]
+gl = ["PyOpenGL"]            # 3D views; without it Map 3D and Tune use the 2D heat map
+test = ["pytest", "pytest-qt"]
+
 [project.scripts]
 hondalog = "hondalog.__main__:main"
 hondalog-sim = "hondalog.sim:main"
 
 [tool.setuptools]
-packages = ["hondalog", "hondalog.ui"]
+packages = ["hondalog", "hondalog.ui", "hondalog.ui.screens"]
 
 [tool.setuptools.package-data]
-hondalog = ["data/*"]
+hondalog = ["data/*", "data/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
