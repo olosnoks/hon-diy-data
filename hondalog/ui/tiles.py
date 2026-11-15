@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 import pyqtgraph.functions as fn
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from . import paint
@@ -64,6 +64,7 @@ class Tile(QWidget):
         self._poly = fn.create_qpolygonf(SPARK_N)
         self._pts = fn.ndarray_from_qpolygonf(self._poly)
         self._pts[:] = 0.0
+        self._spark_pm: QPixmap | None = None
         self._reset()
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
         if state is not None:
@@ -84,6 +85,7 @@ class Tile(QWidget):
         self._icon_on = True
         self._on = False
         self._have_spark = False
+        self._spark_key = None
         self._foot = ""
         self._tag = ""
 
@@ -201,6 +203,20 @@ class Tile(QWidget):
             for i in bad:
                 pts[i, 1] = pts[i - 1, 1]
         self._have_spark = True
+
+    def _render_spark(self, ink) -> None:
+        m = self.m
+        w, h = max(1, self.width() - 4), m.spark_h + 4
+        pm = self._spark_pm
+        if pm is None or pm.width() != w or pm.height() != h:
+            pm = self._spark_pm = QPixmap(w, h)
+        pm.fill(Qt.transparent)
+        qp = QPainter(pm)
+        qp.setRenderHint(QPainter.Antialiasing, True)
+        qp.translate(-2.0, 2.0 - self._spark_top())
+        qp.setPen(T.cpen(ink, 2, Qt.RoundCap, Qt.RoundJoin))
+        qp.drawPolyline(self._poly)
+        qp.end()
 
     def _spark_top(self) -> float:
         m = self.m
@@ -326,14 +342,13 @@ class Tile(QWidget):
                 if frac >= 0:
                     p.fillRect(QRectF(gx + frac * gw - 1.5, gy - 5, 3, gh + 10), tick)
 
-        # sparkline
+        # sparkline: stroked into a pixmap at 2 Hz, blitted on every other paint
         if self._have_spark and not stale:
-            p.setRenderHint(QPainter.Antialiasing, True)
-            p.setPen(T.cpen(ink, 2, Qt.RoundCap, Qt.RoundJoin))
-            p.setClipRect(QRectF(2, self._spark_top() - 2, w - 4, m.spark_h + 4))
-            p.drawPolyline(self._poly)
-            p.setClipping(False)
-            p.setRenderHint(QPainter.Antialiasing, False)
+            key = (self._spark_gen, ink.rgba(), self.width())
+            if key != self._spark_key:
+                self._spark_key = key
+                self._render_spark(ink)
+            p.drawPixmap(2, int(self._spark_top()) - 2, self._spark_pm)
 
         # footer
         if m.foot_h:

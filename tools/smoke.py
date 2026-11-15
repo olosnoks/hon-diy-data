@@ -4,7 +4,8 @@
 Part 1 (no GUI): poller -> sim pty -> CSV log -> stall capture (RPM to 0).
 Part 1b:         the same with the ECU going silent (power cut).
 Part 2 (offscreen GUI): main window at 1366x768 against a second sim run,
-        marker, memory sweep, stall banner, replay; saves screenshots to docs/.
+        marker, memory sweep, stall banner, replay; saves screenshots to
+        docs/screenshots/sim-*.png.
 
     QT_QPA_PLATFORM=offscreen python3 tools/smoke.py
 """
@@ -117,15 +118,22 @@ def headless_power_cut():
 def gui(docs: Path):
     print("Part 2: offscreen GUI at 1366x768")
     from hondalog import ui  # noqa: F401
+    from PySide6.QtCore import QSettings
     from PySide6.QtWidgets import QApplication
-    from hondalog.ui import theme
-    from hondalog.ui.main_window import MainWindow
+    from hondalog.ui import adapters, scene3d, theme
+    from hondalog.ui.main_window import RAW, REPLAY, SENSORS, Shell
+    from hondalog.ui.session import build_session
 
+    scene3d.default_surface_format()
     app = QApplication([])
+    app.setStyle("Fusion")
     theme.apply(app)
-    win = MainWindow()
+    session = build_session()
+    win = Shell(session, QSettings(str(TMP / "ui.ini"), QSettings.IniFormat))
     win.resize(1366, 768)
     win.show()
+    shots = docs / "screenshots"
+    shots.mkdir(exist_ok=True)
 
     def spin(seconds, until=None):
         end = time.monotonic() + seconds
@@ -138,48 +146,48 @@ def gui(docs: Path):
 
     sim = start_sim("--warmup", "8", "--rev-every", "6", "--stall-after", "16", "--restart-after", "0")
     try:
-        win.rescan_ports()
         win.connect_port(LINK)
-        check(spin(5, lambda: win.poller and win.poller.state == OK), "GUI connected to the sim pty")
-        check(win.recorder is not None, "auto-record started")
+        check(spin(5, lambda: session.ecu_status.state == adapters.OK), "GUI connected to the sim pty")
+        check(spin(2, lambda: session.recording.active), "auto-record started")
         spin(4)
         win.mark()
         spin(3)
         win.mark()
+        check(session.recording.marks == 2, "two markers dropped")
+        n_tiles = len(win.sensors.tiles)
+        check(n_tiles >= 32, f"{n_tiles} sensor tiles on one screen")
 
-        win.tabs.setCurrentWidget(win.rawtools)
-        raw = win.rawtools
-        raw.hex_in.setText("20 05 76 0A")
-        raw.send_console()
-        raw.start_scan(False)
-        check(spin(6, lambda: raw._sweeps >= 1), "memory sweep 1 done")
-        raw.start_scan(False)
-        check(spin(6, lambda: raw._sweeps >= 2), "memory sweep 2 done")
-        check(int((raw.changes > 0).sum()) > 5 and not raw.failed.any(),
-              f"scanner saw {int((raw.changes > 0).sum())} bytes change, none unreadable")
-        check("checksum OK" in raw.console.toPlainText(), "hex console round trip")
-        raw.grid.setCurrentCell(0, 0)
-        written = raw.export(TMP / "scan.txt")
-        check(len(written) == 2 and written[0].stat().st_size > 1000, "scan export (.txt + .csv)")
+        win.show_screen(RAW)
+        mapper = session.mapper
+        mapper.send(protocol.parse_hex("20 05 76 0A"), True)
+        mapper.set_sweeping(True)
+        check(spin(12, lambda: mapper.sweeps >= 3), "three memory sweeps done")
+        mapper.set_sweeping(False)
+        moved = int((mapper.changes > 0).sum())
+        check(moved > 5 and (mapper.cur >= 0).all(), f"mapper saw {moved} bytes change, all 256 read")
+        check("checksum OK" in mapper.console(), "hex console round trip")
+        mapper.export(TMP / "scan.txt")
+        check((TMP / "scan.txt").stat().st_size > 1000, "sweep export")
         spin(0.3)
-        win.grab().save(str(docs / "screenshot-rawtools.png"))
+        win.grab().save(str(shots / "sim-rawtools.png"))
 
-        win.tabs.setCurrentWidget(win.dashboard)
-        check(spin(40, lambda: win.dashboard.banner.isVisible()), "stall banner shown")
+        win.show_screen(SENSORS)
+        check(spin(40, lambda: win.banner.isVisible()), "stall banner shown")
         spin(0.5)
-        check(win.grab().save(str(docs / "screenshot.png")), "dashboard screenshot saved")
-        stall_path = win.dashboard.banner._path
-        rate = win.poller.hz
-        win.disconnect_port()
-        win.open_in_replay(stall_path)
-        check(win.replay.log is not None and len(win.replay.log.markers) >= 1,
-              "stall file opens in replay with markers")
-        win.replay.slider.setValue(win.replay.slider.maximum() // 3)
+        check(win.grab().save(str(shots / "sim-stall-banner.png")), "stall banner screenshot saved")
+        stall_path = session.banner.path
+        rate = session.ecu_status.rate_hz
+        win.open_stall()
+        view = win.replay.view
+        check(win.current() == REPLAY and view is not None and view.trigger_t is not None
+              and len(view.markers) >= 1, "stall file opens in replay with markers and a trigger")
+        check(len(win.replay.forensics.loss) >= 1, "order of loss computed: "
+              + "; ".join(f"{r.signal} {r.t:+.1f}s" for r in win.replay.forensics.loss[:3]))
         spin(0.5)
-        win.grab().save(str(docs / "screenshot-replay.png"))
-        print(f"  window {win.width()}x{win.height()}, minimum "
-              f"{win.minimumSizeHint().width()}x{win.minimumSizeHint().height()}, "
-              f"last poll rate {rate:.1f} Hz")
+        win.grab().save(str(shots / "sim-replay.png"))
+        session.disconnect()
+        print(f"  window {win.width()}x{win.height()}, last poll rate {rate:.1f} Hz, "
+              f"stall file {stall_path.name}")
     finally:
         win.close()
         sim.terminate()

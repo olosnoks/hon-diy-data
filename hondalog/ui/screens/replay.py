@@ -32,13 +32,14 @@ LIVE_WINDOW = 40.0
 
 
 class Lane:
-    __slots__ = ("cid", "label", "token", "y", "h", "curve", "has_data", "value", "flag",
-                 "lo", "hi")
+    __slots__ = ("cid", "label", "token", "y", "h", "curve", "twin", "has_data", "value",
+                 "flag", "lo", "hi")
 
     def __init__(self, cid, token, y, h):
         self.cid, self.token, self.y, self.h = cid, token, y, h
         self.label = cid.upper()
         self.curve = None
+        self.twin = None            # live mode: second 1 px trace, one pixel lower
         self.has_data = False
         self.value = ""
         self.flag = False
@@ -93,6 +94,12 @@ class LaneBlock(QWidget):
             curve.curve.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
             self.vb.addItem(curve)
             lane.curve = curve
+            twin = pg.PlotDataItem(antialias=False, stepMode="right" if step else None)
+            twin.setDownsampling(auto=True, method="peak")
+            twin.setClipToView(True)
+            self.vb.addItem(twin)
+            lane.twin = twin
+        self._live_pens = False
         self.overlay = _Overlay(self)
         self.retheme()
 
@@ -100,10 +107,23 @@ class LaneBlock(QWidget):
 
     def retheme(self) -> None:
         self.gv.setBackground(T.panel)
-        for lane in self.lanes:
-            lane.curve.setPen(pg.mkPen(T.color(lane.token), width=2))
+        self._set_pens(self._live_pens)
         self.update()
         self.overlay.update()
+
+    def _set_pens(self, live: bool) -> None:
+        """A file view is stroked once, antialiased, 2 px, and cached. A live
+        view redraws every lane ten times a second: there each trace is two
+        1 px cosmetic lines a pixel apart, which the raster engine draws
+        several times faster than one stroked 2 px line."""
+        self._live_pens = live
+        for lane in self.lanes:
+            colour = T.color(lane.token)
+            lane.curve.opts["antialias"] = not live
+            lane.curve.setPen(pg.mkPen(colour, width=1 if live else 2))
+            lane.twin.setPen(pg.mkPen(colour, width=1))
+            if not live:
+                lane.twin.setData([], [])
 
     def plot_w(self) -> int:
         return max(10, self.width() - LABEL_W - 2)
@@ -129,12 +149,15 @@ class LaneBlock(QWidget):
     def set_view(self, view: ad.LogView, keep_window: bool = False) -> None:
         self.view = view
         live = view.live
+        if live != self._live_pens:
+            self._set_pens(live)
         for lane in self.lanes:
             spec = view.specs.get(lane.cid)
             t = view.t.get(lane.cid)
             lane.has_data = spec is not None and t is not None and len(t) > 1
             if not lane.has_data:
                 lane.curve.setData([], [])
+                lane.twin.setData([], [])
                 if spec is not None:
                     lane.label = f"{spec.label.upper()} {spec.units}".strip()
                 continue
@@ -151,11 +174,11 @@ class LaneBlock(QWidget):
                 pad = max(0.1 * (hi - lo), 0.04 * (spec.hi - spec.lo))
                 lo, hi = lo - pad, hi + pad
             lane.lo, lane.hi = lo, hi
-            # Antialiased 2 px strokes cost about 4x; a live view redraws all 13
-            # lanes ten times a second, a file view once.
-            lane.curve.opts["antialias"] = not live
             f = np.clip((v - lo) / ((hi - lo) or 1.0), 0.0, 1.0)
-            lane.curve.setData(t, lane.y + lane.h - 4 - f * (lane.h - 8))
+            y = lane.y + lane.h - 4 - f * (lane.h - 8)
+            lane.curve.setData(t, y)
+            if live:
+                lane.twin.setData(t, y + 1.0)
         self.heads[0][1] = "ECU · K-line"
         self.heads[1][1] = "Black box"
         if view.align_residual_ms is not None and view.align_residual_ms > 5:
