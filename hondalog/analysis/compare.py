@@ -122,3 +122,56 @@ class Comparison:
             mask = filters.mask(table) if filters is not None else None
             hists.append(TableHistogram.from_table(table, x, y, z, x_bins, y_bins, mask))
         return hists[0].delta(hists[1], stat, min_hits), hists[0], hists[1]
+
+
+@dataclass
+class ChannelDiff:
+    """One channel of two logs: A minus B on A's timestamps."""
+
+    name: str
+    units: str
+    n: int
+    mean_a: float
+    mean_b: float
+    mean: float
+    rms: float
+    max_abs: float
+
+
+@dataclass
+class CompareResult:
+    offset: float                   # added to B's times
+    aligned_on: str
+    rows: list[ChannelDiff]
+    only_a: list[str]
+    only_b: list[str]
+
+
+def compare_logs(a: Log, b: Log, channels: list[str] | None = None, *, align: str = "start",
+                 **options: Any) -> CompareResult:
+    """Two drives side by side: for every channel both have, the difference
+    after B is shifted so that the chosen moment (``align``, see
+    ``event_time``) coincides. The logs may come from the same database or
+    from two different ones. Falls back to the first sample if a log lacks
+    the moment asked for."""
+    comparison = Comparison(a, b)
+    try:
+        comparison.align(align, **options)
+        how = align
+    except ValueError:
+        comparison.align("start")
+        how = "start"
+    common = comparison.common_channels()
+    names = [n for n in channels if n in common] if channels is not None else common
+    rows = []
+    for name in names:
+        overlay = comparison.overlay(name)
+        both = ~np.isnan(overlay.a) & ~np.isnan(overlay.b)
+        stats = overlay.summary()
+        rows.append(ChannelDiff(name, a.units(name), int(both.sum()),
+                                float(overlay.a[both].mean()) if both.any() else NAN,
+                                float(overlay.b[both].mean()) if both.any() else NAN,
+                                stats["mean"], stats["rms"], stats["max_abs"]))
+    theirs, mine = set(b.channels), set(a.channels)
+    return CompareResult(comparison.offset, how, rows, [n for n in a.channels if n not in theirs],
+                         [n for n in b.channels if n not in mine])
