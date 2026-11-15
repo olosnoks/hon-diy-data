@@ -63,7 +63,7 @@ else
     fi
 fi
 
-echo "==> Commands in /usr/local/bin: hondalog hondalog-sim hondalog-firstcontact hondalog-map hondalog-log hondalog-bb hondalog-bbsim hondalog-tune"
+echo "==> Commands in /usr/local/bin: hondalog hondalog-sim hondalog-firstcontact hondalog-map hondalog-log hondalog-bb hondalog-bbsim hondalog-tune hondalog-handheld"
 sudo ln -sf "$PREFIX/bin/hondalog" /usr/local/bin/hondalog
 sudo ln -sf "$PREFIX/bin/hondalog-sim" /usr/local/bin/hondalog-sim
 sudo ln -sf "$PREFIX/bin/hondalog-firstcontact" /usr/local/bin/hondalog-firstcontact
@@ -72,6 +72,7 @@ sudo ln -sf "$PREFIX/bin/hondalog-log" /usr/local/bin/hondalog-log
 sudo ln -sf "$PREFIX/bin/hondalog-bb" /usr/local/bin/hondalog-bb
 sudo ln -sf "$PREFIX/bin/hondalog-bbsim" /usr/local/bin/hondalog-bbsim
 sudo ln -sf "$PREFIX/bin/hondalog-tune" /usr/local/bin/hondalog-tune
+sudo ln -sf "$PREFIX/bin/hondalog-handheld" /usr/local/bin/hondalog-handheld
 
 echo "==> udev rule: /dev/hondalog for the FTDI cable (0403:6001)"
 sudo install -m 644 "$SRC/packaging/99-hondalog.rules" /etc/udev/rules.d/99-hondalog.rules
