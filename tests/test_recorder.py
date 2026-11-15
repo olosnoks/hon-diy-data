@@ -146,22 +146,6 @@ def test_custom_rules_manual_trigger_and_meta(amap, tmp_path):
     assert rec.rows == 200
 
 
-@dataclass
-class Read:
-    t: float
-    addr: int
-    data: bytes
-
-
-@dataclass
-class ReadSample:
-    t: float
-    wall: datetime
-    link: bool
-    values: dict = field(default_factory=dict)
-    reads: list = field(default_factory=list)
-
-
 def test_per_read_recording_keeps_raw_bytes_and_true_times(amap, tmp_path):
     rec = recorder(amap, tmp_path, post_s=1)
     for i in range(100):
@@ -199,18 +183,6 @@ def test_per_read_recording_keeps_raw_bytes_and_true_times(amap, tmp_path):
         assert new.meta["redecoded_from"] == amap.version and new.meta["redecoded_streams"] == 3
         assert new.series("batt").v[0] == pytest.approx(log.series("batt").v[0])
         assert new.series("link").v.tolist() == [1, 0] and len(new.events) == len(log.events)
-
-
-def test_sample_with_reads_attribute(amap, tmp_path):
-    rec = recorder(amap, tmp_path)
-    for i in range(5):
-        t = i * 0.1
-        rec.feed(ReadSample(t + 0.05, T0, True, {}, [Read(t, 0, b"\x0c\x80"), Read(t + 0.03, 0x12, b"\x3c\x8d\x18\x17")]))
-    rec.feed(ReadSample(0.6, T0, False))
-    rec.stop()
-    with open_log(rec.path) as log:
-        assert "ecu" not in log.streams and log.series("rpm").v.tolist() == [800] * 5
-        assert log.series("link").v.tolist() == [1, 0] and log.streams["ecu/12+4"].raw.shape == (5, 4)
 
 
 def test_black_box_stream_shares_the_capture(amap, tmp_path):

@@ -7,13 +7,16 @@ rules by default) are evaluated on every feed; when a capture window closes
 it is cut out of the running log into its own file, with every stream that
 was being recorded at the time.
 
-Three ways to feed it:
+How it is fed (``hondalog.live.LiveSession`` does this wiring):
 
-    feed(sample)                 one poller sweep (the 0.1.0 ``Sample``)
-    feed_read(t, addr, data)     one K-line read with its own timestamp; the
-                                 raw bytes are stored next to the decoded values
+    feed_read(t, addr, data)     one K-line read with its own timestamp
+                                 (``Poller.on_block``); the raw bytes are
+                                 stored next to the decoded values
+    feed_link(t, up)             the ECU stopped or started answering
     feed_values(stream, t, {})   anything else on the session timebase:
-                                 black box frames, math channels, link stats
+                                 math channels, black box frames
+    feed(sample)                 one whole row of decoded values, for sources
+                                 that have no single reads (imports, tests)
 
 Old CSV logs still open: ``read_log`` takes any format ``open_log`` knows.
 """
@@ -26,7 +29,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from . import __version__
 from .data.container import EXTENSION, LogWriter
@@ -62,8 +65,8 @@ class CaptureEvent:
 StallEvent = CaptureEvent       # the 0.1.0 name
 
 
-def _column(ch: Any) -> Column:
-    """An address map channel as a log column."""
+def column_for(ch: Any) -> Column:
+    """An address map channel, math channel or black box channel as a log column."""
     return Column(ch.name, "f4", ch.units, ch.label if ch.label != ch.name else "",
                   ch.kind, ch.decimals, float(ch.min), float(ch.max))
 
@@ -93,10 +96,13 @@ class Recorder:
                  rules: Sequence[TriggerRule] | None = None, rotate_s: float | None = 3600.0,
                  rotate_mb: float | None = 64.0, retention: RetentionPolicy | None = None,
                  flush_interval: float = 0.5, fsync: bool = True, sync_captures: bool = False,
+                 epoch: datetime | None = None, meta: Mapping[str, Any] | None = None,
                  **stall_opts: Any):
         self.amap = amap
         self.out_dir = Path(out_dir) if out_dir else log_dir()
         self.started = datetime.now()
+        #: called with every Fired, on the feeding thread (LiveSession tells the black box)
+        self.on_fired: Callable[[Fired], None] | None = None
         self.rotate_s, self.rotate_mb = rotate_s, rotate_mb
         self.retention = retention
         self.sync_captures = sync_captures
@@ -115,12 +121,19 @@ class Recorder:
             "ecu_id": ecu_id or "(not read)",
             "port": port,
             "address_map_version": amap.version,
+            # version plus the hash of everything that decides a decoded value
+            "address_map_tag": getattr(amap, "version_tag", amap.version),
+            "address_map_hash": getattr(amap, "version_hash", ""),
+            "ecu_variant": getattr(amap, "variant", ""),
             "address_map_file": amap.path,
             "address_map_text": map_text,
             "unverified_channels": " ".join(c.name for c in amap.channels if not c.verified) or "none",
             "units": " ".join(f"{c.name}={c.units or '-'}" for c in amap.channels),
             "triggers": [r.to_dict() for r in rule_list],
         }
+        self.header.update(meta or {})
+        if epoch is not None:
+            self.header["epoch_unix"] = epoch.timestamp()
         self._names: list[str] = list(amap.names)
         self._unknown = {name: None for name in self._names}
         self._block_channels: dict[tuple[int, int], list[Any]] = {}
@@ -134,7 +147,7 @@ class Recorder:
         self._lock = threading.Lock()
         self._pending_markers: list[str] = []
         self._workers: list[threading.Thread] = []
-        self._epoch: datetime | None = None     # wall time of session time 0
+        self._epoch: datetime | None = epoch    # wall time of session time 0
         self._last_t = 0.0
         self._link: bool | None = None
         self.events: queue.Queue[CaptureEvent] = queue.Queue()
@@ -226,21 +239,14 @@ class Recorder:
     # -- poller thread --
 
     def feed(self, sample: Any) -> None:
-        """One poller sweep. If the sample carries per-read records (an
-        iterable ``reads`` of objects with ``t``, ``addr`` and ``data``), each
-        read is stored with its own timestamp and raw bytes."""
-        reads = getattr(sample, "reads", None)
+        """One row of decoded values for every channel (anything with ``t``,
+        ``link`` and ``values``). No raw bytes: such a log cannot be decoded
+        again. The live path uses ``feed_read`` instead."""
         with self._lock:
             if not self.active:
                 return
             self._begin(sample.t, getattr(sample, "wall", None))
-            if reads is not None:
-                for read in reads:
-                    self._read(read.t, read.addr, bytes(read.data))
-                self._set_link(sample.t, bool(sample.link))
-            else:
-                self._sweep(sample)
-            self._after(sample.t)
+            self._after(sample.t, self._sweep(sample))
 
     def feed_read(self, t: float, addr: int, data: bytes) -> None:
         """One K-line read: ``data`` is what the ECU returned for ``addr``."""
@@ -248,9 +254,9 @@ class Recorder:
             if not self.active:
                 return
             self._begin(t, None)
-            self._read(t, addr, bytes(data))
-            self._set_link(t, True)
-            self._after(t)
+            changed = self._read(t, addr, bytes(data))
+            changed.update(self._set_link(t, True))
+            self._after(t, changed)
 
     def feed_link(self, t: float, up: bool) -> None:
         """The link went up or down (no reply, port lost)."""
@@ -258,8 +264,7 @@ class Recorder:
             if not self.active:
                 return
             self._begin(t, None)
-            self._set_link(t, up)
-            self._after(t)
+            self._after(t, self._set_link(t, up))
 
     def feed_values(self, stream: str, t: float, values: Mapping[str, float | None], *,
                     source: str = "", columns: Sequence[Column] | None = None,
@@ -326,23 +331,20 @@ class Recorder:
         worker.start()
         self._workers.append(worker)
 
-    def _sweep(self, sample: Any) -> None:
+    def _sweep(self, sample: Any) -> dict[str, Any]:
         log = self._log
         if log.stream(ECU_STREAM) is None:
             cols = [Column(LINK, "u1", kind="flag", decimals=0)]
-            cols += [_column(c) for c in self.amap.channels]
+            cols += [column_for(c) for c in self.amap.channels]
             log.add_stream(ECU_STREAM, cols, source="ecu", attrs={"mode": "sweep"})
         values = sample.values
         log.append(ECU_STREAM, sample.t, [1 if sample.link else 0, *[values.get(n) for n in self._names]])
         self._link = bool(sample.link)
         if sample.link:
-            self._engine.values.update(values)
-            self._engine.values[LINK] = 1
-        else:
-            self._engine.values.update(self._unknown)
-            self._engine.values[LINK] = 0
+            return {**values, LINK: 1}
+        return {**self._unknown, LINK: 0}
 
-    def _read(self, t: float, addr: int, data: bytes) -> None:
+    def _read(self, t: float, addr: int, data: bytes) -> dict[str, Any]:
         key = (addr, len(data))
         channels = self._block_channels.get(key)
         if channels is None:
@@ -351,25 +353,26 @@ class Recorder:
         name = f"ecu/{addr:02X}+{len(data)}"
         log = self._log
         if log.stream(name) is None:
-            log.add_stream(name, [_column(c) for c in channels], source="ecu", raw_len=len(data),
+            log.add_stream(name, [column_for(c) for c in channels], source="ecu", raw_len=len(data),
                            attrs={"addr": addr, "length": len(data), "mode": "read"})
         values = [c.convert(data[c.addr - addr:c.addr - addr + c.length]) for c in channels]
         log.append(name, t, values, data)
-        self._engine.values.update(zip((c.name for c in channels), values))
+        return dict(zip((c.name for c in channels), values))
 
-    def _set_link(self, t: float, up: bool) -> None:
+    def _set_link(self, t: float, up: bool) -> dict[str, Any]:
+        """Log a link change. Returns what the trigger engine has to hear."""
         log = self._log
         if log.stream(LINK_STREAM) is None:
             log.add_stream(LINK_STREAM, [Column(LINK, "u1", kind="flag", decimals=0)], source="ecu")
             self._link = None
         if up != self._link or not up:
             log.append(LINK_STREAM, t, [1 if up else 0])
+        changed = up != self._link
         self._link = up
         if up:
-            self._engine.values[LINK] = 1
-        else:
-            self._engine.values.update(self._unknown)
-            self._engine.values[LINK] = 0
+            return {LINK: 1}
+        # every value is unknown from here on; say so once, not on every probe
+        return {**self._unknown, LINK: 0} if changed else {LINK: 0}
 
     def _after(self, t: float, values: Mapping[str, Any] | None = None) -> None:
         fired, done = self._engine.feed(t, values)
@@ -387,6 +390,11 @@ class Recorder:
     def _handle_fired(self, fired: Sequence[Fired]) -> None:
         for event in fired:
             rule = event.rule
+            if self.on_fired is not None:
+                try:
+                    self.on_fired(event)
+                except Exception:           # a listener must not stop the recording
+                    pass
             if "mark" in rule.actions:
                 self._log.event(event.t, "trigger", rule.label,
                                 {"rule": rule.name, "reason": rule.reason, "message": rule.message,

@@ -1,5 +1,6 @@
 """Command line tool for log files: ``hondalog-log`` (or ``python3 -m hondalog.logtool``).
 
+    hondalog-log record  --port PORT [options]   record without the GUI (the app's live path)
     hondalog-log info    FILE                    what is in a log
     hondalog-log import  FILE... [-o DIR]        old CSV / MSL / MLG -> native .hlog
     hondalog-log export  FILE OUT [options]      .mlg .msl .csv .npz .hlog
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from . import addressmap
@@ -25,6 +27,59 @@ from .data.redecode import redecode
 from .data.retention import RetentionPolicy
 from .export import FORMATS, export_log
 from .logger import log_dir
+
+
+def _record(args: argparse.Namespace) -> int:
+    """Headless recording through ``hondalog.live.LiveSession``: the same
+    path the app uses (per-read raw bytes, math channels, alarms, triggers,
+    optional black box)."""
+    from .live import LiveSession
+
+    amap = addressmap.load(args.map) if args.map else addressmap.load_user_map()
+    session = LiveSession(amap, out_dir=args.out)
+    poller = session.connect(args.port)
+    recorder = None
+    try:
+        poller.ready.wait(10)
+        if poller.ecu_id is None:
+            print(f"no reply from the ECU on {args.port} yet ({poller.last_error or 'key on?'}); "
+                  "recording anyway", file=sys.stderr)
+        if args.bb:
+            reader = session.open_blackbox(args.bb)
+            reader.ready.wait(4)
+            if reader.hello is None:
+                print(f"black box on {args.bb}: {reader.last_error or 'no hello'}", file=sys.stderr)
+        recorder = session.start_recording()
+        print(f"recording to {recorder.path}  (Ctrl-C to stop)")
+        end = time.monotonic() + args.seconds if args.seconds else None
+        shown = 0.0
+        while poller.is_alive() and (end is None or time.monotonic() < end):
+            time.sleep(0.1)
+            while session.frames:
+                frame = session.frames.popleft()
+                for event in frame.events:
+                    print(f"{frame.t:8.1f} s  {event.marker_text}")
+            while not recorder.notices.empty():
+                fired = recorder.notices.get_nowait()
+                print(f"{fired.t:8.1f} s  TRIGGER {fired.rule.label}: {fired.rule.message}")
+            while not recorder.events.empty():
+                print(f"            saved {recorder.events.get_nowait().path}")
+            if not args.quiet and time.monotonic() - shown >= 2.0:
+                shown = time.monotonic()
+                print(f"{session.now():8.1f} s  {poller.state:9s} {poller.hz:5.1f} Hz  "
+                      f"{recorder.rows} reads, {poller.errors} errors", flush=True)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        session.close()
+    if recorder is not None:
+        while not recorder.events.empty():
+            print(f"            saved {recorder.events.get_nowait().path}")
+        if recorder.write_error is not None:
+            print(f"hondalog-log: the log is incomplete: {recorder.write_error}", file=sys.stderr)
+            return 1
+        print(f"saved {recorder.path}  ({recorder.rows} reads, {recorder.markers} markers)")
+    return 0
 
 
 def _info(args: argparse.Namespace) -> int:
@@ -133,6 +188,15 @@ def _prune(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hondalog-log", description="hondalog log file tool")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("record", help="record from the ECU without the GUI")
+    p.add_argument("--port", required=True, help="serial device, or sim: for the built-in simulator")
+    p.add_argument("--bb", help="black box port (bbsim: for the built-in simulator)")
+    p.add_argument("--seconds", type=float, help="stop after this long (default: until Ctrl-C)")
+    p.add_argument("--map", help="address map TOML (default: your map)")
+    p.add_argument("-o", "--out", help="folder for the log and captures (default: ~/hondalog/logs)")
+    p.add_argument("-q", "--quiet", action="store_true", help="no progress lines")
+    p.set_defaults(fn=_record)
 
     p = sub.add_parser("info", help="show what is in a log")
     p.add_argument("file")
