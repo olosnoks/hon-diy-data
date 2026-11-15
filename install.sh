@@ -38,8 +38,8 @@ done
 
 echo "==> Copying hondalog to $PREFIX"
 sudo mkdir -p "$PREFIX"
-sudo rm -rf "$PREFIX/hondalog" "$PREFIX/bin" "$PREFIX/tests" "$PREFIX/tools"
-sudo cp -r "$SRC/hondalog" "$SRC/bin" "$SRC/tests" "$SRC/tools" "$SRC/README.md" \
+sudo rm -rf "$PREFIX/hondalog" "$PREFIX/bin" "$PREFIX/tests" "$PREFIX/tools" "$PREFIX/bench"
+sudo cp -r "$SRC/hondalog" "$SRC/bin" "$SRC/tests" "$SRC/tools" "$SRC/bench" "$SRC/README.md" \
            "$SRC/pyproject.toml" "$SRC/uninstall.sh" "$PREFIX/"
 sudo find "$PREFIX" -name __pycache__ -prune -exec rm -rf {} +
 sudo chmod -R a+rX "$PREFIX"
@@ -60,9 +60,10 @@ else
     fi
 fi
 
-echo "==> Commands: /usr/local/bin/hondalog, /usr/local/bin/hondalog-sim"
+echo "==> Commands: /usr/local/bin/hondalog, /usr/local/bin/hondalog-sim, /usr/local/bin/hondalog-log"
 sudo ln -sf "$PREFIX/bin/hondalog" /usr/local/bin/hondalog
 sudo ln -sf "$PREFIX/bin/hondalog-sim" /usr/local/bin/hondalog-sim
+sudo ln -sf "$PREFIX/bin/hondalog-log" /usr/local/bin/hondalog-log
 
 echo "==> udev rule: /dev/hondalog for the FTDI cable (0403:6001)"
 sudo install -m 644 "$SRC/packaging/99-hondalog.rules" /etc/udev/rules.d/99-hondalog.rules

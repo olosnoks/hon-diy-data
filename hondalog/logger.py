@@ -1,285 +1,447 @@
-"""CSV logging, the stall catcher, and reading logs back for replay.
+"""Recording: the running native log, the triggers and the captures they save.
 
-File format (logs and stall captures are the same):
+One ``Recorder`` is one recording session. It is fed on the poller thread
+and writes a ``.hlog`` file (see ``hondalog/data/container.py``) through a
+writer that never makes the caller wait for the disk. Triggers (the stall
+rules by default) are evaluated on every feed; when a capture window closes
+it is cut out of the running log into its own file, with every stream that
+was being recorded at the time.
 
-    # hondalog 0.1.0
-    # key: value                 <- header lines, one per fact
-    time_s,wall_time,link,rpm,...,marker
-    12.345,2026-11-16T08:01:02.123,1,752,...,
+Three ways to feed it:
+
+    feed(sample)                 one poller sweep (the 0.1.0 ``Sample``)
+    feed_read(t, addr, data)     one K-line read with its own timestamp; the
+                                 raw bytes are stored next to the decoded values
+    feed_values(stream, t, {})   anything else on the session timebase:
+                                 black box frames, math channels, link stats
+
+Old CSV logs still open: ``read_log`` takes any format ``open_log`` knows.
 """
 
 from __future__ import annotations
 
-import collections
-import csv
 import os
 import queue
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any, Mapping, Sequence
 
 from . import __version__
-from .poller import Sample
+from .data.container import EXTENSION, LogWriter
+from .data.model import Column
+from .data.reader import open_log
+from .data.retention import RetentionPolicy
+from .data.store import extract_window
+from .triggers import MANUAL, Capture, Fired, TriggerEngine, TriggerRule, default_rules
 
-FIXED_COLS = ("time_s", "wall_time", "link")
-MARKER_COL = "marker"
+LINK = "link"
+ECU_STREAM = "ecu"
+LINK_STREAM = "ecu/link"
 
 
 def log_dir() -> Path:
     return Path(os.environ.get("HONDALOG_DIR") or os.path.expanduser("~/hondalog/logs"))
 
 
-def _row(sample: Sample, names, marker: str) -> list:
-    row = [f"{sample.t:.3f}", sample.wall.isoformat(timespec="milliseconds"),
-           1 if sample.link else 0]
-    for name in names:
-        value = sample.values.get(name)
-        row.append("" if value is None else f"{value:.4g}" if abs(value) < 1e5 else f"{value:.0f}")
-    row.append(marker)
-    return row
-
-
-def write_csv(path: Path, names, header: dict, rows) -> None:
-    """Write a whole file at once. rows = iterable of (Sample, marker)."""
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        _write_header(fh, names, header)
-        w = csv.writer(fh)
-        for sample, marker in rows:
-            w.writerow(_row(sample, names, marker))
-
-
-def _write_header(fh, names, header: dict) -> None:
-    fh.write(f"# hondalog {__version__}\n")
-    for key, value in header.items():
-        fh.write(f"# {key}: {str(value).replace(chr(10), ' ')}\n")
-    csv.writer(fh).writerow([*FIXED_COLS, *names, MARKER_COL])
-
-
-class CsvLogger:
-    """Appends one row per sample. Line-buffered: a crash loses one row at most."""
-
-    def __init__(self, path: Path, names, header: dict):
-        self.path = Path(path)
-        self.names = list(names)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = open(self.path, "w", newline="", encoding="utf-8", buffering=1)
-        _write_header(self._fh, self.names, header)
-        self._csv = csv.writer(self._fh)
-        self.rows = 0
-
-    def write(self, sample: Sample, marker: str = "") -> None:
-        self._csv.writerow(_row(sample, self.names, marker))
-        self.rows += 1
-
-    def close(self) -> None:
-        if not self._fh.closed:
-            self._fh.close()
-
-
 @dataclass
-class StallEvent:
+class CaptureEvent:
+    """A capture file was written. ``reason`` is the rule's short code:
+    "rpm" and "link" for the two stall rules."""
+
     path: Path
-    reason: str             # "rpm" or "link"
-    t: float                # sample time of the trigger
+    reason: str
+    t: float                # session time of the (first) trigger
     rows: int
+    rule: str = ""
+    label: str = ""
+    message: str = ""
 
 
-class StallCatcher:
-    """Keeps the last ``pre_s`` seconds; on a stall saves them plus ``post_s``.
+StallEvent = CaptureEvent       # the 0.1.0 name
 
-    Triggers once the engine has been seen running (RPM above ``rpm_run``):
-      * "rpm":  RPM reads below ``rpm_zero``
-      * "link": no valid reply for ``link_down_s`` (ECU lost power, cable out)
-    It re-arms when RPM goes above ``rpm_run`` again.
-    """
 
-    def __init__(self, out_dir: Path, names, header: dict, rpm_channel: str = "rpm",
-                 pre_s: float = 30.0, post_s: float = 10.0, rpm_run: float = 400.0,
-                 rpm_zero: float = 50.0, link_down_s: float = 1.0):
-        self.out_dir = Path(out_dir)
-        self.names = list(names)
-        self.header = dict(header)
-        self.rpm_channel = rpm_channel
-        self.pre_s, self.post_s = pre_s, post_s
-        self.rpm_run, self.rpm_zero, self.link_down_s = rpm_run, rpm_zero, link_down_s
-        self._ring: collections.deque = collections.deque()
-        self._armed = False
-        self._link_lost_at: float | None = None
-        self._capture: list | None = None       # rows being collected after a trigger
-        self._trigger: tuple[str, float, datetime] | None = None
+def _column(ch: Any) -> Column:
+    """An address map channel as a log column."""
+    return Column(ch.name, "f4", ch.units, ch.label if ch.label != ch.name else "",
+                  ch.kind, ch.decimals, float(ch.min), float(ch.max))
 
-    @property
-    def capturing(self) -> bool:
-        return self._capture is not None
 
-    def feed(self, sample: Sample, marker: str = "") -> tuple[str | None, StallEvent | None]:
-        """Returns (trigger_reason_or_None, finished_capture_or_None)."""
-        if self._capture is not None:
-            self._capture.append((sample, marker))
-            if sample.t - self._trigger[1] >= self.post_s:
-                return None, self.finish()
-            return None, None
-
-        self._ring.append((sample, marker))
-        while self._ring and sample.t - self._ring[0][0].t > self.pre_s:
-            self._ring.popleft()
-
-        reason = None
-        rpm = sample.values.get(self.rpm_channel) if sample.link else None
-        if sample.link:
-            self._link_lost_at = None
-            if rpm is not None and rpm > self.rpm_run:
-                self._armed = True
-            elif rpm is not None and rpm < self.rpm_zero and self._armed:
-                reason = "rpm"
-        else:
-            if self._link_lost_at is None:
-                self._link_lost_at = sample.t
-            if self._armed and sample.t - self._link_lost_at >= self.link_down_s:
-                reason = "link"
-        if reason:
-            self._armed = False
-            self._trigger = (reason, sample.t, sample.wall)
-            self._capture = list(self._ring)
-            self._ring.clear()
-        return reason, None
-
-    def finish(self) -> StallEvent | None:
-        """Write the capture now (also called when recording stops early)."""
-        if self._capture is None:
-            return None
-        reason, t, wall = self._trigger
-        rows, self._capture, self._trigger = self._capture, None, None
-        self.out_dir.mkdir(parents=True, exist_ok=True)
-        path = self.out_dir / f"stall_{wall:%Y%m%d_%H%M%S}.csv"
-        header = dict(self.header)
-        header["stall_trigger"] = ("rpm dropped to 0" if reason == "rpm"
-                                   else "link lost (no reply from ECU)")
-        header["stall_time_s"] = f"{t:.3f}"
-        header["stall_wall_time"] = wall.isoformat(timespec="milliseconds")
-        header["window"] = f"{self.pre_s:g} s before, {self.post_s:g} s after"
-        write_csv(path, self.names, header, rows)
-        return StallEvent(path, reason, t, len(rows))
+def _unique(path: Path) -> Path:
+    n, out = 2, path
+    while out.exists():
+        out = path.with_name(f"{path.stem}_{n}{path.suffix}")
+        n += 1
+    return out
 
 
 class Recorder:
-    """One recording session: the running CSV log plus the stall catcher.
+    """One recording session: the native log, the trigger engine, the captures.
 
-    ``feed`` is called on the poller thread, ``mark``/``stop`` on the UI
-    thread. Finished stall captures appear on ``events``.
+    ``feed*`` are called on the poller thread; ``mark``, ``note``, ``trigger``
+    and ``stop`` on the UI thread. Finished captures appear on ``events``;
+    every rule firing appears at once on ``notices`` (for a banner or a beep
+    before the capture's post-window is over).
+
+    ``stall_opts`` (pre_s, post_s, rpm_run, rpm_zero, link_down_s,
+    rpm_channel) tune the built-in stall rules; pass ``rules`` to replace the
+    whole rule list.
     """
 
-    def __init__(self, amap, ecu_id: str = "", port: str = "", out_dir: Path | None = None,
-                 **stall_opts):
+    def __init__(self, amap: Any, ecu_id: str = "", port: str = "", out_dir: Path | None = None, *,
+                 rules: Sequence[TriggerRule] | None = None, rotate_s: float | None = 3600.0,
+                 rotate_mb: float | None = 64.0, retention: RetentionPolicy | None = None,
+                 flush_interval: float = 0.5, fsync: bool = True, sync_captures: bool = False,
+                 **stall_opts: Any):
+        self.amap = amap
         self.out_dir = Path(out_dir) if out_dir else log_dir()
         self.started = datetime.now()
-        self.header = {
+        self.rotate_s, self.rotate_mb = rotate_s, rotate_mb
+        self.retention = retention
+        self.sync_captures = sync_captures
+        self._writer_opts: dict[str, Any] = {"flush_interval": flush_interval, "fsync": fsync}
+        rule_list = list(rules) if rules is not None else default_rules(**stall_opts)
+        try:
+            map_text = Path(amap.path).read_text(encoding="utf-8") if amap.path else ""
+        except OSError:
+            map_text = ""
+        self.header: dict[str, Any] = {
+            "format": f"hondalog {__version__}",
             "started": self.started.isoformat(timespec="seconds"),
+            "started_unix": self.started.timestamp(),
+            "timebase": "seconds since connect (monotonic)",
             "ecu": amap.ecu,
             "ecu_id": ecu_id or "(not read)",
             "port": port,
             "address_map_version": amap.version,
             "address_map_file": amap.path,
+            "address_map_text": map_text,
             "unverified_channels": " ".join(c.name for c in amap.channels if not c.verified) or "none",
             "units": " ".join(f"{c.name}={c.units or '-'}" for c in amap.channels),
+            "triggers": [r.to_dict() for r in rule_list],
         }
-        names = amap.names
-        self.path = self.out_dir / f"log_{self.started:%Y%m%d_%H%M%S}.csv"
-        self._log = CsvLogger(self.path, names, self.header)
-        self._stall = StallCatcher(self.out_dir, names, self.header, **stall_opts)
+        self._names: list[str] = list(amap.names)
+        self._unknown = {name: None for name in self._names}
+        self._block_channels: dict[tuple[int, int], list[Any]] = {}
+        self._custom: dict[str, list[str]] = {}
+
+        self.paths: list[Path] = []
+        self._part = 0
+        self._part_t0: float | None = None
+        self._log = self._open_part()
+        self._engine = TriggerEngine(rule_list)
         self._lock = threading.Lock()
-        self._pending_marker = ""
-        self.events: queue.Queue = queue.Queue()
+        self._pending_markers: list[str] = []
+        self._workers: list[threading.Thread] = []
+        self._epoch: datetime | None = None     # wall time of session time 0
+        self._last_t = 0.0
+        self._link: bool | None = None
+        self.events: queue.Queue[CaptureEvent] = queue.Queue()
+        self.notices: queue.Queue[Fired] = queue.Queue()
         self.markers = 0
+        self.rows = 0               # sweeps or reads fed so far
         self.active = True
 
+    # -- properties --
+
     @property
-    def rows(self) -> int:
-        return self._log.rows
+    def path(self) -> Path:
+        """The file being written now (the last part of a rotated recording)."""
+        return self.paths[-1]
+
+    @property
+    def rules(self) -> list[TriggerRule]:
+        return self._engine.rules
+
+    @property
+    def capturing(self) -> bool:
+        return self._engine.capturing
+
+    @property
+    def write_error(self) -> Exception | None:
+        """The last disk error, if the log could not be written."""
+        return self._log.error
+
+    # -- UI thread --
 
     def mark(self, text: str = "MARK") -> None:
-        """Tag the next row. Called on a keypress."""
+        """Drop a marker. It gets the time of the next thing fed."""
         with self._lock:
-            self._pending_marker = (self._pending_marker + " | " + text
-                                    if self._pending_marker else text)
+            self._pending_markers.append(text)
             self.markers += 1
 
-    def feed(self, sample: Sample) -> None:
+    def note(self, text: str) -> None:
+        """A free-text note at the current time (shown in the event list, not as a marker)."""
         with self._lock:
-            if not self.active:
-                return
-            marker, self._pending_marker = self._pending_marker, ""
-            reason, event = self._stall.feed(sample, marker)
-            if reason:
-                # put the tag on the trigger row in both files
-                tag = "STALL (rpm 0)" if reason == "rpm" else "STALL (link lost)"
-                marker = f"{marker} | {tag}" if marker else tag
-                self._stall._capture[-1] = (sample, marker)
-            self._log.write(sample, marker)
-            if event:
-                self.events.put(event)
+            if self.active:
+                self._log.event(self._last_t, "note", text)
+
+    def set_meta(self, **items: Any) -> None:
+        """Add facts to the log header: DTCs, a freeze frame, expert-unlock, notes, tags."""
+        with self._lock:
+            if self.active:
+                self.header.update(items)
+                self._log.set_meta(**items)
+
+    def event(self, kind: str, text: str = "", data: Mapping[str, Any] | None = None,
+              t: float | None = None) -> None:
+        """Record an event of any kind ("alarm", "dtc", "link", ...)."""
+        with self._lock:
+            if self.active:
+                self._log.event(self._last_t if t is None else t, kind, text, data)
+
+    def trigger(self, rule: TriggerRule | str = MANUAL, t: float | None = None) -> None:
+        """Start a capture by hand, from an alarm, or from a black box trigger."""
+        with self._lock:
+            if self.active:
+                self._handle_fired([self._engine.fire(rule, self._last_t if t is None else t)])
 
     def stop(self) -> None:
         with self._lock:
             if not self.active:
                 return
             self.active = False
-            event = self._stall.finish()
-            if event:
-                self.events.put(event)
-            self._log.close()
+            capture = self._engine.finish()
+            try:
+                self._log.close()
+            except OSError:
+                pass
+            if capture is not None:
+                self._save_capture(capture, list(self.paths[-2:]))
+        for worker in self._workers:
+            worker.join()
+        if self.retention is not None:
+            self.retention.apply(self.out_dir)
+
+    # -- poller thread --
+
+    def feed(self, sample: Any) -> None:
+        """One poller sweep. If the sample carries per-read records (an
+        iterable ``reads`` of objects with ``t``, ``addr`` and ``data``), each
+        read is stored with its own timestamp and raw bytes."""
+        reads = getattr(sample, "reads", None)
+        with self._lock:
+            if not self.active:
+                return
+            self._begin(sample.t, getattr(sample, "wall", None))
+            if reads is not None:
+                for read in reads:
+                    self._read(read.t, read.addr, bytes(read.data))
+                self._set_link(sample.t, bool(sample.link))
+            else:
+                self._sweep(sample)
+            self._after(sample.t)
+
+    def feed_read(self, t: float, addr: int, data: bytes) -> None:
+        """One K-line read: ``data`` is what the ECU returned for ``addr``."""
+        with self._lock:
+            if not self.active:
+                return
+            self._begin(t, None)
+            self._read(t, addr, bytes(data))
+            self._set_link(t, True)
+            self._after(t)
+
+    def feed_link(self, t: float, up: bool) -> None:
+        """The link went up or down (no reply, port lost)."""
+        with self._lock:
+            if not self.active:
+                return
+            self._begin(t, None)
+            self._set_link(t, up)
+            self._after(t)
+
+    def feed_values(self, stream: str, t: float, values: Mapping[str, float | None], *,
+                    source: str = "", columns: Sequence[Column] | None = None,
+                    evaluate: bool = True) -> None:
+        """One row of any other stream on the session timebase. The stream's
+        columns are fixed by the first call (``columns``, or the keys of
+        ``values`` as 32-bit floats)."""
+        with self._lock:
+            if not self.active:
+                return
+            self._begin(t, None)
+            names = self._custom.get(stream)
+            if names is None:
+                cols = list(columns) if columns is not None else [Column(n) for n in values]
+                self._log.add_stream(stream, cols, source=source or stream.split("/")[0])
+                names = self._custom[stream] = [c.name for c in cols]
+            self._log.append(stream, t, [values.get(n) for n in names])
+            if evaluate:
+                self._after(t, values)
+
+    # -- internals (lock held) --
+
+    def _open_part(self) -> LogWriter:
+        self._part += 1
+        stem = f"log_{self.started:%Y%m%d_%H%M%S}"
+        if self._part > 1:
+            stem += f"_p{self._part:03d}"
+        path = _unique(self.out_dir / (stem + EXTENSION))
+        meta = dict(self.header, part=self._part)
+        if self.paths:
+            meta["previous_part"] = self.paths[-1].name
+        writer = LogWriter(path, meta, **self._writer_opts)
+        self.paths.append(path)
+        self._part_t0 = None
+        self._custom = {}
+        return writer
+
+    def _begin(self, t: float, wall: datetime | None) -> None:
+        if self._epoch is None:
+            self._epoch = (wall or datetime.now()) - timedelta(seconds=t)
+        if self._part_t0 is None:
+            self._part_t0 = t
+        elif not self._engine.capturing and (
+                (self.rotate_s and t - self._part_t0 >= self.rotate_s)
+                or (self.rotate_mb and self._log.bytes_written >= self.rotate_mb * 1e6)):
+            self._rotate()
+            self._part_t0 = t
+        if self._pending_markers:
+            for text in self._pending_markers:
+                self._log.event(t, "marker", text)
+            self._pending_markers.clear()
+        self._last_t = t
+        self.rows += 1
+
+    def _rotate(self) -> None:
+        old = self._log
+        old.flush()                     # rows reach the file now; the index follows below
+        self._log = self._open_part()
+        worker = threading.Thread(target=old.close, name="hondalog-rotate", daemon=True)
+        worker.start()
+        self._workers.append(worker)
+
+    def _sweep(self, sample: Any) -> None:
+        log = self._log
+        if log.stream(ECU_STREAM) is None:
+            cols = [Column(LINK, "u1", kind="flag", decimals=0)]
+            cols += [_column(c) for c in self.amap.channels]
+            log.add_stream(ECU_STREAM, cols, source="ecu", attrs={"mode": "sweep"})
+        values = sample.values
+        log.append(ECU_STREAM, sample.t, [1 if sample.link else 0, *[values.get(n) for n in self._names]])
+        self._link = bool(sample.link)
+        if sample.link:
+            self._engine.values.update(values)
+            self._engine.values[LINK] = 1
+        else:
+            self._engine.values.update(self._unknown)
+            self._engine.values[LINK] = 0
+
+    def _read(self, t: float, addr: int, data: bytes) -> None:
+        key = (addr, len(data))
+        channels = self._block_channels.get(key)
+        if channels is None:
+            channels = self._block_channels[key] = [
+                c for c in self.amap.channels if addr <= c.addr and c.addr + c.length <= addr + len(data)]
+        name = f"ecu/{addr:02X}+{len(data)}"
+        log = self._log
+        if log.stream(name) is None:
+            log.add_stream(name, [_column(c) for c in channels], source="ecu", raw_len=len(data),
+                           attrs={"addr": addr, "length": len(data), "mode": "read"})
+        values = [c.convert(data[c.addr - addr:c.addr - addr + c.length]) for c in channels]
+        log.append(name, t, values, data)
+        self._engine.values.update(zip((c.name for c in channels), values))
+
+    def _set_link(self, t: float, up: bool) -> None:
+        log = self._log
+        if log.stream(LINK_STREAM) is None:
+            log.add_stream(LINK_STREAM, [Column(LINK, "u1", kind="flag", decimals=0)], source="ecu")
+            self._link = None
+        if up != self._link or not up:
+            log.append(LINK_STREAM, t, [1 if up else 0])
+        self._link = up
+        if up:
+            self._engine.values[LINK] = 1
+        else:
+            self._engine.values.update(self._unknown)
+            self._engine.values[LINK] = 0
+
+    def _after(self, t: float, values: Mapping[str, Any] | None = None) -> None:
+        fired, done = self._engine.feed(t, values)
+        self._handle_fired(fired)
+        if done is not None:
+            paths = list(self.paths[-2:])
+            if self.sync_captures:
+                self._save_capture(done, paths)
+            else:
+                worker = threading.Thread(target=self._save_capture, args=(done, paths),
+                                          name="hondalog-capture", daemon=True)
+                worker.start()
+                self._workers = [w for w in self._workers if w.is_alive()] + [worker]
+
+    def _handle_fired(self, fired: Sequence[Fired]) -> None:
+        for event in fired:
+            rule = event.rule
+            if "mark" in rule.actions:
+                self._log.event(event.t, "trigger", rule.label,
+                                {"rule": rule.name, "reason": rule.reason, "message": rule.message,
+                                 "severity": rule.severity})
+            if "notify" in rule.actions:
+                self.notices.put(event)
+
+    def _wall(self, t: float) -> datetime:
+        return (self._epoch or self.started) + timedelta(seconds=t)
+
+    def _save_capture(self, capture: Capture, sources: Sequence[Path]) -> None:
+        """Cut the capture window out of the running log (worker thread)."""
+        first = capture.first
+        rule = first.rule
+        wall = self._wall(first.t)
+        meta = {
+            "capture_of": sources[-1].name,
+            "trigger": rule.name,
+            "trigger_reason": rule.reason,
+            "trigger_message": rule.message,
+            "trigger_time_s": f"{first.t:.3f}",
+            "trigger_wall_time": wall.isoformat(timespec="milliseconds"),
+            "triggers_fired": [{"rule": f.rule.name, "t": round(f.t, 3)} for f in capture.fired],
+            "window": f"{rule.pre_s:g} s before, {rule.post_s:g} s after",
+            "window_complete": capture.complete,
+            # the 0.1.0 names, which the replay tab and old scripts look for
+            "stall_trigger": rule.message,
+            "stall_time_s": f"{first.t:.3f}",
+            "stall_wall_time": wall.isoformat(timespec="milliseconds"),
+        }
+        try:
+            if not self._log.closed:
+                self._log.flush()
+            self.out_dir.mkdir(parents=True, exist_ok=True)
+            path = _unique(self.out_dir / f"{rule.kind}_{wall:%Y%m%d_%H%M%S}{EXTENSION}")
+            _, rows = extract_window([p for p in sources if p.exists()], path,
+                                     capture.t_start, capture.t_end, meta)
+        except (OSError, ValueError) as exc:
+            self._log.error = exc
+            return
+        self.events.put(CaptureEvent(path, rule.reason, first.t, rows, rule.name, rule.label, rule.message))
 
 
-# ---- reading ----------------------------------------------------------------
+# ---- reading (the shape the 0.1.0 replay tab uses) --------------------------
 
 @dataclass
 class LogData:
+    """A log flattened onto one time grid: what the replay tab draws."""
+
     path: Path
     meta: dict = field(default_factory=dict)
     names: list = field(default_factory=list)
-    t: object = None                    # numpy array of seconds
+    t: Any = None                                   # numpy array of seconds
     data: dict = field(default_factory=dict)        # name -> numpy array (NaN = missing)
     markers: list = field(default_factory=list)     # (time_s, text)
 
 
-def read_log(path) -> LogData:
-    import numpy as np
+def read_log(path: str | os.PathLike) -> LogData:
+    """Open any supported log (.hlog, old .csv, .msl, .mlg) as one flat table.
 
-    log = LogData(Path(path))
-    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
-        body = []
-        for line in fh:
-            if line.startswith("#"):
-                key, sep, value = line[1:].partition(":")
-                if sep:
-                    log.meta[key.strip()] = value.strip()
-                else:
-                    log.meta.setdefault("format", line[1:].strip())
-            elif line.strip():
-                body.append(line)
-    rows = list(csv.reader(body))
-    if not rows:
-        raise ValueError(f"{path}: no data")
-    cols = rows[0]
-    if "time_s" not in cols:
-        raise ValueError(f"{path}: not a hondalog CSV (no time_s column)")
-    ti = cols.index("time_s")
-    mi = cols.index(MARKER_COL) if MARKER_COL in cols else None
-    skip = {"time_s", "wall_time", MARKER_COL}
-    log.names = [c for c in cols if c not in skip]
-    idx = {name: cols.index(name) for name in log.names}
-
-    def num(row, i):
-        try:
-            return float(row[i])
-        except (ValueError, IndexError):
-            return float("nan")
-
-    rows = [r for r in rows[1:] if r and num(r, ti) == num(r, ti)]
-    log.t = np.array([num(r, ti) for r in rows], dtype=float)
-    for name, i in idx.items():
-        log.data[name] = np.array([num(r, i) for r in rows], dtype=float)
-    if mi is not None:
-        log.markers = [(num(r, ti), r[mi]) for r in rows if len(r) > mi and r[mi]]
-    return log
+    Channels read at different rates are put on the grid of the densest one.
+    New code should use ``hondalog.data.open_log`` and keep the real rates.
+    """
+    with open_log(path) as log:
+        if not log.channels or log.rows == 0:
+            raise ValueError(f"{path}: no data")
+        table = log.table()
+        meta = {k: v if isinstance(v, str) else str(v) for k, v in log.meta.items()
+                if k != "address_map_text"}
+        return LogData(Path(path), meta, list(table.names), table.t, dict(table.columns),
+                       list(log.markers))

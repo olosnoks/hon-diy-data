@@ -1,0 +1,6 @@
+#!/bin/sh
+# Log file tool: info, import, export, repair, report, prune. See: hondalog-log --help
+HERE=$(dirname "$(readlink -f "$0")")/..
+PY=python3
+[ -x "$HERE/.venv/bin/python" ] && PY="$HERE/.venv/bin/python"
+PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m hondalog.logtool "$@"
