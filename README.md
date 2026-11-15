@@ -9,16 +9,18 @@ It reads ECU RAM with the Honda diagnostic protocol on the K-line
 log (`.hlog`), and saves a separate capture when the engine stalls or another
 trigger fires. Logs export to MegaLogViewer (`.mlg`, `.msl`) and CSV.
 
-![all sensors, daylight theme](docs/screenshots/sensors-daylight.png)
+![All sensors on the simulated ECU: 24 ECU slots, the black box, math channels](docs/screenshots/sim-sensors.png)
 
-*Above: the working 0.1.0 app. Below: the 1.0 UI design that the rebuild targets.*
+*Above: the app on the simulated ECU. Every picture below is the app
+itself at 1366x768 (`tools/screenshots.py`, demo data), with the design
+mockup it was built from beside it.*
 
-## UI design (1.0, in progress)
+## The 1.0 UI
 
-Mockups at the T430's native 1366x768, rendered from the
-[interactive design](https://claude.ai/artifact/UZP8DiarTkdK1RWKmk7vSS)
-(fake data). The full spec for the Qt build is in
-[docs/design/HANDOFF.md](docs/design/HANDOFF.md).
+Designed at the T430's native 1366x768 from the
+[interactive design](https://claude.ai/artifact/UZP8DiarTkdK1RWKmk7vSS);
+the spec is in [docs/design/HANDOFF.md](docs/design/HANDOFF.md). The
+mockups use fake data; the screenshots are the Qt build.
 
 The default is the Daylight theme, black on white, because a TN panel in
 sun loses its blacks first. Night is white on true black for dusk and the
@@ -26,31 +28,64 @@ garage, and F9 switches between them. All text meets 7:1 contrast or
 better. Warning states use a shape as well as a colour, so they read
 without colour vision.
 
-### All sensors on one screen: 24 ECU + 8 black-box channels
-![All sensors, daylight](docs/mockups/sensors-daylight.png)
-![All sensors, night](docs/mockups/sensors-night.png)
+### All sensors on one screen: 24 ECU + 8 black-box channels, then math channels
+
+| app | mockup |
+|---|---|
+| ![Sensors, daylight](docs/screenshots/sensors-daylight.png) | ![mockup](docs/mockups/sensors-daylight.png) |
+| ![Sensors, night](docs/screenshots/sensors-night.png) | ![mockup](docs/mockups/sensors-night.png) |
 
 ### Driving view
-![Driving view, daylight](docs/mockups/drive-daylight.png)
-![Driving view, night](docs/mockups/drive-night.png)
+
+| app | mockup |
+|---|---|
+| ![Drive, daylight](docs/screenshots/drive-daylight.png) | ![mockup](docs/mockups/drive-daylight.png) |
+| ![Drive, night](docs/screenshots/drive-night.png) | ![mockup](docs/mockups/drive-night.png) |
 
 ### 3D observed map: RPM x MAP, live operating point and trail
+
 Built from your own logs, so it works on the stock P2P before any chip.
-The other modes are time-in-cell bars and stall approach paths.
-![Map 3D, night](docs/mockups/map3d-night.png)
-![Map 3D, daylight](docs/mockups/map3d-daylight.png)
+The other modes are time-in-cell bars and stall approach paths. With a ROM
+open (`--rom`), the cells are the fuel table's own cells.
+
+| app | mockup |
+|---|---|
+| ![Map 3D, night](docs/screenshots/map3d-night.png) | ![mockup](docs/mockups/map3d-night.png) |
+| ![Map 3D, daylight](docs/screenshots/map3d-daylight.png) | ![mockup](docs/mockups/map3d-daylight.png) |
+
+![Time in cell](docs/screenshots/map3d-hist-daylight.png)
+![Stall paths](docs/screenshots/map3d-stall-daylight.png)
 
 ### Stall forensics replay: ECU and black box on one timeline
-![Stall forensics replay](docs/mockups/replay-stall-forensics.png)
+
+| app | mockup |
+|---|---|
+| ![Replay](docs/screenshots/replay-daylight.png) | ![mockup](docs/mockups/replay-stall-forensics.png) |
+
+A stall caught on the simulated ECU, banner and capture opened in Replay:
+
+![Stall banner](docs/screenshots/sim-stall-banner.png)
+![The capture in Replay](docs/screenshots/sim-replay.png)
 
 ### Raw tools and guided memory mapper
-![Raw tools and mapper](docs/mockups/raw-tools-mapper.png)
+
+| app | mockup |
+|---|---|
+| ![Raw tools](docs/screenshots/rawtools-daylight.png) | ![mockup](docs/mockups/raw-tools-mapper.png) |
+
+![Raw tools on the simulated ECU](docs/screenshots/sim-rawtools.png)
 
 ### Tuning table editor (chipped P28)
-![Tuning table editor](docs/mockups/tune-table-p28.png)
+
+| app | mockup |
+|---|---|
+| ![Tune](docs/screenshots/tune-daylight.png) | ![mockup](docs/mockups/tune-table-p28.png) |
 
 ### Status bar and alarm states
-![Alarm states](docs/mockups/alarms-states.png)
+
+| app | mockup |
+|---|---|
+| ![Alarms](docs/screenshots/alarms-daylight.png) | ![mockup](docs/mockups/alarms-states.png) |
 
 **Read this first:** the address map is a guess. It is the kerpz P2T map,
 and nobody has checked it on a P2P. Every channel shows an amber `?` until
@@ -214,14 +249,35 @@ side lists what left its normal range first.
 **Raw tools (F5).** S sweeps all 256 bytes and keeps going. Yellow = changed
 in the last sweep, underlined = changed earlier, dashed = in the address
 map but unverified. Arrows move the selected byte; the inspector shows its
-bits and history. The hex console sends raw frames (Enter). The guided
-mapper (N next, B back) ranks bytes by how well they follow three timed
-presses of whatever you are looking for.
+bits and history. The hex console sends raw frames (Enter). It is
+read-only: only read requests (`20 05 addr len cksum`) go out, anything
+else is refused until you tick **Expert**, and every frame sent that way is
+written into the log header. The guided mapper (N next, B back) runs one of
+the verification scripts from "Mapping the P2P" on the channel you pick:
+it tells you what to do, judges the recorded data, and on a pass writes
+`status = "verified"` and the evidence into your address map. When the
+check fails it lists the addresses that did behave as expected.
 
-**Tune (F6).** Table grid with a 3D surface beside it. Read-only sample
-tables until the chipped P28 and the ROM tools are in.
+**Tune (F6).** Table grid with a 3D surface beside it. Start with
+`hondalog --rom tuned.bin --definition p28.toml` (or `.xdf`) to edit a ROM:
+edits go through the ROM session's undo, "Save .bin" writes a new image
+with the checksum fixed, and the live cursor follows RPM and MAP. Without
+a ROM, or if it cannot be read, the read-only sample tables are shown.
 
-**Alarms (F7).** The shape key, the live alarm list and the limits.
+**Alarms (F7).** The shape key, the live alarm list and the limits. The
+alarms are the `[[alarm]]` rules in the address map; the black box rails
+have fixed limits (below 11 V).
+
+**ECU chip menu.** Port list, record on connect, the link's health (reads
+per second per rate class against target, share of the wire used,
+timeouts, checksum errors, retries) and, while disconnected, **Run first
+contact**: the same sequence as `hondalog-firstcontact`, with the verdict
+in the status line and the report in the log folder.
+
+**Sensor tiles.** Right-click, "Mark verified" writes the mark to
+`~/.config/hondalog/addressmap.toml` (method "manual"). Rad fan and Fuel
+pump are placeholders until the map has channels named `fan` and
+`fuel_pump`.
 
 `hondalog --profile` shows frame time, CPU and latency in the bottom bar.
 `tools/bench_ui.py` measures the same per screen (see docs/ui-adapters.md).
@@ -316,9 +372,13 @@ compare two values, so the time-window versions are spelled `minw`/`maxw`.
 Nothing in an expression is run as Python: the text is parsed into a small
 tree and only the listed functions exist.
 
-For now the app shows the top alarm at the bottom of the window (click it to
-acknowledge) and writes alarm markers into the log. Math channels are computed
-but the dashboard does not display them until the new UI lands.
+Math channels are their own group on the Sensors screen and a `math` stream
+in every log. An alarm colours its tile, shows in the bottom strip (Esc
+acknowledges) and is written into the log; `"marker"` in its `actions` drops
+a marker and `"capture"` saves a capture around it, like a stall.
+
+Trigger rules (`hondalog/triggers/`) use the same expressions, including
+the ones with history: `when = "rate(rpm) < -1500 and rpm > 300"`.
 
 Temperatures are in °C, pressure in kPa, speed in km/h in the map and in logs.
 `hondalog/units.py` converts for display (°F, psi, inHg, mph, AFR).
@@ -383,6 +443,7 @@ for sweeps where nothing valid came back.
 ## Log files from the command line
 
 ```sh
+hondalog-log record  --port sim: --seconds 30   # record without the window (add --bb PORT)
 hondalog-log info    FILE                 # streams, rates, markers, header
 hondalog-log import  old_log.csv          # 0.1.0 CSV, MSL or MLG -> .hlog
 hondalog-log export  FILE out.mlg         # also .msl .csv .npz .hlog
@@ -398,9 +459,12 @@ MLG files follow EFI Analytics' published MLG 2.0 layout and are checked
 byte by byte in the tests. Nobody has opened one in MegaLogViewer from this
 project yet. Parquet is not offered: Debian trixie has no `python3-pyarrow`.
 
-`redecode` needs a log that holds raw bytes. Those are stored when the
-poller hands over single reads (`Recorder.feed_read`); a log recorded sweep
-by sweep has decoded values only.
+`redecode` needs a log that holds raw bytes. Everything recorded by the
+app or by `hondalog-log record` does: every K-line read is stored with its
+own timestamp and the bytes the ECU sent. Logs imported from CSV, MSL or
+MLG have decoded values only. The header also carries the address map's
+version and decode hash, the link's counters, and any frame sent with the
+expert unlock.
 ## Black box (Track B)
 
 A K-line log cannot show a millisecond power dropout: the ECU just stops
@@ -453,9 +517,16 @@ cd firmware/blackbox && pio run -t upload
 **Other commands:** `hondalog-bb list`, `config [--set key=value] [--save]`,
 `selftest`, `csv FILE`, `cal RAIL --low METER SHOWN --high METER SHOWN`.
 
-**Not done yet:** the live black box channels are not on the dashboard (the
-UI is being redesigned; the API it needs is `hondalog.blackbox.BlackboxReader`,
-documented in `hondalog/blackbox/__init__.py`). No Wi-Fi download.
+**In the app.** With the box on USB (`/dev/hondalog-bb`, or `--bb PORT`) its
+eight live channels are the BLACK BOX group on the Sensors screen, they are
+recorded into the same log on the same clock as the ECU reads, MARK goes to
+both, and a trigger on either side saves both: the box's own capture on its
+SD card and one laptop capture holding the ECU reads and the box's live
+frames. `hondalog-log record --port /dev/hondalog --bb /dev/hondalog-bb`
+does the same without the window.
+
+**Not done yet:** no Wi-Fi download; captures are fetched with
+`hondalog-bb fetch`, not from the app.
 
 ## Files
 
@@ -566,8 +637,9 @@ same model in-process, with ISO 9141-2.
 
 ## ROM tuning tools (chipped P28)
 
-`hondalog/tuning/` edits ROM files for the chipped OBD1 P28. There is no
-window for it yet; the command `hondalog-tune` covers the file work:
+`hondalog/tuning/` edits ROM files for the chipped OBD1 P28. The Tune screen
+edits tables (`hondalog --rom FILE --definition FILE`); the command
+`hondalog-tune` covers the file work:
 
 ```sh
 hondalog-tune demo-rom demo.bin                 # a made-up ROM to practise on
@@ -609,10 +681,11 @@ is based on.
 
 ```sh
 cd /opt/hondalog
-python3 -m pytest                                   # unit tests (the black box C core needs gcc and make; skipped without)
+python3 -m pytest                                   # everything (the black box C core needs gcc and make; skipped without)
 python3 -m hondalog.bench.expr_bench                # math/alarm CPU cost against the budget
 QT_QPA_PLATFORM=offscreen python3 tools/smoke.py    # full run against the simulator
 python3 bench/bench_data.py                         # log write/open/histogram timings
+QT_QPA_PLATFORM=offscreen python3 tools/bench_ui.py # UI frame rate, CPU and latency per screen
 ```
 
 (If the installer had to build a venv, use `/opt/hondalog/.venv/bin/python`

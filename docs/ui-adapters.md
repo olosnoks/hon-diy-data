@@ -1,19 +1,20 @@
-# UI adapters: what the integration step has to wire
+# UI adapters: how the UI is bound to the backends
 
-The UI (`hondalog/ui/`) never imports a backend module. It talks to seven
-small Protocol classes in `hondalog/ui/adapters.py`. Today each one is
-implemented in `hondalog/ui/backends.py` against what is on main (the 0.1.0
-poller, CSV logger and simulator), with a stopgap where main has nothing.
+The UI (`hondalog/ui/`) talks to everything behind it through the Protocol
+classes in `hondalog/ui/adapters.py`. `build_session()` at the bottom of
+`hondalog/ui/session.py` picks one implementation per role:
 
-**To integrate W1-W5, edit one function:** `build_session()` at the bottom of
-`hondalog/ui/session.py`. Replace the object passed for each role. No screen
-changes. `tests/test_ui_backends.py::test_implementations_satisfy_the_protocols`
-shows the `isinstance` check each replacement must pass.
+- real use: `hondalog/ui/wired.py`, bound to the tracks' backends;
+- `--demo`: `hondalog/ui/backends.py`, the simulated car (no port, no log).
+
+`tests/test_ui_wired.py` exercises every wired adapter against the built-in
+simulators; `test_wired_implementations_satisfy_the_protocols` is the
+`isinstance` check a replacement must pass.
 
 ```
-ECU poller ----.                                      .-- Sensors, Drive (tiles)
-black box ------+--> ChannelBus --(read on the 33 ms --+-- Map 3D, Tune (live point)
-math channels --'    (any thread)   frame timer)       '-- Replay live lanes, alarms
+W1 poller ------ on_block ---.                              .-- Sensors, Drive (tiles)
+W3 math -- (LiveSession) ----+--> ChannelBus --(read on the -+-- Map 3D, Tune (live point)
+W2 black box reader ---------'    (any thread)  33 ms timer) '-- Replay live lanes, alarms
 ```
 
 ## The rule for live data
@@ -39,23 +40,36 @@ channel: `id, label, units, decimals, lo, hi, kind ("value"/"flag"), source
 ("ECU"/"BB"/"MATH"), verified, warn_lo, warn_hi, alarm_lo, alarm_hi, signed,
 mapped`. Labels must fit a 163 px tile (about 12 capitals).
 
-## The seven roles
+## The roles
 
-| Role | Protocol | Today (`backends.py`) | Replace with | Status today |
+| Role | Protocol | Wired (`wired.py`) | Backend | Demo (`backends.py`) |
 |---|---|---|---|---|
-| ECU link | `ChannelSource` + `Connectable` | `PollerSource` over `hondalog.poller.Poller` | W1 link/scheduler | real |
-| Black box | `ChannelSource` | `SimBlackBox`: derives 8 channels from a simulated ECU; "not found" on a real port | W2 `hondalog/blackbox/` reader | stopgap |
-| Alarms | `AlarmSource` | `LimitAlarms`: spec limits, 2 s latch, acknowledge | W3 alarms | stopgap |
-| Recording, stall catcher | `Recording` | `CsvRecording` over `hondalog.logger.Recorder` | W4 native log + trigger engine | real, reads two private fields |
-| Logs, forensics | `LogReader` | `CsvLogReader` + `order_of_loss()` | W4 reader + analysis | reader real, analysis stopgap |
-| Observed map | `ObservedMap` | `HistogramMap`: this session only, in memory | W4 histogram | stopgap |
-| Raw tools, wizard | `MapperSession` | `PollerMapper`: sweep and console are real; wizard is a small Pearson ranker | W3 mapping wizard, W1 command guard | part real |
-| Tables | `TableModel` | `DemoTableModel`: sample 20 x 10 tables, read-only | W5 `hondalog/tuning/` | stopgap |
+| ECU link | `ChannelSource` + `Connectable` | `LinkSource` | `hondalog.live.LiveSession` over the W1 `Poller` | `DemoSource` |
+| Math channels | `ChannelSource` ("MATH") | `MathSource` | W3 `LivePipeline.math` | none |
+| Black box | `ChannelSource` | `BlackboxSource` | W2 `BlackboxReader` on the poller's `t0` | `DemoSource` |
+| Alarms | `AlarmSource` | `PipelineAlarms` | W3 `LivePipeline.alarms`; plain limits for the black box rails | `LimitAlarms` |
+| Recording, stall catcher | `Recording` | `LiveRecording` | W4 `Recorder` + trigger engine (`Recorder.status()`) | `NullRecording` |
+| Logs, forensics | `LogReader` | `HlogReader` | W4 `open_log` / `ReplaySession`; W2 `open_event` for `.bbx` | `CsvLogReader` |
+| Observed map | `ObservedMap` | `LogHistogramMap` | W4 `TableHistogram`, bins from the W5 table when a ROM is open | `HistogramMap` |
+| Raw tools, wizard | `MapperSession` | `MappingSession` | W3 `VerificationSession` / `correlate` / `mapedit`; W1 read-only guard | `DemoMapper` |
+| Tables | `TableModel` | `RomTableModel` | W5 `RomSession` / `TableEditor`; sample tables when no ROM is loaded | `DemoTableModel` |
 
-Math channels (W3) need no adapter of their own: implement `ChannelSource`
-with `name = "MATH"`, register specs with `source="MATH"`, publish. The
-Sensors screen adds a "Math channels" group and, past 32 tiles, switches to
-the compact 112 px rows by itself.
+Things the wired adapters add that the screens reach with `getattr` (so the
+demo objects need not have them): `ecu.link_text()`, `ecu.channel_rates()`,
+`ecu.first_contact(port)`, `ecu.set_expert_unlock(on)`, `mapper.set_expert(on)`,
+`mapper.rank_against(channel)`, `alarms.marks_itself`, `tables.open(rom,
+definition)`, `tables.editor`.
+
+What is not bound yet:
+
+- `ReplaySession` rides on `LogView.replay`, but the Replay screen still
+  draws from the `LogView` arrays with its own decimation and cursor code.
+- `mapper.rank_against()` (the correlation finder on the sweep history) has
+  no button.
+- The Tune screen reads its table list once at start: a ROM is opened with
+  `--rom` / `--definition`, not from inside the app. `TableTracer` is not
+  used; the screen's own live cursor does that job.
+- Captures on the box's SD card are fetched with `hondalog-bb fetch`.
 
 ### ChannelSource / Connectable (W1, W2)
 
@@ -77,16 +91,22 @@ def set_verified(self, channel_id, verified) -> str  # returns a message for the
 `SourceStatus.state` is one of `off / connecting / ok / silent / lost`; the
 chips in the status bar are drawn from it. Notes for W1:
 
-- `Session.pump` currently looks for `ecu.poller` (to notice a dead thread)
-  and `ecu.amap` (map name in the tab bar, mapper lookups). Keep those two
-  attributes or change the three places that use `getattr(self.ecu, ...)`.
-- `PollerSource.set_verified` only marks the channel for this session.
-  The real one should write `status = "verified"` to the address map.
-- `PollerSource.sink` is how the recorder taps samples. With W4's log format
-  the recorder should subscribe to the bus or to the link directly.
+- `Session.pump` looks for `ecu.poller` (to notice a dead thread) and
+  `ecu.amap` (map name in the tab bar, mapper lookups).
+- `LinkSource` publishes every block read (`Poller.on_block`), so a channel's
+  tile moves at its own rate; `t` is when the ECU sampled it and `wire` is
+  `BlockRead.mono`, the moment the last reply byte arrived.
+- `LinkSource.set_verified` writes `status` and a "manual" evidence record to
+  the address map file (`mapping.mapedit.mark_channel`) and reloads the map.
+- The recorder is fed by the `LiveSession`, not by the bus.
+- Rad fan and Fuel pump are real tiles as soon as the map has channels named
+  `fan` and `fuel_pump`; until then they are the unmapped placeholders.
 
 W2: the eight black-box ids the layouts assume are `bbatt, ecub, fpv, ig1,
-tach, igt, injp, bbmark` (`BLACKBOX_SPECS`). The default Drive view and the
+tach, igt, injp, bbmark` (`BLACKBOX_SPECS`). `wired.BB_TO_UI` maps the reader's
+names onto them (`bb_vbat, bb_ecub, bb_pump, bb_ig1, bb_rpm_tach / 30,
+bb_rpm_ign / 30, bb_inj_pw, bb_button`); logs keep W2's names and
+`HlogReader` applies the same mapping. The default Drive view and the
 Replay lanes reference `fpv`, `bbatt`, `ecub`, `ig1`, `tach`, `bbmark` by id;
 keep the ids or edit `DRIVE_DEFAULT` (session.py) and `GROUPS` (replay.py).
 
@@ -104,8 +124,10 @@ revision: int                                          # bump when active()/hist
 ```
 
 `evaluate` runs once per frame on the UI thread and must be cheap. For every
-event it returns with severity `alarm`, the shell beeps twice and drops an
-auto-MARK through `Recording.mark`. The limits in `backends.DEFAULT_LIMITS`
+event it returns with severity `alarm` the shell beeps twice. With the plain
+limit checker it also drops an auto-MARK through `Recording.mark`; W3's rules
+say themselves whether they want a marker (`actions`), and the live path
+drops it (`marks_itself`). The limits in `backends.DEFAULT_LIMITS`
 are the placeholders from HANDOFF section 8; `spec_from_channel` already
 prefers `warn_lo / warn_hi / alarm_lo / alarm_hi` on the address-map channel
 when those fields exist.
@@ -123,10 +145,11 @@ def stall(self) -> StallStatus    # state: off / standby / armed / saving / trig
 def poll(self) -> Sequence[StallCapture]   # captures finished since the last call
 ```
 
-`CsvRecording.stall()` reads `Recorder._stall._armed`, `._ring` and
-`._trigger` because 0.1.0 has no public status. `standby` (recording, engine
-not seen running yet) is a state the handoff does not have; drop it if the
-trigger engine arms differently.
+`LiveRecording.stall()` reads `Recorder.status()` (armed, capturing, pre/post
+seconds, buffer held, when the open window closes). `standby` is "recording,
+no stall rule armed yet" (the engine has not been seen running).
+`StallCapture.reason` is the rule's code (`rpm`, `link`, `external` for a
+black box trigger, `alarm`, `manual`) and `message` its own words.
 
 ### LogReader (W4)
 
@@ -142,7 +165,8 @@ rates. Times are seconds relative to the stall trigger (`trigger_t == 0.0`)
 or to the start of the file (`trigger_t is None`). Set `align_residual_ms`
 and the Replay header shows it when it exceeds 5 ms.
 
-`order_of_loss()` is the stopgap analysis: band = what the channel did in the
+`order_of_loss()` is the reading for any `LogView` (for a `.bbx` the box's own
+verdict from `blackbox.diagnose` leads the summary): band = what the channel did in the
 first two thirds of the 30 s window, widened by 8 % of its range; first exit
 that lasts 0.2 s; exits within 0.15 s of the trigger count as effects, not
 causes.
@@ -158,7 +182,7 @@ def clear(self) -> None
 ```
 
 Stall paths for the 3D view come from `Session.stall_paths()`, which reads
-the newest `stall_*.csv` files through the `LogReader`.
+the newest `stall_*` captures through the `LogReader`.
 
 ### MapperSession (W3, W1)
 
@@ -187,8 +211,8 @@ def wizard_retry(self) -> None
 `WizardCard` is a host: it renders `WizardView` (five numbered steps, one
 instruction box, a target list or a candidate table, three buttons) and calls
 the four `wizard_*` methods. W3's wizard needs no UI change as long as it
-fills a `WizardView`. `PollerMapper.send` goes straight to `link.raw`: route
-it through W1's command guard.
+fills a `WizardView`. `send` goes to `link.raw`, which is W1's guard: a
+frame that is not a read comes back as "blocked" until `set_expert(True)`.
 
 ### TableModel (W5)
 

@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Qt runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
+      - run: pip install pytest numpy pyserial PySide6 pyqtgraph PyOpenGL mypy
+      - name: Whole suite (link, mapping, data, black box host and C core, tuning, UI, integration)
+        run: python -m pytest -q
+      - name: End to end against the simulator, GUI included
+        run: python tools/smoke.py
+      - name: Types (the packages that are kept clean; the UI and the black box host are not yet)
+        run: >
+          python -m mypy --ignore-missing-imports --follow-imports=silent
+          hondalog/link hondalog/diag hondalog/expr hondalog/mathch hondalog/alarms
+          hondalog/mapping hondalog/data hondalog/analysis hondalog/export hondalog/triggers
+          hondalog/tuning hondalog/addressmap.py hondalog/protocol.py hondalog/transport.py
+          hondalog/poller.py hondalog/obd2.py hondalog/sim.py hondalog/live.py
+          hondalog/logger.py hondalog/logtool.py hondalog/units.py

@@ -13,8 +13,8 @@ hondalog --port sim: --connect --profile                        # overlay in the
 ```
 
 The bench runs the real app against the built-in simulator (`sim:`): real
-poller thread, real protocol code, real recorder writing CSV, simulated
-black box at 50 Hz. Per screen it reports:
+poller thread, real protocol code, real recorder writing the native log,
+W2's simulated black box at 50 Hz. Per screen it reports:
 
 - **fps / min**: frame timer rate achieved; min = slowest 1 % of frames.
 - **frame ms**: work per frame (bus pump, refresh, and the paint, which the
@@ -26,25 +26,38 @@ black box at 50 Hz. Per screen it reports:
 
 ## Measured here (not on the T430)
 
-Intel Xeon 2.1 GHz, 2 cores, PySide6 6.12 / pyqtgraph 0.14, Qt offscreen
-platform, 1366x768, Daylight, 10 s per screen. The built-in simulator polls
-at about 22 Hz, twice what the real K-line gives, so tiles repaint twice as
-often as they will in the car.
+Intel Xeon 2.1 GHz, 2 cores, PySide6 / pyqtgraph, Qt offscreen platform,
+1366x768, Daylight, 8 s per screen, after the backends were bound
+(`ui/wired.py`): W1 link at true rates (fast class about 17 Hz, each read
+published on arrival), W3 math channels and alarms on the poller thread,
+W4 recorder writing a native log with raw bytes, W2's simulated black box
+at 50 Hz, 41 tiles (24 ECU + 8 black box + 9 math).
 
 | Screen | fps | min fps | frame p50 / p95 / max (ms) | CPU % | latency p50 / p95 / max (ms) |
 |---|---|---|---|---|---|
-| Sensors, 32 tiles + 32 sparklines (after 90 s, traces full) | 30.3 | 29.6 | 4.6 / 13.5 / 28.4 | 20.2 | 8.8 / 18.6 / 21.3 |
-| Drive | 30.3 | 29.6 | 2.1 / 6.8 / 9.6 | 10.1 | 10.8 / 19.4 / 24.0 |
-| Map 3D (2D fallback) | 30.3 | 29.6 | 3.6 / 6.7 / 14.9 | 12.7 | 10.5 / 19.1 / 21.9 |
-| Replay, live: 13 lanes following the bus | 30.3 | 29.6 | 0.2 / 18.7 / 36.7 | 17.8 | 9.7 / 18.5 / 22.4 |
-| Replay, playing a file | 30.3 | 29.6 | 4.1 / 7.6 / 9.8 | 16.2 | 7.7 / 17.8 / 19.8 |
-| Raw tools, sweeping | 30.3 | 29.5 | 0.2 / 11.6 / 16.1 | 7.5 | 8.5 / 19.2 / 20.3 |
-| Tune (2D fallback) | 30.3 | 29.6 | 2.8 / 7.6 / 14.6 | 11.6 | 9.8 / 19.1 / 20.8 |
-| Alarms | 30.3 | 29.6 | 0.2 / 2.7 / 7.1 | 4.7 | 8.4 / 18.6 / 20.1 |
+| Sensors, 41 tiles | 30.3 | 29.5 | 3.3 / 8.2 / 12.8 | 21.5 | 4.7 / 14.8 / 16.0 |
+| Drive | 30.3 | 29.7 | 1.8 / 6.0 / 8.7 | 16.6 | 4.3 / 15.4 / 17.2 |
+| Map 3D (2D fallback) | 30.3 | 29.6 | 4.0 / 9.2 / 15.3 | 22.2 | 5.0 / 14.9 / 18.0 |
+| Map 3D, orbiting | 30.3 | 27.9 | 3.2 / 6.1 / 17.4 | 35.7 | 5.7 / 14.4 / 16.5 |
+| Replay, live lanes following the bus | 30.3 | 29.6 | 0.3 / 18.6 / 31.4 | 26.0 | 5.0 / 13.8 / 16.5 |
+| Replay, playing a file | 30.3 | 29.5 | 5.2 / 9.4 / 23.9 | 28.5 | 7.0 / 14.7 / 16.6 |
+| Raw tools, sweeping | 30.3 | 29.6 | 0.3 / 4.0 / 19.5 | 15.6 | 7.4 / 17.6 / 20.0 |
+| Tune (2D fallback) | 30.3 | 29.5 | 3.0 / 5.6 / 12.1 | 19.3 | 5.8 / 14.3 / 17.2 |
+| Alarms | 30.3 | 29.5 | 0.1 / 3.0 / 12.3 | 13.4 | 5.6 / 14.0 / 17.2 |
+| Sensors again (traces full) | 30.3 | 29.5 | 3.8 / 13.9 / 23.9 | 26.7 | 6.2 / 13.6 / 15.9 |
 
-Peak RSS 154 MB. No link errors. All targets met in this environment. The
-same run on the Debian trixie versions (PySide6 6.8.3, pyqtgraph 0.13.7)
-gave the same figures within noise.
+Peak RSS 167 MB. No link errors. All four targets are met.
+
+Against the numbers before the backends were bound (stand-in sources,
+32 tiles): frame rate and frame times are unchanged, latency is lower (the
+link stamps each read itself, and reads are published one by one instead of
+once per sweep), and CPU is higher: Sensors went from 20 % to between 21 and
+30 % from run to run. Most of that is the simulated black box, which is now
+W2's real simulator: a 1 kHz model of the box running in this process, where
+the stand-in was a few lines at 50 Hz. `tools/bench_ui.py --no-blackbox`
+leaves it out: Sensors is then 13 to 15 % and Drive 10 %. With a real box
+that model's cost is not on the laptop; the 50 Hz frames and eight more
+live tiles are.
 
 Latency is dominated by waiting for the next 33 ms frame; the UI adds no
 queue of its own.
