@@ -1,11 +1,17 @@
-"""Recording: the running native log, the triggers and the captures they save.
+"""Recording: the drive being written to the database, the triggers and the
+captures they save.
 
 One ``Recorder`` is one recording session. It is fed on the poller thread
-and writes a ``.hlog`` file (see ``hondalog/data/container.py``) through a
-writer that never makes the caller wait for the disk. Triggers (the stall
+and writes into ``hondalog.db`` (see ``hondalog/data/store.py``) through a
+store that never makes the caller wait for the disk. Triggers (the stall
 rules by default) are evaluated on every feed; when a capture window closes
-it is cut out of the running log into its own file, with every stream that
-was being recorded at the time.
+it is entered in the ``captures`` table as a time range of the drive: no
+data is copied, and every stream that was being recorded is in it.
+
+A session is one or more *drives*. The first starts with the recorder. A
+drive ends when the recorder stops, or when the ECU has not answered for
+``drive_gap_s`` seconds (key off); the next answer starts a new drive on the
+same clock. Nothing is recorded in between.
 
 How it is fed (``hondalog.live.LiveSession`` does this wiring):
 
@@ -34,11 +40,12 @@ from typing import Any, Callable, Mapping, Sequence
 import numpy as np
 
 from . import __version__
-from .data.container import EXTENSION, LogWriter
+from .data import db
+from .data.db import DriveRef
 from .data.model import Column
 from .data.reader import align, open_log
 from .data.retention import RetentionPolicy
-from .data.store import extract_window
+from .data.store import DriveWriter, Store
 from .triggers import MANUAL, Capture, Fired, TriggerEngine, TriggerRule, default_rules, external_rule
 
 LINK = "link"
@@ -47,15 +54,18 @@ LINK_STREAM = "ecu/link"
 
 
 def log_dir() -> Path:
-    return Path(os.environ.get("HONDALOG_DIR") or os.path.expanduser("~/hondalog/logs"))
+    """The folder for loose files: exports, reports, fetched black box
+    captures. The drives themselves are in the database (``db.db_path()``)."""
+    return db.files_dir()
 
 
 @dataclass
 class CaptureEvent:
-    """A capture file was written. ``reason`` is the rule's short code:
-    "rpm" and "link" for the two stall rules."""
+    """A capture was saved. ``path`` names it in the database (``open_log``
+    takes it; ``path.name`` is like ``stall_20261116_071455``). ``reason`` is
+    the rule's short code: "rpm" and "link" for the two stall rules."""
 
-    path: Path
+    path: DriveRef
     reason: str
     t: float                # session time of the (first) trigger
     rows: int
@@ -86,42 +96,35 @@ def column_for(ch: Any) -> Column:
                   ch.kind, ch.decimals, float(ch.min), float(ch.max))
 
 
-def _unique(path: Path) -> Path:
-    n, out = 2, path
-    while out.exists():
-        out = path.with_name(f"{path.stem}_{n}{path.suffix}")
-        n += 1
-    return out
-
-
 class Recorder:
-    """One recording session: the native log, the trigger engine, the captures.
+    """One recording session: the drives, the trigger engine, the captures.
 
     ``feed*`` are called on the poller thread; ``mark``, ``note``, ``trigger``
     and ``stop`` on the UI thread. Finished captures appear on ``events``;
     every rule firing appears at once on ``notices`` (for a banner or a beep
     before the capture's post-window is over).
 
-    ``stall_opts`` (pre_s, post_s, rpm_run, rpm_zero, link_down_s,
-    rpm_channel) tune the built-in stall rules; pass ``rules`` to replace the
-    whole rule list.
+    ``out_dir`` is the folder that holds ``hondalog.db`` (``db`` names the
+    file itself). ``stall_opts`` (pre_s, post_s, rpm_run, rpm_zero,
+    link_down_s, rpm_channel) tune the built-in stall rules; pass ``rules``
+    to replace the whole rule list.
     """
 
-    def __init__(self, amap: Any, ecu_id: str = "", port: str = "", out_dir: Path | None = None, *,
-                 rules: Sequence[TriggerRule] | None = None, rotate_s: float | None = 3600.0,
-                 rotate_mb: float | None = 64.0, retention: RetentionPolicy | None = None,
+    def __init__(self, amap: Any, ecu_id: str = "", port: str = "", out_dir: str | os.PathLike | None = None, *,
+                 db_file: str | os.PathLike | None = None, rules: Sequence[TriggerRule] | None = None,
+                 drive_gap_s: float | None = 120.0, retention: RetentionPolicy | None = None,
                  flush_interval: float = 0.5, fsync: bool = True, sync_captures: bool = False,
                  epoch: datetime | None = None, meta: Mapping[str, Any] | None = None,
                  **stall_opts: Any):
         self.amap = amap
-        self.out_dir = Path(out_dir) if out_dir else log_dir()
+        self.db = Path(db_file) if db_file else db.db_path(out_dir)
+        self.out_dir = self.db.parent
         self.started = datetime.now()
         #: called with every Fired, on the feeding thread (LiveSession tells the black box)
         self.on_fired: Callable[[Fired], None] | None = None
-        self.rotate_s, self.rotate_mb = rotate_s, rotate_mb
+        self.drive_gap_s = drive_gap_s
         self.retention = retention
         self.sync_captures = sync_captures
-        self._writer_opts: dict[str, Any] = {"flush_interval": flush_interval, "fsync": fsync}
         rule_list = list(rules) if rules is not None else default_rules(**stall_opts)
         try:
             map_text = Path(amap.path).read_text(encoding="utf-8") if amap.path else ""
@@ -154,17 +157,19 @@ class Recorder:
         self._block_channels: dict[tuple[int, int], list[Any]] = {}
         self._custom: dict[str, list[str]] = {}
 
-        self.paths: list[Path] = []
-        self._part = 0
-        self._part_t0: float | None = None
-        self._log = self._open_part()
+        #: every drive of this session, oldest first
+        self.drives: list[DriveRef] = []
+        self._store = Store(self.db, flush_interval=flush_interval, fsync=fsync)
+        self._log: DriveWriter | None = None
+        self._open_drive(self.started)
         self._engine = TriggerEngine(rule_list)
         self._lock = threading.Lock()
         self._pending_markers: list[str] = []
-        self._workers: list[threading.Thread] = []
         self._epoch: datetime | None = epoch    # wall time of session time 0
         self._last_t = 0.0
         self._t_first: float | None = None      # session time of the first thing recorded
+        self._drive_t0: float | None = None     # ... of the first thing in the current drive
+        self._down_since: float | None = None   # the link went down then and has not come back
         self._link: bool | None = None
         self.events: queue.Queue[CaptureEvent] = queue.Queue()
         self.notices: queue.Queue[Fired] = queue.Queue()
@@ -175,9 +180,16 @@ class Recorder:
     # -- properties --
 
     @property
-    def path(self) -> Path:
-        """The file being written now (the last part of a rotated recording)."""
-        return self.paths[-1]
+    def path(self) -> DriveRef:
+        """The drive being written now (the last one of the session)."""
+        return self.drives[-1]
+
+    drive = path
+
+    @property
+    def parked(self) -> bool:
+        """Between drives: the ECU has been silent for ``drive_gap_s``."""
+        return self._log is None
 
     @property
     def rules(self) -> list[TriggerRule]:
@@ -197,8 +209,8 @@ class Recorder:
             out.pre_s, out.post_s = stall[0].pre_s, stall[0].post_s
             out.armed = any(engine.armed(r.name) for r in stall)
         out.fired = sum(engine.fired_count(r.name) for r in engine.rules)
-        if self._t_first is not None:
-            out.buffer_s = max(0.0, min(out.pre_s, self._last_t - self._t_first))
+        if self._drive_t0 is not None and self._log is not None:
+            out.buffer_s = max(0.0, min(out.pre_s, self._last_t - self._drive_t0))
         capture = engine.capture
         if capture is not None:
             out.capturing = True
@@ -207,8 +219,8 @@ class Recorder:
 
     @property
     def write_error(self) -> Exception | None:
-        """The last disk error, if the log could not be written."""
-        return self._log.error
+        """The last database error, if the log could not be written."""
+        return self._store.error
 
     # -- UI thread --
 
@@ -222,21 +234,22 @@ class Recorder:
         """A free-text note at the current time (shown in the event list, not as a marker)."""
         with self._lock:
             if self.active:
-                self._log.event(self._last_t, "note", text)
+                self._drive().event(self._last_t, "note", text)
 
     def set_meta(self, **items: Any) -> None:
-        """Add facts to the log header: DTCs, a freeze frame, expert-unlock, notes, tags."""
+        """Add facts to the drive's header: DTCs, a freeze frame, expert-unlock, notes, tags."""
         with self._lock:
             if self.active:
                 self.header.update(items)
-                self._log.set_meta(**items)
+                if self._log is not None:
+                    self._log.set_meta(**items)
 
     def event(self, kind: str, text: str = "", data: Mapping[str, Any] | None = None,
               t: float | None = None) -> None:
         """Record an event of any kind ("alarm", "dtc", "link", ...)."""
         with self._lock:
             if self.active:
-                self._log.event(self._last_t if t is None else t, kind, text, data)
+                self._drive().event(self._last_t if t is None else t, kind, text, data)
 
     def trigger(self, rule: TriggerRule | str = MANUAL, t: float | None = None) -> None:
         """Start a capture by hand, from an alarm, or from a black box trigger."""
@@ -247,11 +260,15 @@ class Recorder:
     def external_trigger(self, why: str, t: float | None = None) -> None:
         """Another source (the black box) reported a trigger: save a capture
         around now. It goes through the same engine as the rules, so a stall
-        the ECU log also sees within the window lands in the same file."""
+        the ECU log also sees within the window lands in the same capture."""
         with self._lock:
             if self.active:
                 rule = external_rule(why, self._engine.rules)
                 self._handle_fired([self._engine.fire(rule, self._last_t if t is None else t)])
+
+    def flush(self) -> None:
+        """Commit what has been fed so far (a reader sees it afterwards)."""
+        self._store.flush()
 
     def stop(self) -> None:
         with self._lock:
@@ -259,16 +276,15 @@ class Recorder:
                 return
             self.active = False
             capture = self._engine.finish()
+            if capture is not None:
+                self._save_capture(capture, wait=True)
             try:
-                self._log.close()
+                self._end_drive("stopped")
+                self._store.close()
             except OSError:
                 pass
-            if capture is not None:
-                self._save_capture(capture, list(self.paths[-2:]))
-        for worker in self._workers:
-            worker.join()
         if self.retention is not None:
-            self.retention.apply(self.out_dir)
+            self.retention.apply(self.db)
 
     # -- poller thread --
 
@@ -277,27 +293,26 @@ class Recorder:
         ``link`` and ``values``). No raw bytes: such a log cannot be decoded
         again. The live path uses ``feed_read`` instead."""
         with self._lock:
-            if not self.active:
+            if not self.active or not self._begin(sample.t, getattr(sample, "wall", None), bool(sample.link)):
                 return
-            self._begin(sample.t, getattr(sample, "wall", None))
             self._after(sample.t, self._sweep(sample))
 
-    def feed_read(self, t: float, addr: int, data: bytes) -> None:
-        """One K-line read: ``data`` is what the ECU returned for ``addr``."""
+    def feed_read(self, t: float, addr: int, data: bytes, latency: float | None = None) -> None:
+        """One K-line read: ``data`` is what the ECU returned for ``addr``.
+        ``latency`` is the estimated age of the reply in seconds, if known."""
         with self._lock:
             if not self.active:
                 return
-            self._begin(t, None)
-            changed = self._read(t, addr, bytes(data))
+            self._begin(t, None, True)
+            changed = self._read(t, addr, bytes(data), latency)
             changed.update(self._set_link(t, True))
             self._after(t, changed)
 
     def feed_link(self, t: float, up: bool) -> None:
         """The link went up or down (no reply, port lost)."""
         with self._lock:
-            if not self.active:
+            if not self.active or not self._begin(t, None, up):
                 return
-            self._begin(t, None)
             self._after(t, self._set_link(t, up))
 
     def feed_values(self, stream: str, t: float, values: Mapping[str, float | None], *,
@@ -307,68 +322,82 @@ class Recorder:
         columns are fixed by the first call (``columns``, or the keys of
         ``values`` as 32-bit floats)."""
         with self._lock:
-            if not self.active:
+            if not self.active or not self._begin(t, None, None):
                 return
-            self._begin(t, None)
+            log = self._drive()
             names = self._custom.get(stream)
             if names is None:
                 cols = list(columns) if columns is not None else [Column(n) for n in values]
-                self._log.add_stream(stream, cols, source=source or stream.split("/")[0])
+                log.add_stream(stream, cols, source=source or stream.split("/")[0])
                 names = self._custom[stream] = [c.name for c in cols]
-            self._log.append(stream, t, [values.get(n) for n in names])
+            log.append(stream, t, [values.get(n) for n in names])
             if evaluate:
                 self._after(t, values)
 
     # -- internals (lock held) --
 
-    def _open_part(self) -> LogWriter:
-        self._part += 1
-        stem = f"log_{self.started:%Y%m%d_%H%M%S}"
-        if self._part > 1:
-            stem += f"_p{self._part:03d}"
-        path = _unique(self.out_dir / (stem + EXTENSION))
-        meta = dict(self.header, part=self._part)
-        if self.paths:
-            meta["previous_part"] = self.paths[-1].name
-        writer = LogWriter(path, meta, **self._writer_opts)
-        self.paths.append(path)
-        self._part_t0 = None
+    def _open_drive(self, started: datetime) -> DriveWriter:
+        meta = dict(self.header, drive_of_session=len(self.drives) + 1)
+        meta["started"] = started.isoformat(timespec="seconds")
+        meta["started_unix"] = started.timestamp()
+        if self.drives:
+            meta["previous_drive"] = self.drives[-1].name
+        self._log = self._store.begin_drive(meta, started=started)
+        self.drives.append(self._log.ref)
         self._custom = {}
-        return writer
+        self._drive_t0 = None
+        self._link = None
+        return self._log
 
-    def _begin(self, t: float, wall: datetime | None) -> None:
+    def _drive(self) -> DriveWriter:
+        """The drive being written; starts one if the recorder was parked."""
+        if self._log is None:
+            self._open_drive(self._wall(self._last_t))
+        assert self._log is not None
+        return self._log
+
+    def _end_drive(self, reason: str) -> None:
+        log, self._log = self._log, None
+        if log is not None:
+            log.end(reason=reason)
+
+    def _begin(self, t: float, wall: datetime | None, link: bool | None) -> bool:
+        """Bookkeeping before a row is stored. ``link``: this feed shows the
+        ECU answering (True), silent (False), or says nothing about it (None).
+        False means the recorder is between drives and the row is dropped."""
         if self._epoch is None:
             self._epoch = (wall or datetime.now()) - timedelta(seconds=t)
             # wall time of session time 0: what lines this log up with a
-            # black box capture, or with another log of the same drive
+            # black box capture, or with another drive of the same session
             self.header["epoch_unix"] = self._epoch.timestamp()
-            self._log.set_meta(epoch_unix=self.header["epoch_unix"])
+            if self._log is not None:
+                self._log.set_meta(epoch_unix=self.header["epoch_unix"])
+        if link:
+            self._down_since = None
+        elif link is False and self._down_since is None and self._link is not None:
+            self._down_since = t
+        if self._log is not None and self._down_since is not None and self.drive_gap_s is not None \
+                and t - self._down_since >= self.drive_gap_s and not self._engine.capturing:
+            self._end_drive("link_lost")            # key off: this drive is over
+        if self._log is None:
+            if not link:
+                self._last_t = t
+                return False
+            self._open_drive(self._wall(t))
         if self._t_first is None:
             self._t_first = t
-        if self._part_t0 is None:
-            self._part_t0 = t
-        elif not self._engine.capturing and (
-                (self.rotate_s and t - self._part_t0 >= self.rotate_s)
-                or (self.rotate_mb and self._log.bytes_written >= self.rotate_mb * 1e6)):
-            self._rotate()
-            self._part_t0 = t
+        if self._drive_t0 is None:
+            self._drive_t0 = t
         if self._pending_markers:
             for text in self._pending_markers:
-                self._log.event(t, "marker", text)
+                self._drive().event(t, "marker", text)
             self._pending_markers.clear()
         self._last_t = t
         self.rows += 1
-
-    def _rotate(self) -> None:
-        old = self._log
-        old.flush()                     # rows reach the file now; the index follows below
-        self._log = self._open_part()
-        worker = threading.Thread(target=old.close, name="hondalog-rotate", daemon=True)
-        worker.start()
-        self._workers.append(worker)
+        return True
 
     def _sweep(self, sample: Any) -> dict[str, Any]:
-        log = self._log
+        log = self._drive()
         if log.stream(ECU_STREAM) is None:
             cols = [Column(LINK, "u1", kind="flag", decimals=0)]
             cols += [column_for(c) for c in self.amap.channels]
@@ -380,24 +409,24 @@ class Recorder:
             return {**values, LINK: 1}
         return {**self._unknown, LINK: 0}
 
-    def _read(self, t: float, addr: int, data: bytes) -> dict[str, Any]:
+    def _read(self, t: float, addr: int, data: bytes, latency: float | None) -> dict[str, Any]:
         key = (addr, len(data))
         channels = self._block_channels.get(key)
         if channels is None:
             channels = self._block_channels[key] = [
                 c for c in self.amap.channels if addr <= c.addr and c.addr + c.length <= addr + len(data)]
         name = f"ecu/{addr:02X}+{len(data)}"
-        log = self._log
+        log = self._drive()
         if log.stream(name) is None:
             log.add_stream(name, [column_for(c) for c in channels], source="ecu", raw_len=len(data),
                            attrs={"addr": addr, "length": len(data), "mode": "read"})
         values = [c.convert(data[c.addr - addr:c.addr - addr + c.length]) for c in channels]
-        log.append(name, t, values, data)
+        log.append(name, t, values, data, latency)
         return dict(zip((c.name for c in channels), values))
 
     def _set_link(self, t: float, up: bool) -> dict[str, Any]:
         """Log a link change. Returns what the trigger engine has to hear."""
-        log = self._log
+        log = self._drive()
         if log.stream(LINK_STREAM) is None:
             log.add_stream(LINK_STREAM, [Column(LINK, "u1", kind="flag", decimals=0)], source="ecu")
             self._link = None
@@ -414,14 +443,7 @@ class Recorder:
         fired, done = self._engine.feed(t, values)
         self._handle_fired(fired)
         if done is not None:
-            paths = list(self.paths[-2:])
-            if self.sync_captures:
-                self._save_capture(done, paths)
-            else:
-                worker = threading.Thread(target=self._save_capture, args=(done, paths),
-                                          name="hondalog-capture", daemon=True)
-                worker.start()
-                self._workers = [w for w in self._workers if w.is_alive()] + [worker]
+            self._save_capture(done, wait=self.sync_captures)
 
     def _handle_fired(self, fired: Sequence[Fired]) -> None:
         for event in fired:
@@ -432,28 +454,31 @@ class Recorder:
                 except Exception:           # a listener must not stop the recording
                     pass
             if "mark" in rule.actions:
-                self._log.event(event.t, "trigger", rule.label,
-                                {"rule": rule.name, "reason": rule.reason, "message": rule.message,
-                                 "severity": rule.severity})
+                self._drive().event(event.t, "trigger", rule.label,
+                                    {"rule": rule.name, "reason": rule.reason, "message": rule.message,
+                                     "severity": rule.severity})
             if "notify" in rule.actions:
                 self.notices.put(event)
 
     def _wall(self, t: float) -> datetime:
         return (self._epoch or self.started) + timedelta(seconds=t)
 
-    def _save_capture(self, capture: Capture, sources: Sequence[Path]) -> None:
-        """Cut the capture window out of the running log (worker thread)."""
+    def _save_capture(self, capture: Capture, wait: bool) -> None:
+        """Enter the capture window in the database. With ``wait`` it is
+        there when this returns; otherwise the store's thread does it."""
         first = capture.first
         rule = first.rule
         wall = self._wall(first.t)
-        meta = {
-            "capture_of": sources[-1].name,
+        log = self._drive()
+        t_start = capture.t_start if self._drive_t0 is None else max(capture.t_start, self._drive_t0)
+        fired = [{"rule": f.rule.name, "t": round(f.t, 3)} for f in capture.fired]
+        meta: dict[str, Any] = {
             "trigger": rule.name,
             "trigger_reason": rule.reason,
             "trigger_message": rule.message,
             "trigger_time_s": f"{first.t:.3f}",
             "trigger_wall_time": wall.isoformat(timespec="milliseconds"),
-            "triggers_fired": [{"rule": f.rule.name, "t": round(f.t, 3)} for f in capture.fired],
+            "triggers_fired": fired,
             "window": f"{rule.pre_s:g} s before, {rule.post_s:g} s after",
             "window_complete": capture.complete,
             # the 0.1.0 names, which the replay tab and old scripts look for
@@ -461,17 +486,18 @@ class Recorder:
             "stall_time_s": f"{first.t:.3f}",
             "stall_wall_time": wall.isoformat(timespec="milliseconds"),
         }
+
+        def saved(ref: DriveRef, rows: int) -> None:
+            self.events.put(CaptureEvent(ref, rule.reason, first.t, rows, rule.name, rule.label, rule.message))
         try:
-            if not self._log.closed:
-                self._log.flush()
-            self.out_dir.mkdir(parents=True, exist_ok=True)
-            path = _unique(self.out_dir / f"{rule.kind}_{wall:%Y%m%d_%H%M%S}{EXTENSION}")
-            _, rows = extract_window([p for p in sources if p.exists()], path,
-                                     capture.t_start, capture.t_end, meta)
+            log.capture(rule.kind, first.t, t_start, capture.t_end, rule=rule.name, reason=rule.reason,
+                        label=rule.label, message=rule.message, severity=rule.severity, wall=wall,
+                        complete=capture.complete, fired=fired, meta=meta, wait=wait,
+                        on_saved=saved)
         except (OSError, ValueError) as exc:
-            self._log.error = exc
-            return
-        self.events.put(CaptureEvent(path, rule.reason, first.t, rows, rule.name, rule.label, rule.message))
+            self._store.error = exc
+        except Exception as exc:                # sqlite3.Error: the capture is lost, the recording goes on
+            self._store.error = OSError(str(exc))
 
 
 # ---- reading (the shape the 0.1.0 replay tab uses) --------------------------
@@ -480,7 +506,7 @@ class Recorder:
 class LogData:
     """A log flattened onto one time grid: what the replay tab draws."""
 
-    path: Path
+    path: Any                                       # a DriveRef, or the Path of a file
     meta: dict = field(default_factory=dict)
     names: list = field(default_factory=list)
     t: Any = None                                   # numpy array of seconds
@@ -488,8 +514,9 @@ class LogData:
     markers: list = field(default_factory=list)     # (time_s, text)
 
 
-def read_log(path: str | os.PathLike) -> LogData:
-    """Open any supported log (.hlog, old .csv, .msl, .mlg) as one flat table.
+def read_log(path: str | os.PathLike | DriveRef) -> LogData:
+    """Open any supported log (a drive or capture in the database, an old
+    .csv, .msl, .mlg) as one flat table.
 
     Channels read at different rates are put on the grid of the densest one.
     New code should use ``hondalog.data.open_log`` and keep the real rates.
@@ -516,4 +543,5 @@ def read_log(path: str | os.PathLike) -> LogData:
             columns[LINK] = align(link, table.t, "hold", float("inf"))
         meta = {k: v if isinstance(v, str) else str(v) for k, v in log.meta.items()
                 if k != "address_map_text"}
-        return LogData(Path(path), meta, list(table.names), table.t, columns, list(log.markers))
+        where = path if isinstance(path, DriveRef) else Path(path)
+        return LogData(where, meta, list(table.names), table.t, columns, list(log.markers))

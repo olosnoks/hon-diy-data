@@ -171,8 +171,8 @@ class Recording(Protocol):
 
 @dataclass
 class LogView:
-    """One log or stall capture, ready to plot."""
-    path: Path
+    """One drive or stall capture, ready to plot."""
+    path: object                                # a DriveRef, the Path of a file, None when live
     title: str = ""
     note: str = ""                              # "simulated capture"
     meta: dict = field(default_factory=dict)
@@ -213,16 +213,39 @@ class Forensics:
     summary: str = ""           # for the stall banner: "FP FEED fell first, 2.1 s earlier."
 
 
+@dataclass
+class DriveRow:
+    """One line of the drive picker: a drive, or a capture inside one."""
+    ref: object                 # what ``LogReader.read`` takes
+    name: str
+    kind: str = "drive"         # "drive", "stall", "capture", ... or "file" (.bbx)
+    started: str = ""
+    duration_s: float = 0.0
+    status: str = ""            # "crashed" and "recording" are worth showing
+    stalls: int = 0
+    notes: str = ""
+    text: str = ""              # what a search looks through
+
+
 @runtime_checkable
 class LogReader(Protocol):
     def read(self, path) -> LogView:
-        """Raises OSError / ValueError with a message fit for the user."""
+        """``path``: a drive or capture in the database (as ``recent`` and
+        ``drives`` give them), or a file (.bbx, .csv, .msl, .mlg).
+        Raises OSError / ValueError with a message fit for the user."""
 
     def analyze(self, view: LogView) -> Forensics:
         """Order of loss etc. Computed from the data, never typed."""
 
-    def recent(self, stalls_only: bool = False) -> Sequence[Path]:
-        """Newest first."""
+    def recent(self, stalls_only: bool = False) -> Sequence:
+        """Drives, captures and black box files, newest first."""
+
+    def drives(self) -> Sequence[DriveRow]:
+        """Everything the drive picker lists, newest first; a capture follows its drive."""
+
+    def import_file(self, path):
+        """Read a CSV / MSL / MLG file into the database as a new drive.
+        Returns what ``read`` takes to open it."""
 
 
 # ---- observed map (Map 3D) --------------------------------------------------

@@ -1,16 +1,15 @@
-"""The recorder: native logging, captures, rotation; plus retention, library, CLI."""
+"""The recorder: drives in the database, captures, key-off; plus retention, library, CLI."""
 
-import os
+import sqlite3
 import time
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import numpy as np
 import pytest
 
 from hondalog import addressmap, logtool
-from hondalog.data import Column, LogWriter, annotate, open_log, read_hlog
-from hondalog.data.library import CACHE_NAME, Library
+from hondalog.data import Column, DriveRef, annotate, db, new_drive, open_log
+from hondalog.data.library import Library
 from hondalog.data.redecode import redecode
 from hondalog.data.retention import RetentionPolicy
 from hondalog.data.synth import write_synthetic
@@ -44,16 +43,18 @@ def run(rec, t0, t1, rpm=800.0, link=True, step=0.1):
 
 def test_sweep_recording_and_stall_capture(amap, tmp_path):
     rec = recorder(amap, tmp_path)
-    assert rec.path.suffix == ".hlog" and rec.path.name.startswith("log_")
+    assert isinstance(rec.path, DriveRef) and rec.path.db == tmp_path / "hondalog.db"
+    assert rec.path.name.startswith("drive_") and rec.drives == [rec.path] and rec.path.exists()
     run(rec, 0, 50)
     rec.mark("MARK 1")
     rec.mark("it stumbled")
     run(rec, 50, 52)
     run(rec, 52, 63, rpm=0)
-    assert rec.notices.get_nowait().reason == "rpm"         # known at once, before the file exists
+    assert rec.notices.get_nowait().reason == "rpm"         # known at once, before the capture is saved
     event = rec.events.get_nowait()
     assert isinstance(event, StallEvent) and event.reason == "rpm" and event.rule == "stall"
-    assert event.t == pytest.approx(52.0) and event.path.name == "stall_20261115_080052.hlog"
+    assert event.t == pytest.approx(52.0) and event.path.name == "stall_20261115_080052"
+    assert event.path.drive == rec.path.name and event.path.db == rec.path.db
     run(rec, 63, 64, rpm=0)
     rec.note("towed home")
     rec.stop()
@@ -61,7 +62,7 @@ def test_sweep_recording_and_stall_capture(amap, tmp_path):
     assert rec.events.empty() and rec.rows == 640 and rec.markers == 2 and rec.write_error is None
 
     with open_log(rec.path) as log:
-        assert log.indexed and log.streams["ecu"].rows == 640
+        assert log.status == "complete" and log.meta["end_reason"] == "stopped" and log.streams["ecu"].rows == 640
         assert log.meta["address_map_version"] == amap.version and log.meta["ecu_id"] == "SIM-P2P"
         assert "[[channel]]" in log.meta["address_map_text"]            # the map travels with the log
         assert [r["name"] for r in log.meta["triggers"]][:2] == ["stall", "link_loss"]
@@ -85,6 +86,15 @@ def test_sweep_recording_and_stall_capture(amap, tmp_path):
     assert flat.names[0] == "link" and "address_map_text" not in flat.meta
     assert flat.data["rpm"][-1] == 0 and ("STALL (rpm 0)" in [m[1] for m in flat.markers])
 
+    # the capture is a row, not a copy: one drive's worth of samples, and plain SQL sees the stall
+    conn = sqlite3.connect(rec.db)
+    assert conn.execute("SELECT count(*), count(DISTINCT drive_id) FROM samples WHERE part = 0").fetchone() == (640, 1)
+    assert conn.execute("SELECT name, drive, reason, t_trigger, t_start, t_end, complete, rows FROM stalls"
+                        ).fetchone() == ("stall_20261115_080052", rec.path.name, "rpm", pytest.approx(52.0),
+                                         pytest.approx(22.0), pytest.approx(62.0), 1, event.rows)
+    assert conn.execute("SELECT stall_count, capture_count, status FROM drives").fetchone() == (1, 1, "complete")
+    assert conn.execute(f"SELECT rpm, link FROM {rec.path.name} WHERE t > 62.95").fetchall() == [(0.0, 1.0)] * 10
+
 
 def test_link_loss_capture_and_stop_mid_capture(amap, tmp_path):
     rec = recorder(amap, tmp_path, post_s=5, link_down_s=1.0)
@@ -107,7 +117,7 @@ def test_capture_is_saved_off_the_feed_thread(amap, tmp_path):
     while rec.events.empty() and time.monotonic() < deadline:
         time.sleep(0.01)
     event = rec.events.get_nowait()
-    assert read_hlog(event.path).series("rpm").v[-1] == 0
+    assert open_log(event.path).series("rpm").v[-1] == 0
     rec.stop()
 
 
@@ -129,6 +139,7 @@ def test_custom_rules_manual_trigger_and_meta(amap, tmp_path):
     run(rec, 8, 20)
     manual = rec.events.get_nowait()
     assert manual.reason == "manual" and manual.path.name.startswith("capture_")
+    assert manual.path.drive == event.path.drive                        # two captures, one drive
     rec.stop()
     with open_log(rec.path) as log:
         assert log.meta["dtc"] == ["P0135"] and log.meta["notes"] == "hot day"
@@ -151,7 +162,7 @@ def test_per_read_recording_keeps_raw_bytes_and_true_times(amap, tmp_path):
     for i in range(100):
         t = i * 0.06
         rpm = 3000 if i < 80 else 0
-        rec.feed_read(t, 0x00, (rpm * 4).to_bytes(2, "big"))
+        rec.feed_read(t, 0x00, (rpm * 4).to_bytes(2, "big"), latency=0.0035)
         rec.feed_read(t + 0.02, 0x12, bytes([60, 141, 24 + 2 * (i % 50), 23]))
         if i % 10 == 0:
             rec.feed_read(t + 0.04, 0x16, bytes([0, 145, 128, 0]))
@@ -164,6 +175,8 @@ def test_per_read_recording_keeps_raw_bytes_and_true_times(amap, tmp_path):
         fast = log.streams["ecu/00+2"]
         assert fast.info.raw_len == 2 and fast.info.attrs["addr"] == 0 and fast.rows == 100
         assert bytes(fast.raw[0]) == b"\x2e\xe0" and log.series("rpm").v[0] == 3000
+        np.testing.assert_allclose(fast.latency, 0.0035)
+        assert np.isnan(log.streams["ecu/12+4"].latency).all()         # not given: unknown, not zero
         assert log.series("map").v[0] == pytest.approx(60 * 0.716 - 5) and log.series("tps").v[1] == 1
         assert log.streams["ecu/16+4"].info.column_names == ["batt", "alt_fr", "eld"]
         assert log.series("rpm").t[1] == pytest.approx(0.06) and log.series("tps").t[1] == pytest.approx(0.08)
@@ -215,103 +228,196 @@ def test_black_box_values_can_trigger(amap, tmp_path):
     assert rec.events.get_nowait().t == pytest.approx(2.0)
 
 
-def test_rotation_and_capture_across_parts(amap, tmp_path):
-    rec = recorder(amap, tmp_path, rotate_s=20.0, pre_s=15, post_s=2)
-    run(rec, 0, 45)
-    run(rec, 45, 50, rpm=0)
+def test_key_off_ends_the_drive_and_the_next_answer_starts_a_new_one(amap, tmp_path):
+    rec = recorder(amap, tmp_path, drive_gap_s=20.0, pre_s=15, post_s=2, link_down_s=1.0)
+    cols = [Column("ecu_b_min", units="V")]
+
+    def box(t0, t1):
+        for t in np.arange(t0, t1, 0.05):
+            rec.feed_values("blackbox/rails", float(t), {"ecu_b_min": 12.5}, columns=cols, evaluate=False)
+    run(rec, 0, 30)
+    box(0, 30)
+    run(rec, 30, 33, link=False)                            # key off: the link-loss capture opens
+    box(30, 33)
+    run(rec, 33, 49.9, link=False)                          # not yet 20 s of silence
+    link_cap = rec.events.get_nowait()
+    assert link_cap.reason == "link" and not rec.parked and len(rec.drives) == 1
+    run(rec, 49.9, 55, link=False)
+    assert rec.parked and len(rec.drives) == 1 and rec.status().buffer_s == 0
+    box(55, 100)                                            # the box keeps talking: not recorded
+    rec.mark("pushed it home")                              # waits for the next drive
+    fed = rec.rows
+    run(rec, 100, 130)                                      # key on again
+    assert not rec.parked and len(rec.drives) == 2 and rec.rows == fed + 300
+    run(rec, 130, 135, rpm=0)                               # a stall 30 s into the second drive
     rec.stop()
-    assert [p.name for p in rec.paths] == [rec.paths[0].name, rec.paths[0].stem + "_p002.hlog",
-                                           rec.paths[0].stem + "_p003.hlog"]
-    parts = [read_hlog(p) for p in rec.paths]
-    assert all(p.indexed for p in parts) and sum(p.streams["ecu"].rows for p in parts) == 500
-    assert parts[1].meta["previous_part"] == rec.paths[0].name and parts[2].meta["part"] == 3
-    assert parts[1].t0 == pytest.approx(20.0) and parts[0].t1 < 20.0
-    event = rec.events.get_nowait()                          # trigger at 45 s, 5 s into part 3
-    rpm = read_hlog(event.path).series("rpm")
-    assert rpm.t[0] == pytest.approx(30.0, abs=0.11) and rpm.t[-1] >= 47.0    # pre-window reaches into part 2
-    assert np.all(np.diff(rpm.t) > 0) and len(rpm) == pytest.approx(171, abs=2)
+    stall = rec.events.get_nowait()
+    first, second = rec.drives
+    assert first.name != second.name and stall.path.drive == second.name and link_cap.path.drive == first.name
+    with open_log(first) as a, open_log(second) as b:
+        assert (a.status, a.meta["end_reason"]) == ("complete", "link_lost")
+        assert (b.status, b.meta["end_reason"]) == ("complete", "stopped")
+        assert a.t0 == 0 and a.t1 == pytest.approx(50.0, abs=0.11)         # ends when the silence was long enough
+        assert b.t0 == pytest.approx(100.0) and b.t1 == pytest.approx(134.9)    # same clock, nothing in between
+        assert b.meta["previous_drive"] == first.name and b.meta["drive_of_session"] == 2
+        assert b.meta["epoch_unix"] == a.meta["epoch_unix"] and b.meta["ecu_id"] == "SIM-P2P"
+        assert a.series("ecu_b_min").t[-1] < 50.1 and "ecu_b_min" not in b.channels
+        assert [e.text for e in b.events_of("marker")] == ["pushed it home"]
+    with open_log(stall.path) as cap:                       # 15 s before the stall, all in the second drive
+        rpm = cap.series("rpm")
+        assert rpm.t[0] == pytest.approx(115.0, abs=0.11) and rpm.t[-1] >= 132.0 and np.all(np.diff(rpm.t) > 0)
+    conn = sqlite3.connect(rec.db)
+    assert conn.execute("SELECT drive, stalls, captures FROM drive_summary ORDER BY drive_id").fetchall() == [
+        (first.name, 1, 1), (second.name, 1, 1)]
+    started = [r[0] for r in conn.execute("SELECT started_iso FROM drives ORDER BY id")]
+    assert started[1].startswith("2026-11-15T08:01:40")     # the second drive began 100 s into the session
 
 
-def test_rotation_waits_for_an_open_capture(amap, tmp_path):
-    rec = recorder(amap, tmp_path, rotate_s=5.0, pre_s=2, post_s=4)
+def test_a_capture_near_the_start_of_a_drive_is_cut_at_the_drive(amap, tmp_path):
+    rec = recorder(amap, tmp_path, drive_gap_s=5.0, pre_s=30, post_s=1, link_down_s=60.0)
+    run(rec, 0, 10)
+    run(rec, 10, 16, link=False)
+    assert rec.parked
+    run(rec, 40, 44)
+    run(rec, 44, 46, rpm=0)
+    rec.stop()
+    event = rec.events.get_nowait()
+    with open_log(event.path) as cap:
+        assert cap.t0 == pytest.approx(40.0) and cap.meta["window"] == "30 s before, 1 s after"
+    assert sqlite3.connect(rec.db).execute("SELECT t_start, t_trigger FROM captures").fetchone() == (
+        pytest.approx(40.0), pytest.approx(44.0))
+
+
+def test_the_drive_does_not_end_while_a_capture_is_open(amap, tmp_path):
+    rec = recorder(amap, tmp_path, drive_gap_s=2.0, pre_s=2, post_s=6, link_down_s=1.0)
     run(rec, 0, 4)
-    run(rec, 4, 7, rpm=0)                                   # 5 s passes while the window is open
-    assert len(rec.paths) == 1
-    run(rec, 7, 9, rpm=0)
-    assert len(rec.paths) == 2
+    run(rec, 4, 9, link=False)                              # 2 s of silence pass while the window is open
+    assert rec.capturing and not rec.parked
+    run(rec, 9, 12, link=False)
+    assert not rec.capturing and rec.parked and rec.events.get_nowait().reason == "link"
     rec.stop()
+    assert len(rec.drives) == 1 and open_log(rec.path).meta["end_reason"] == "link_lost"
+    never = recorder(amap, tmp_path, drive_gap_s=None)      # None: one drive for the whole session
+    run(never, 0, 2)
+    run(never, 2, 500, link=False, step=5)
+    assert not never.parked
+    never.stop()
 
 
-def test_size_rotation_and_unique_names(amap, tmp_path):
-    a = recorder(amap, tmp_path, rotate_mb=0.02, rotate_s=None, flush_interval=0.01)
-    b = recorder(amap, tmp_path)                            # same second: must not overwrite
-    assert a.path != b.path
+def test_two_recorders_share_one_database(amap, tmp_path):
+    a = recorder(amap, tmp_path, flush_interval=0.01)
+    b = recorder(amap, tmp_path)                            # same minute: the names must differ
+    assert a.path != b.path and a.db == b.db
     for i in range(600):
         a.feed(sample(i * 0.1))
+        b.feed(sample(i * 0.1, rpm=3000.0))
         if i % 100 == 0:
-            time.sleep(0.05)
+            time.sleep(0.02)
     a.stop()
+    with open_log(b.path) as live:
+        assert live.status == "recording"                   # a's stop did not touch b's drive
     b.stop()
-    assert len(a.paths) > 1 and sum(read_hlog(p).rows for p in a.paths) == 600
+    with open_log(a.path) as one, open_log(b.path) as two:
+        assert one.rows == two.rows == 600 and one.series("rpm").v.max() == 800 and two.series("rpm").v.min() == 3000
+    assert a.write_error is None and b.write_error is None
 
 
-def test_disk_error_does_not_stop_feeding(amap, tmp_path, monkeypatch):
+def test_disk_error_does_not_stop_feeding(amap, tmp_path):
     rec = recorder(amap, tmp_path, flush_interval=0.01)
     run(rec, 0, 1)
+    rec.flush()
+    real = rec._store._conn
 
-    def full(fd):
-        raise OSError(28, "No space left on device")
-    monkeypatch.setattr(os, "fdatasync", full)
-    rec._writer_opts["fsync"] = True
-    rec._log.fsync = True
+    class Full:
+        def execute(self, sql, *args):
+            if sql.startswith("BEGIN"):
+                raise sqlite3.OperationalError("database or disk is full")
+            return real.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+    rec._store._conn = Full()
     run(rec, 1, 2)
     time.sleep(0.1)
     run(rec, 2, 3)                                          # still accepts samples
-    assert isinstance(rec.write_error, OSError)
-    monkeypatch.undo()
+    assert isinstance(rec.write_error, OSError) and "full" in str(rec.write_error)
+    rec._store._conn = real
     rec.stop()
+    with open_log(rec.path) as log:
+        assert log.status == "complete" and 10 <= log.rows < 30      # what was fed while it failed is lost
 
 
 # ---- retention ----
 
-def aged(folder, name, days, size=1000, **meta):
-    path = folder / name
-    if name.endswith(".hlog"):
-        with LogWriter(path, meta, background=False) as w:
-            w.add_stream("s", [Column("a")])
-            w.append_columns("s", np.arange(size // 12, dtype=float), {})
-    else:
-        path.write_bytes(b"x" * size)
-    stamp = 1_800_000_000 - days * 86400
-    os.utime(path, (stamp, stamp))
-    return path
+NOW = 1_800_000_000
+
+
+def aged(path, days, rows=50, capture=False, **meta):
+    """A finished drive that started ``days`` ago."""
+    started = NOW - days * 86400
+    with new_drive(path, {"started_unix": started, "epoch_unix": started, **meta}) as w:
+        w.add_stream("s", [Column("a"), Column("rpm")], raw_len=8)
+        t = np.arange(rows, dtype=float)
+        w.append_columns("s", t, {"a": t, "rpm": 800 + t}, np.zeros((rows, 8), np.uint8))
+        if capture:
+            w.capture("stall", 5.0, 0.0, 10.0, reason="rpm", message="rpm dropped to 0",
+                      wall=datetime.fromtimestamp(started + 5))
+    return w.ref
 
 
 def test_retention_policy(tmp_path):
-    now = 1_800_000_000
-    old = aged(tmp_path, "log_20260101_000000.hlog", 40)
-    kept_notes = aged(tmp_path, "log_20260102_000000.hlog", 39, notes="first verified run")
-    stall = aged(tmp_path, "stall_20260103_000000.hlog", 38)
-    csv = aged(tmp_path, "log_20260201_000000.csv", 20)
-    mid = aged(tmp_path, "log_20260301_000000.hlog", 10, size=600_000)
-    new = aged(tmp_path, "log_20260310_000000.hlog", 1)
-    aged(tmp_path, "notes.txt", 400)
-    assert RetentionPolicy().plan(tmp_path, now) == [] and not RetentionPolicy().active
-    assert RetentionPolicy(max_age_days=30).plan(tmp_path, now) == [old]     # notes and captures protect
-    assert RetentionPolicy(max_age_days=30, keep_captures=False).plan(tmp_path, now) == [old, stall]
-    assert RetentionPolicy(max_files=2).plan(tmp_path, now) == [old, csv, mid]
-    assert RetentionPolicy(max_total_mb=0.5).plan(tmp_path, now) == [old, csv, mid]
-    assert RetentionPolicy(max_age_days=0).plan(tmp_path, now) == [old, csv, mid]    # newest always stays
-    assert RetentionPolicy(max_age_days=30).plan(tmp_path / "missing") == []
-    broken = aged(tmp_path, "log_20251201_000000.hlog", 90)
-    broken.write_bytes(b"garbage")
-    os.utime(broken, (now - 90 * 86400,) * 2)
-    assert RetentionPolicy(max_age_days=30).apply(tmp_path, now) == [old]    # unreadable is left alone
-    assert not old.exists() and all(p.exists() for p in (kept_notes, stall, csv, mid, new, broken))
+    path = tmp_path / "hondalog.db"
+    old = aged(path, 40)
+    kept_notes = aged(path, 39, notes="first verified run")
+    stall = aged(path, 38, capture=True)
+    tagged = aged(path, 37, tags=["dyno"])
+    flagged = aged(path, 36, keep=True)
+    plain = aged(path, 20)
+    mid = aged(path, 10, rows=20_000)
+    new = aged(path, 1)
+    assert RetentionPolicy().plan(path, NOW) == [] and not RetentionPolicy().active
+    assert RetentionPolicy(max_age_days=30).plan(path, NOW) == [old]        # notes, tags, keep and captures protect
+    assert RetentionPolicy(max_age_days=30, keep_captures=False).plan(path, NOW) == [old, stall]
+    assert RetentionPolicy(max_drives=5).plan(path, NOW) == [old, plain, mid]
+    assert RetentionPolicy(max_total_mb=0.5).plan(path, NOW) == [old, plain, mid]
+    assert RetentionPolicy(max_total_mb=0.7).plan(path, NOW) == [old, plain, mid]     # mid is most of the file
+    assert RetentionPolicy(max_total_mb=5).plan(path, NOW) == []
+    assert RetentionPolicy(max_age_days=0).plan(path, NOW) == [old, plain, mid]       # the newest always stays
+    assert RetentionPolicy(max_age_days=0, keep_newest=0).plan(path, NOW)[-1] == new
+    assert RetentionPolicy(max_age_days=30).plan(tmp_path / "missing", NOW) == []
+    assert RetentionPolicy(max_age_days=30).plan(tmp_path, NOW) == [old]    # the folder names the database too
+
+    before = db.file_size(path)
+    assert RetentionPolicy(max_drives=5).apply(path, NOW) == [old, plain, mid]
+    assert not old.exists() and not mid.exists()
+    assert all(r.exists() for r in (kept_notes, stall, tagged, flagged, new))
+    conn = sqlite3.connect(path)
+    assert conn.execute("SELECT count(*) FROM drives").fetchone()[0] == 5
+    assert conn.execute("SELECT count(DISTINCT drive_id), count(*) FROM samples").fetchone() == (5, 5 * 50)
+    assert conn.execute("PRAGMA freelist_count").fetchone()[0] == 0         # the pages went back to the disk
+    assert db.file_size(path) < before - 0.6e6 and conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    views = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'view'")}
+    assert old.name not in views and mid.name not in views and new.name in views
+    assert open_log(stall.db, "last").rows == 50 and open_log(stall).rows == 50
+    assert RetentionPolicy(max_drives=5).apply(path, NOW) == []
+    assert RetentionPolicy(max_drives=1, keep_captures=False, full_vacuum=True).apply(path, NOW) == [stall]
+    assert conn.execute("SELECT count(*) FROM captures").fetchone()[0] == 0
+
+
+def test_retention_leaves_a_running_drive_alone(amap, tmp_path):
+    old = aged(tmp_path / "hondalog.db", 5000)
+    rec = recorder(amap, tmp_path)
+    run(rec, 0, 1)
+    rec.flush()
+    policy = RetentionPolicy(max_age_days=0, keep_newest=0)
+    assert policy.apply(tmp_path) == [old] and rec.path.exists()            # the one being recorded stays
+    run(rec, 1, 2)
+    rec.stop()
+    assert open_log(rec.path).rows == 20
 
 
 def test_recorder_applies_retention_on_stop(amap, tmp_path):
-    old = aged(tmp_path, "log_20200101_000000.hlog", 5000)
+    old = aged(tmp_path / "hondalog.db", 5000)
     rec = recorder(amap, tmp_path, retention=RetentionPolicy(max_age_days=30))
     run(rec, 0, 1)
     rec.stop()
@@ -327,93 +433,137 @@ def test_library_lists_searches_and_annotates(amap, tmp_path):
     run(rec, 40, 42)
     run(rec, 42, 55, rpm=0)
     rec.stop()
-    (tmp_path / "log_20261110_075801.csv").write_text(
+    old = tmp_path / "log_20261110_075801.csv"
+    old.write_text(
         "# hondalog 0.1.0\n# started: 2026-11-10T07:58:01\ntime_s,wall_time,link,rpm,marker\n0.1,x,1,750,\n0.2,x,1,760,cold start\n")
-    (tmp_path / "broken.hlog").write_bytes(b"nope")
     (tmp_path / "readme.txt").write_text("not a log")
     lib = Library(tmp_path)
     entries = {e.name: e for e in lib.refresh()}
-    assert len(entries) == 4 and (tmp_path / CACHE_NAME).exists()
+    assert len(entries) == 2 and lib.path == tmp_path / "hondalog.db"       # files are not listed: import them
     main, stall = entries[rec.path.name], next(e for e in entries.values() if e.kind == "stall")
-    assert main.kind == "log" and main.duration == pytest.approx(54.9) and main.rows == 550
+    assert main.kind == "drive" and main.duration == pytest.approx(54.9) and main.rows == 550
+    assert main.ref == rec.path and main.status == "complete" and (main.stalls, main.captures) == (1, 1)
     assert main.map_version == amap.version and main.markers == ["idle hunting", "STALL (rpm 0)"]
     assert stall.trigger == "rpm dropped to 0" and stall.duration == pytest.approx(40, abs=0.3)
+    assert stall.ref.capture == stall.name and stall.ref.drive == main.name and stall.markers == main.markers
     assert 0 < len(main.thumb_hi) <= 64 and max(main.thumb_hi) == 800 and min(main.thumb_lo) == 0
-    assert entries["broken.hlog"].error and entries["log_20261110_075801.csv"].started == "2026-11-10T07:58:01"
+    assert lib.drives() == [main]
 
-    assert [e.name for e in lib.search("hunting")] == [stall.name, main.name] or \
-           [e.name for e in lib.search("hunting")] == [main.name, stall.name]
-    assert [e.name for e in lib.search("cold start")] == ["log_20261110_075801.csv"]
+    assert logtool.main(["--db", str(tmp_path), "import", str(old)]) == 0
+    imported = next(e for e in lib.refresh() if e.status == "imported")
+    assert imported.started == "2026-11-10T07:58:01" and imported.name == "drive_2026_11_10_0758"
+    assert {e.name for e in lib.search("hunting")} == {stall.name, main.name}
+    assert [e.name for e in lib.search("cold start")] == [imported.name]
     assert lib.search("hunting nonsense") == [] and len(lib.search(kinds=["stall"])) == 1
-    lib.set_notes(main, notes="Fixed by cleaning the IACV", tags=["idle", "fixed"], keep=True)
+    lib.set_notes(lib.get(main.name), notes="Fixed by cleaning the IACV", tags=["idle", "fixed"], keep=True)
     found = lib.search("iacv")
-    assert [e.name for e in found] == [main.name] and found[0].tags == ["idle", "fixed"]
+    assert {e.name for e in found} == {stall.name, main.name} and all(e.tags == ["idle", "fixed"] and e.keep for e in found)
     assert lib.search(tag="fixed") == found and lib.search(tag="nope") == []
+    lib.set_notes(imported.name, notes="the first log I ever took")         # by name works too
+    assert lib.get(imported.name).notes.startswith("the first")
     with pytest.raises(ValueError):
-        lib.set_notes(tmp_path / "log_20261110_075801.csv", notes="x")
+        lib.set_notes(old, notes="x")                                       # a file is not in the library
 
-    again = Library(tmp_path)                               # second scan comes from the cache
-    opened = []
-    import hondalog.data.library as library_module
-    real = library_module.summarise
-    library_module.summarise = lambda p, c="rpm": opened.append(p) or real(p, c)
-    try:
-        assert len(again.refresh()) == 4 and opened == []
-        annotate(rec.path, notes="changed")
-        again.refresh()
-        assert [p.name for p in opened] == [rec.path.name]
-    finally:
-        library_module.summarise = real
-    (tmp_path / CACHE_NAME).write_text("{broken")
-    assert len(Library(tmp_path).refresh()) == 4 and Library(tmp_path / "missing").refresh() == []
+    annotate(rec.path, notes="changed")                                     # no cache to go stale
+    assert Library(tmp_path / "hondalog.db").refresh() and Library(tmp_path).get(main.name) is None
+    assert {e.notes for e in Library(tmp_path / "hondalog.db").refresh() if e.drive_id == main.drive_id} == {"changed"}
+    assert Library(tmp_path / "missing").refresh() == []
+    crashed = recorder(amap, tmp_path)
+    run(crashed, 0, 2)
+    crashed.flush()
+    db.mark_active(crashed.db, crashed._log.id, False)                      # its process dies
+    assert lib.get(crashed.path.name) is None and lib.refresh()
+    assert lib.get(crashed.path.name).status == "crashed" and lib.get(crashed.path.name).rows == 20
+    crashed.stop()                                                          # it was only asleep: it finishes its drive
+    assert lib.refresh() and lib.get(crashed.path.name).status == "complete"
 
 
 # ---- command line ----
 
-def test_logtool(tmp_path, capsys, amap):
-    src = write_synthetic(tmp_path / "log_20261115_080000.hlog", duration_s=60)
-    assert logtool.main(["info", str(src)]) == 0
+def test_logtool(tmp_path, capsys, amap, monkeypatch):
+    monkeypatch.setenv("HONDALOG_DIR", str(tmp_path))
+    monkeypatch.delenv("HONDALOG_DB", raising=False)
+    src = write_synthetic(tmp_path / "hondalog.db", duration_s=60)
+    assert logtool.main(["info"]) == 0                                      # the newest drive, default database
     out = capsys.readouterr().out
     assert "ecu/00+2" in out and "2 raw bytes/row" in out and "MARK 1" in out and "16.0 Hz" in out
+    assert f"hondalog.db#{src.name}" in out and "status: complete" in out
+    assert logtool.main(["info", src.name]) == 0 and logtool.main(["info", "1"]) == 0
+    assert logtool.main(["--db", str(tmp_path / "hondalog.db"), "info", "last"]) == 0
+    capsys.readouterr()
 
     mlg_path = tmp_path / "out.mlg"
-    assert logtool.main(["export", str(src), str(mlg_path), "--channels", "rpm,map", "--filter", "rpm > 2000",
+    assert logtool.main(["export", src.name, str(mlg_path), "--channels", "rpm,map", "--filter", "rpm > 2000",
                          "--start", "10", "--end", "50", "--compact"]) == 0
     back = open_log(mlg_path)
     assert back.channels == ["rpm", "map"] and back.series("rpm").v.min() > 2000
-    assert logtool.main(["export", str(src), str(tmp_path / "x.parquet")]) == 2
+    assert logtool.main(["export", src.name, str(tmp_path / "x.parquet")]) == 2
     assert "unknown export format" in capsys.readouterr().err
+    assert logtool.main(["export", src.name, str(tmp_path / "cut.db"), "--start", "10", "--end", "20"]) == 0
+    with open_log(tmp_path / "cut.db") as cut:                              # a database to hand to someone
+        assert cut.t0 >= 10 and cut.t1 <= 20 and cut.streams["ecu/00+2"].raw.shape[1] == 2
+        assert cut.meta["exported_from"].endswith(src.name)
 
     old = tmp_path / "old.csv"
     old.write_text("# hondalog 0.1.0\ntime_s,wall_time,link,rpm,marker\n0.1,x,1,750,\n0.2,x,1,760,MARK 1\n")
-    assert logtool.main(["import", str(old), "-o", str(tmp_path)]) == 0
-    assert read_hlog(tmp_path / "old.hlog").markers == [(0.2, "MARK 1")]
-    assert logtool.main(["import", str(old)]) == 0 and "exists" in capsys.readouterr().out
-    assert logtool.main(["import", str(old), "--force"]) == 0
+    assert logtool.main(["import", str(old)]) == 0
+    line = capsys.readouterr().out
+    imported = line.split(" -> ")[1].split()[0]
+    assert imported.startswith("drive_") and "(2 rows, 1 events)" in line
+    with open_log(imported) as log:
+        assert log.markers == [(0.2, "MARK 1")] and log.status == "imported" and log.meta["imported_from"] == str(old)
+    assert logtool.main(["info", str(old)]) == 0 and "status" not in capsys.readouterr().out   # a file, read as it is
 
-    torn = tmp_path / "torn.hlog"
-    torn.write_bytes(src.read_bytes()[:200_000])
-    assert logtool.main(["info", str(torn)]) == 0 and "run 'repair'" in capsys.readouterr().out
-    assert logtool.main(["repair", str(torn), str(src)]) == 0
-    out = capsys.readouterr().out
-    assert "index written" in out and "already complete" in out and read_hlog(torn).indexed
-
-    assert logtool.main(["report", str(src)]) == 0 and src.with_suffix(".html").read_text().startswith("<!DOCTYPE")
-    assert logtool.main(["redecode", str(tmp_path / "old.hlog"), str(tmp_path / "r.hlog"),
-                         "--map", str(addressmap.DEFAULT_MAP)]) == 1       # no raw bytes in a CSV import
+    assert logtool.main(["report", src.name, "-o", str(tmp_path / "r.html")]) == 0
+    assert (tmp_path / "r.html").read_text().startswith("<!DOCTYPE")
+    assert logtool.main(["redecode", imported, "--map", str(addressmap.DEFAULT_MAP)]) == 1     # no raw bytes in a CSV
     rec = recorder(amap, tmp_path)
     rec.feed_read(0.0, 0, b"\x0c\x80")
     rec.stop()
-    assert logtool.main(["redecode", str(rec.path), str(tmp_path / "r.hlog"), "--map", str(addressmap.DEFAULT_MAP)]) == 0
-    assert read_hlog(tmp_path / "r.hlog").series("rpm").v.tolist() == [800]
+    capsys.readouterr()
+    assert logtool.main(["redecode", rec.path.name, "--map", str(addressmap.DEFAULT_MAP)]) == 0
+    again = capsys.readouterr().out.split()[1]
+    with open_log(again) as log:
+        assert log.series("rpm").v.tolist() == [800] and log.meta["redecoded_drive"] == rec.path.name
+        assert log.streams["ecu/00+2"].raw.tolist() == [[0x0c, 0x80]]
+    assert logtool.main(["redecode", rec.path.name, str(tmp_path / "other.db"), "--map", str(addressmap.DEFAULT_MAP)]) == 0
+    assert open_log(tmp_path / "other.db").series("rpm").v.tolist() == [800]
 
     capsys.readouterr()
-    assert logtool.main(["list", str(tmp_path), "-q", "zzz"]) == 0
-    assert "log_20261115_080000.hlog" not in capsys.readouterr().out       # the query matches nothing
-    assert logtool.main(["list", str(tmp_path)]) == 0 and "log_20261115_080000.hlog" in capsys.readouterr().out
-    assert logtool.main(["prune", str(tmp_path)]) == 1
-    os.utime(src, (1, 1))
-    assert logtool.main(["prune", str(tmp_path), "--days", "30"]) == 0
-    assert "would delete" in capsys.readouterr().out and src.exists()
-    assert logtool.main(["prune", str(tmp_path), "--days", "30", "--yes"]) == 0 and not src.exists()
-    assert logtool.main(["info", str(tmp_path / "nope.hlog")]) == 2
+    assert logtool.main(["list", "-q", "zzz"]) == 0 and capsys.readouterr().out == ""    # the query matches nothing
+    assert logtool.main(["list"]) == 0
+    listed = capsys.readouterr().out
+    assert all(name in listed for name in (src.name, imported, rec.path.name, again)) and "60.0 s" in listed
+
+    # compare: two drives of this database, and one from another file
+    assert logtool.main(["compare", src.name, f"{tmp_path / 'cut.db'}#last", "--channels", "rpm,map,nope"]) == 0
+    out = capsys.readouterr().out
+    assert "laid over A with -10." in out and "aligned on start" in out and "rpm" in out and "nope" not in out
+    assert logtool.main(["compare", src.name, imported]) == 0 and "only in A:" in capsys.readouterr().out
+    assert logtool.main(["compare", src.name, "drive_1999"]) == 2 and "no drive" in capsys.readouterr().err
+
+    # SQL passthrough
+    assert logtool.main(["sql", "SELECT drive, status, rows FROM drive_summary ORDER BY drive_id LIMIT 1"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["drive\tstatus\trows", f"{src.name}\tcomplete\t5958"]
+    assert logtool.main(["sql", "--csv", f"SELECT round(max(rpm)), count(*) FROM {src.name}"]) == 0
+    assert capsys.readouterr().out.splitlines()[1].endswith(",960")
+    assert logtool.main(["sql", "SELECT raw FROM ecu_reads LIMIT 1"]) == 0 and len(capsys.readouterr().out.split()[1]) == 4
+    assert logtool.main(["sql", "DELETE FROM drives"]) == 2                 # read-only
+    assert logtool.main(["sql", "SELEC nonsense"]) == 2
+    assert "readonly" in capsys.readouterr().err.replace("-", "").replace(" ", "")
+
+    assert logtool.main(["prune"]) == 1
+    capsys.readouterr()
+    assert logtool.main(["prune", "--days", "0"]) == 0
+    out = capsys.readouterr().out
+    assert f"would delete {src.name}" in out and "dry run" in out and src.exists()
+    size = db.file_size(src.db)
+    assert logtool.main(["prune", "--days", "0", "--yes"]) == 0 and not src.exists()
+    assert db.file_size(src.db) < size
+    assert logtool.main(["vacuum"]) == 0 and "check: ok" in capsys.readouterr().out
+    assert logtool.main(["vacuum", "--full"]) == 0 and "rewritten" in capsys.readouterr().out
+    assert logtool.main(["info", "drive_nope"]) == 2
+    assert logtool.main(["--db", str(tmp_path / "nowhere"), "info"]) == 2
+    err = capsys.readouterr().err
+    assert "no drive, capture or file 'drive_nope'" in err and "no database there" in err
+    assert logtool.main(["--db", str(tmp_path / "nowhere"), "list"]) == 0

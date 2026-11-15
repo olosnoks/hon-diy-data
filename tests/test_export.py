@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 
 from hondalog.analysis import Filter, FilterSet
-from hondalog.data import Column, LogWriter, open_log, read_hlog, write_log
+from hondalog.data import Column, new_drive, open_log, write_log
 from hondalog.data.model import Table
-from hondalog.export import FORMATS, export_log, export_table, mlg, textlog
+from hondalog.export import FORMATS, export_capture, export_log, export_table, mlg, textlog
 
 OLD_CSV = """# hondalog 0.1.0
 # started: 2026-11-10T07:58:01
@@ -26,10 +26,8 @@ time_s,wall_time,link,rpm,ect,batt,vtec,marker
 
 @pytest.fixture()
 def small(tmp_path):
-    path = tmp_path / "small.hlog"
-    with LogWriter(path, {"ecu": "P2P", "ecu_id": "SIM", "started_unix": 1794729600.0,
-                          "address_map_version": "v7", "address_map_text": "x" * 5000},
-                   background=False) as w:
+    with new_drive(tmp_path / "small.db", {"ecu": "P2P", "ecu_id": "SIM", "started_unix": 1794729600.0,
+                                            "address_map_version": "v7", "address_map_text": "x" * 5000}) as w:
         w.add_stream("ecu", [Column("link", "u1", kind="flag", decimals=0),
                              Column("rpm", units="rpm", decimals=0),
                              Column("ect", units="°C", decimals=1),
@@ -41,7 +39,7 @@ def small(tmp_path):
         w.event(5.03, "marker", "MARK 1")
         w.event(30.0, "trigger", "STALL (rpm 0)")
         w.event(31.0, "note", "not a marker")
-    with open_log(path) as log:
+    with open_log(w.ref) as log:
         yield log
 
 
@@ -53,7 +51,8 @@ def test_mlg_v2_layout_matches_the_spec(tmp_path, small):
     version, stamp, info_start, data_begin, rec_len, nfields = struct.unpack_from(">HIIIHH", blob, 6)
     assert (version, stamp, nfields) == (2, 1794729600, 5)             # Time + 4 channels
     assert info_start == 24 + 89 * nfields and blob[data_begin - 1] == 0
-    assert blob[info_start:data_begin - 1].decode() == "ecu=P2P; ecu_id=SIM; address_map_version=v7"
+    assert blob[info_start:data_begin - 1].decode().startswith(
+        "ecu=P2P; ecu_id=SIM; address_map_version=v7; started=2026-11-1")
 
     fields = []
     for i in range(nfields):
@@ -208,8 +207,9 @@ def test_import_old_csv_and_migrate(tmp_path):
     assert log.series("link").v.tolist() == [1, 1, 0, 1]
     assert [(e.t, e.kind, e.text) for e in log.events] == [
         (0.204, "marker", "MARK 1"), (0.406, "marker", "it stumbled"), (0.406, "trigger", "STALL (rpm 0)")]
-    native = read_hlog(write_log(log, tmp_path / "migrated.hlog"))
-    assert native.indexed and native.rows == 4 and native.meta["imported_from"] == str(src)
+    native = open_log(write_log(log, tmp_path / "hondalog.db", {"imported_from": str(src)}))
+    assert native.status == "imported" and native.rows == 4 and native.meta["imported_from"] == str(src)
+    assert native.name == "drive_2026_11_10_0758" and native.meta["started"] == "2026-11-10T07:58:01"
     assert native.markers == log.markers and native.series("batt").v[3] == pytest.approx(12.1)
 
 
@@ -238,8 +238,9 @@ def test_export_options(tmp_path, synth):
     assert len(cold) == 0
     slow = open_log(export_log(synth, tmp_path / "s.csv", channels=["rpm", "ect"], hz=2))
     assert slow.channels == ["rpm", "ect"] and slow.series("rpm").rate_hz == pytest.approx(2)
-    cut = read_hlog(export_log(synth, tmp_path / "cut.hlog", t0=10, t1=20))
+    cut = open_log(export_log(synth, tmp_path / "cut.db", t0=10, t1=20))
     assert cut.t0 >= 10 and cut.t1 <= 20 and set(cut.streams) == set(synth.streams)
+    assert cut.streams["blackbox/rails"].rows == pytest.approx(500, abs=2) and ".db" in FORMATS
     npz = np.load(export_log(synth, tmp_path / "a.npz", channels=["rpm", "tps"]))
     assert npz["names"].tolist() == ["rpm", "tps"] and len(npz["t"]) == len(npz["ch_rpm"])
     assert npz["marker_text"][0] == "MARK 1" and npz["units"].tolist() == ["rpm", "%"]
@@ -257,3 +258,23 @@ def test_one_hour_mlg_size_is_in_budget(tmp_path):
     cols = {n: Column(n, decimals=1) for n in table.names}
     size = mlg.write_mlg(tmp_path / "h.mlg", table, columns=cols, compact=True).stat().st_size
     assert 1.5e6 < size < 2.3e6
+
+
+def test_export_capture_to_a_file(tmp_path):
+    """A capture is a row in the database; this is how it becomes a file again."""
+    with new_drive(tmp_path / "hondalog.db", {"ecu_id": "SIM"}) as w:
+        w.add_stream("ecu/00+2", [Column("rpm", units="rpm")], source="ecu", raw_len=2)
+        w.add_stream("blackbox/live", [Column("bb_ecub", units="V")], source="blackbox")
+        for i in range(600):
+            w.append("ecu/00+2", i * 0.1, [3000.0 if i < 400 else 0.0], b"\x00\x00")
+            w.append("blackbox/live", i * 0.1, [13.8])
+        w.event(38.0, "marker", "MARK 1")
+        ref, rows = w.capture("stall", 40.0, 10.0, 50.0, reason="rpm", message="rpm dropped to 0",
+                              meta={"stall_time_s": "40.000"})
+    back = open_log(export_capture(ref, tmp_path / "stall.mlg"))
+    assert back.channels == ["rpm", "bb_ecub"] and back.duration == pytest.approx(40) and len(back.markers) == 1
+    text = open_log(export_capture(str(ref), tmp_path / "stall.csv", channels=["rpm"]))
+    assert text.t0 >= 10 and text.t1 <= 50 and text.series("rpm").v[-1] == 0 and text.markers == [(38.0, "MARK 1")]
+    alone = open_log(export_capture(ref, tmp_path / "stall.db"))          # a database with just that window
+    assert alone.rows == rows == 802 and alone.meta["stall_time_s"] == "40.000" and alone.duration == pytest.approx(40)
+    assert alone.streams["ecu/00+2"].raw.shape == (401, 2) and alone.meta["exported_from"] == str(ref)

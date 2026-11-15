@@ -375,7 +375,14 @@ def test_open_event_merges_the_matching_ecu_log(paired, tmp_path):
     import json
     info = json.loads((folder / "bundle.json").read_text())
     assert info["verdict"] == "main_relay" and info["alignment"] == "wall"
-    assert abs(info["offset_s"] - offset) < 0.02 and (folder / log_path.name).exists()
+    assert abs(info["offset_s"] - offset) < 0.02
+    # the drive travels as a small database of its own, next to the .bbx
+    from hondalog.data import open_log
+    assert info["ecu_log"].startswith("ecu.db#drive_") and (folder / bbx.name).exists()
+    with open_log(folder / "ecu.db") as copy, open_log(log_path) as original:
+        assert copy.rows == original.rows and copy.meta["epoch_unix"] == original.meta["epoch_unix"]
+        assert copy.meta["exported_from"] == str(log_path)
+    assert estimate(read_log(folder / "ecu.db"), ev).method == "wall"       # and still lines up there
 
 
 def test_bench_event_on_both_paths_lines_up_within_20ms(tmp_path):
@@ -414,6 +421,6 @@ def test_bench_event_on_both_paths_lines_up_within_20ms(tmp_path):
 
     log = open_event(path, directory=tmp_path / "logs")
     assert log.alignment.method == "wall" and log.verdict.cause == "main_relay", log.verdict.text()
-    assert "log_" in log.meta["bb_ecu_log"]
+    assert log.meta["bb_ecu_log"] == str(rec.path)
     drop_us = next(us for us, sig, what in timeline(log.blackbox) if sig == "ecub" and what == "fell below 6 V")
     assert abs(float(log.alignment.to_ecu_s(drop_us)) - t_fail) < 0.020

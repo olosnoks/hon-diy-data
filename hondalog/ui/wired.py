@@ -10,7 +10,7 @@ built against. This module is what ``build_session()`` wires for real use:
     BlackboxSource  W2 BlackboxReader on the poller's time axis
     PipelineAlarms  W3 alarm engine (plus plain limits for the black box rails)
     LiveRecording   W4 Recorder + trigger engine through the LiveSession
-    HlogReader      W4 open_log / ReplaySession, .bbx through W2 open_event
+    DriveReader     W4 open_log / ReplaySession on the drive database, .bbx through W2 open_event
     LogHistogramMap W4 TableHistogram, on the ROM table's axes when one is open
     MappingSession  W3 VerificationSession / correlate; the console goes
                     through W1's read-only guard
@@ -39,7 +39,8 @@ from ..analysis import Bins, ReplaySession, TableHistogram, table_bins
 from ..blackbox import BlackboxReader, bb_channel
 from ..blackbox import list_ports as bb_list_ports
 from ..blackbox.sim import BBSIM_PREFIX
-from ..data import open_log
+from ..data import DriveRef, db_path, files_dir, open_log, parse_ref, write_log
+from ..data.library import Library
 from ..live import BLACKBOX_STREAM, LiveSession
 from ..logger import LINK, log_dir
 from ..mapping import correlate, mapedit
@@ -557,14 +558,15 @@ class _Filtered:
 # ---- recording --------------------------------------------------------------
 
 class LiveRecording:
-    """Recording on the LiveSession: native .hlog with raw bytes, math
-    channels, the black box stream, alarms and the trigger engine."""
+    """Recording on the LiveSession: a drive in the database with raw bytes,
+    math channels, the black box stream, alarms and the trigger engine.
+    ``path`` is the drive (a ``DriveRef``); a capture is a ``DriveRef`` too."""
 
     def __init__(self, ecu: LinkSource, out_dir=None):
         self.ecu = ecu
         self.out_dir = out_dir
         self.rec = None
-        self.path: Path | None = None
+        self.path: DriveRef | None = None
         self.marks = 0
         self._t0 = 0.0
         self._last_mark: float | None = None
@@ -592,7 +594,7 @@ class LiveRecording:
         try:
             self.rec = self.ecu.live.start_recording(self.out_dir)
         except OSError as exc:
-            return f"Cannot write the log file: {exc}"
+            return f"Cannot write the database: {exc}"
         self.path, self.marks, self._t0 = self.rec.path, 0, time.monotonic()
         self._last_mark = None
         return ""
@@ -651,17 +653,23 @@ class LiveRecording:
 
 # ---- logs -------------------------------------------------------------------
 
-class HlogReader:
-    """LogReader on W4's reader (``open_log``: .hlog, old .csv, .msl, .mlg) and
-    W2's ``open_event`` for black box captures (.bbx, merged with the ECU log).
+class DriveReader:
+    """LogReader on W4's reader (``open_log``: a drive or capture in the
+    database; old .csv, .msl, .mlg files) and W2's ``open_event`` for black
+    box captures (.bbx, merged with the drive that was being recorded).
 
     Every channel keeps its own time base. ``view.replay`` is W4's
-    ``ReplaySession`` for the same file (envelopes, two cursors, readouts).
+    ``ReplaySession`` for the same drive (envelopes, two cursors, readouts).
+    ``directory`` is the folder that holds ``hondalog.db``.
     """
 
     def __init__(self, spec_lookup=None, directory=None):
         self._lookup = spec_lookup or (lambda cid: None)
         self._dir = directory
+
+    @property
+    def database(self) -> Path:
+        return db_path(self._dir)
 
     def _spec(self, name: str, column=None, source: str = "ECU") -> tuple[str, ChannelSpec, float]:
         """(ui id, spec, scale) for a logged channel name."""
@@ -681,15 +689,27 @@ class HlogReader:
         return cid, spec, scale
 
     def read(self, path) -> ad.LogView:
-        path = Path(path)
-        if path.suffix.lower() == ".bbx":
-            return self._read_bbx(path)
-        with open_log(path) as log:
+        ref = path if isinstance(path, DriveRef) else parse_ref(path, self.database)
+        if ref is None:
+            path = Path(path)
+            if path.suffix.lower() == ".bbx":
+                return self._read_bbx(path)
+            if not path.exists() and path.parent == Path("."):
+                raise ValueError(f"no drive or capture {path.name!r} in {self.database}")
+        else:
+            path = ref
+        try:
+            log = open_log(path)
+        except KeyError as exc:
+            raise ValueError(str(exc.args[0] if exc.args else exc)) from None
+        with log:
             log.load_all()
             if not log.channels or log.rows == 0:
                 raise ValueError(f"{path.name}: no data")
             meta = {k: v for k, v in log.meta.items() if k != "address_map_text"}
             view = ad.LogView(path, title=path.name, meta=meta)
+            if log.status == "crashed":
+                view.note = "the recorder died during this drive: it ends at the last commit"
             trigger = None
             for key in ("trigger_time_s", "stall_time_s"):
                 try:
@@ -762,15 +782,53 @@ class HlogReader:
             out.summary = verdict.title + "."
         return out
 
-    def recent(self, stalls_only: bool = False):
-        folder = Path(self._dir) if self._dir else log_dir()
+    def _entries(self):
         try:
-            files = [p for pattern in ("*.hlog", "*.csv", "*.bbx") for p in folder.glob(pattern)]
+            return Library(self.database).refresh()
+        except (OSError, ValueError):
+            return []
+
+    def _bbx(self) -> list[tuple[float, Path]]:
+        try:
+            return [(p.stat().st_mtime, p) for p in files_dir(self._dir).glob("*.bbx")]
         except OSError:
             return []
+
+    def recent(self, stalls_only: bool = False):
+        """Drives, captures and black box files, newest first. A capture
+        counts from its trigger, so it comes before the drive it is in."""
+        entries = self._entries()
         if stalls_only:
-            files = [p for p in files if p.name.startswith("stall_")]
-        return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+            return [e.ref for e in entries if e.kind == "stall"]
+        found = [(e.started_unix, 1 if e.kind == "drive" else 2, e.ref) for e in entries]
+        found += [(mtime, 0, path) for mtime, path in self._bbx()]
+        return [ref for _, _, ref in sorted(found, key=lambda x: x[:2], reverse=True)]
+
+    def drives(self):
+        """The drive picker's rows: every drive, each followed by its captures, then .bbx files."""
+        entries = self._entries()
+        rows = []
+        for drive in (e for e in entries if e.kind == "drive"):
+            mine = [drive] + sorted((e for e in entries if e.kind != "drive" and e.drive_id == drive.drive_id),
+                                    key=lambda e: e.started_unix)
+            for e in mine:
+                text = " ".join([e.name, e.kind, e.status, e.notes, e.trigger, *e.tags, *e.markers]).lower()
+                rows.append(ad.DriveRow(e.ref, e.name, e.kind, e.started[:19].replace("T", " "), e.duration,
+                                        e.status, e.stalls, e.trigger if e.kind != "drive" else e.notes, text))
+        for mtime, path in sorted(self._bbx(), reverse=True):
+            stamp = datetime.fromtimestamp(mtime).isoformat(" ", "seconds")
+            rows.append(ad.DriveRow(path, path.name, "file", stamp, text=path.name.lower()))
+        return rows
+
+    def import_file(self, path):
+        """A CSV / MSL / MLG file becomes a new drive in the database."""
+        path = Path(path)
+        if path.suffix.lower() == ".bbx":
+            return path                     # black box captures are opened where they lie
+        with open_log(path) as log:
+            if log.ref is not None:
+                return log.ref              # already a drive (another database): open it there
+            return write_log(log, self.database, {"imported_from": str(path)})
 
 
 # ---- observed map -----------------------------------------------------------

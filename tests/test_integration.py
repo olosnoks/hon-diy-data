@@ -115,7 +115,7 @@ def test_stall_capture_reopens_with_raw_bytes_and_decodes_again(stall_run):
     rec = stall_run["recorder"]
     event = rec.events.get_nowait()
     assert event.reason == "rpm" and event.rule == "stall" and 5.0 <= event.t < 6.0   # the engine spins down
-    assert event.path.name.startswith("stall_") and event.path.suffix == ".hlog" and rec.events.empty()
+    assert event.path.name.startswith("stall_") and event.path.drive == rec.path.name and rec.events.empty()
     with open_log(event.path) as cap:
         assert cap.t0 == pytest.approx(event.t - 3, abs=0.1) and cap.t1 == pytest.approx(event.t + 2, abs=0.15)
         assert cap.meta["trigger"] == "stall" and cap.meta["capture_of"] == rec.path.name
@@ -260,7 +260,7 @@ def test_black_box_and_ecu_share_one_timebase_and_one_capture(tmp_path):
     captures = []
     while not recorder.events.empty():
         captures.append(recorder.events.get_nowait())
-    assert len(captures) == 1, [c.path.name for c in captures]      # both trigger paths, one file
+    assert len(captures) == 1, [c.path.name for c in captures]      # both trigger paths, one capture
     cap_event = captures[0]
     assert cap_event.reason == "external" and "black box" in cap_event.message
     assert abs(cap_event.t - t_fail) < 0.5
@@ -290,7 +290,7 @@ def test_black_box_and_ecu_share_one_timebase_and_one_capture(tmp_path):
 
     # the box's own 1 kHz capture lines up with the ECU log through the same clock
     merged = open_event(bbx, directory=tmp_path / "logs")
-    assert merged.alignment.method == "wall" and "log_" in merged.meta["bb_ecu_log"]
+    assert merged.alignment.method == "wall" and merged.meta["bb_ecu_log"] == str(recorder.path)
     assert merged.verdict.cause == "main_relay"
     assert "rpm" in merged.names and "bb_ecub" in merged.names
     late = merged.t > 1.0
@@ -302,9 +302,10 @@ def test_hondalog_log_record_uses_the_same_path(tmp_path, capsys):
     assert logtool.main(["record", "--port", "sim:", "--bb", "bbsim:", "--seconds", "2.5",
                          "--map", str(addressmap.DEFAULT_MAP), "-o", str(tmp_path), "-q"]) == 0
     out = capsys.readouterr().out
-    assert "recording to" in out and "saved" in out
-    (path,) = tmp_path.glob("log_*.hlog")
-    with open_log(path) as log:
+    assert "recording drive_" in out and "saved drive_" in out
+    assert [p.name for p in tmp_path.glob("*.db")] == ["hondalog.db"]
+    with open_log(tmp_path / "hondalog.db") as log:
+        assert log.status == "complete" and log.streams[BLACKBOX_STREAM].rows > 50
         assert {"ecu/00+3", MATH_STREAM, BLACKBOX_STREAM} <= set(log.streams)
         assert log.streams["ecu/00+3"].info.raw_len == 3 and log.series("rpm").rate_hz > 10
         assert log.meta["address_map_tag"] == addressmap.load_default().version_tag

@@ -29,11 +29,10 @@ import csv
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 
 import numpy as np
 
-from ..data.container import is_hlog
+from ..data.db import DriveRef, is_database, parse_ref
 from ..data.reader import open_log
 from . import format as F
 from .eventfile import BlackboxEvent
@@ -58,11 +57,12 @@ class Alignment:
 def ecu_wall_origin(path) -> float | None:
     """Unix time of session time 0 in an ECU log.
 
-    A native ``.hlog`` carries it in its header (``epoch_unix``, written by
+    A drive in the database carries it in its row (``epoch_unix``, written by
     the recorder). A 0.1.0 CSV has a wall_time column: the median over all
     rows is used, so one odd row does not matter."""
-    if is_hlog(path):
-        with open_log(path) as log:
+    ref = path if isinstance(path, DriveRef) else parse_ref(path)
+    if ref is not None or is_database(path):
+        with open_log(ref if ref is not None else path) as log:
             epoch = log.meta.get("epoch_unix")
         return float(epoch) if isinstance(epoch, (int, float)) else None
     origins = []

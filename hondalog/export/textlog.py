@@ -63,7 +63,7 @@ def write_csv(path: str | os.PathLike, table: Table, markers: Sequence[tuple[flo
         fh.write(f"# hondalog {__version__}\n")
         for key, value in (meta or {}).items():
             text = str(value).replace("\n", " ")
-            if len(text) <= 400:                # the map text and the like stay in the .hlog
+            if len(text) <= 400:                # the map text and the like stay in the database
                 fh.write(f"# {key}: {text}\n")
         units = " ".join(f"{n}={table.units.get(n) or '-'}" for n in names)
         if "units" not in (meta or {}):

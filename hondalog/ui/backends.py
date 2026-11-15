@@ -574,6 +574,12 @@ class CsvLogReader:
             return []
         return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
 
+    def drives(self):
+        return [ad.DriveRow(p, p.name, "file", text=p.name.lower()) for p in self.recent()]
+
+    def import_file(self, path):
+        return Path(path)                   # the demo has no database: the file is opened as it is
+
 
 def order_of_loss(view: ad.LogView, pre_s: float = 30.0, hold_s: float = 0.2) -> ad.Forensics:
     """For each channel, the first time it leaves its normal band in the pre_s

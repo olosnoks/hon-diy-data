@@ -1,4 +1,4 @@
-"""Synthetic logs for tests and benchmarks: a plausible drive, no car needed."""
+"""Synthetic drives for tests and benchmarks: a plausible drive, no car needed."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ from pathlib import Path
 
 import numpy as np
 
-from .container import LogWriter
+from .db import DriveRef
 from .model import Column
+from .store import Store
 
 FAST = (("ecu/00+2", 0x00, 2, ("rpm",)),
         ("ecu/12+4", 0x12, 4, ("map", "baro", "tps", "o2")),
@@ -39,14 +40,15 @@ def drive(t: np.ndarray, rng: np.random.Generator) -> dict[str, np.ndarray]:
 
 def write_synthetic(path: str | os.PathLike, duration_s: float = 3600.0, *, fast_hz: float = 16.0,
                     slow_hz: float = 1.3, blackbox_hz: float = 50.0, markers: int = 12,
-                    seed: int = 1) -> Path:
-    """Write a multi-rate log: three fast K-line blocks, one slow block with
-    raw bytes, and black box rail frames, all on one timebase."""
+                    seed: int = 1, started_unix: float = 1794729600.0) -> DriveRef:
+    """Write a multi-rate drive into the database ``path``: three fast K-line
+    blocks, one slow block with raw bytes, and black box rail frames, all on
+    one timebase. The rails are in millivolt steps, as the box reports them."""
     rng = np.random.default_rng(seed)
-    path = Path(path)
-    meta = {"format": "hondalog synthetic", "started": "2026-11-15T08:00:00", "ecu": "P2P (synthetic)",
-            "ecu_id": "SYNTH", "address_map_version": "synthetic-1", "started_unix": 1794729600.0}
-    with LogWriter(path, meta, background=False) as writer:
+    meta = {"format": "hondalog synthetic", "ecu": "P2P (synthetic)", "ecu_id": "SYNTH",
+            "address_map_version": "synthetic-1", "started_unix": started_unix, "epoch_unix": started_unix}
+    with Store(Path(path), background=False, fsync=False) as store:
+        writer = store.begin_drive(meta)
         n_fast = int(duration_s * fast_hz)
         base = np.arange(n_fast) / fast_hz + rng.uniform(0, 0.004, n_fast)
         for k, (name, addr, length, channels) in enumerate(FAST):
@@ -71,10 +73,11 @@ def write_synthetic(path: str | os.PathLike, duration_s: float = 3600.0, *, fast
             frame = {}
             for rail in RAILS:
                 mean = 13.8 + rng.normal(0, 0.04, len(t))
-                frame[f"{rail}_mean"] = mean
-                frame[f"{rail}_min"] = mean - np.abs(rng.normal(0, 0.05, len(t)))
-                frame[f"{rail}_max"] = mean + np.abs(rng.normal(0, 0.05, len(t)))
+                frame[f"{rail}_mean"] = np.round(mean, 3)
+                frame[f"{rail}_min"] = np.round(mean - np.abs(rng.normal(0, 0.05, len(t))), 3)
+                frame[f"{rail}_max"] = np.round(mean + np.abs(rng.normal(0, 0.05, len(t))), 3)
             writer.append_columns("blackbox/rails", t, frame)
         for i in range(markers):
             writer.event(duration_s * (i + 0.5) / markers, "marker", f"MARK {i + 1}")
-    return path
+        writer.end()
+    return writer.ref

@@ -1,9 +1,12 @@
-"""Keeping the log folder from filling the disk.
+"""Keeping the database from filling the disk.
 
-``RetentionPolicy.plan`` lists what it would delete; ``apply`` deletes it.
-Nothing is deleted unless a limit is set, captures (stall files and the
-like) are kept by default, and so is any log whose metadata has ``keep``
-set or carries notes or tags: somebody cared about those.
+``RetentionPolicy.plan`` lists the drives it would delete; ``apply`` deletes
+them and gives the freed pages back to the disk (incremental vacuum; pass
+``full_vacuum=True`` to rewrite the file compactly as well). Nothing is
+deleted unless a limit is set. A drive with a capture in it (a stall) is
+kept by default, and so is any drive with ``keep`` set or with notes or
+tags: somebody cared about those. A drive that is being recorded is never
+touched.
 """
 
 from __future__ import annotations
@@ -11,86 +14,86 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
-from .container import EXTENSION, LogFormatError
-from .reader import read_hlog
-
-LOG_PREFIX = "log_"
-LOG_SUFFIXES = (EXTENSION, ".csv")
+from . import db
+from .db import DriveRef
+from .library import DriveEntry, list_entries
 
 
-def is_session_log(path: Path) -> bool:
-    """A continuous recording (as opposed to a capture cut out of one)."""
-    return path.name.startswith(LOG_PREFIX) and path.suffix in LOG_SUFFIXES
-
-
-def is_protected(path: Path) -> bool:
-    """True if the log's own metadata says to keep it."""
-    if path.suffix != EXTENSION:
-        return False
-    try:
-        with read_hlog(path) as log:
-            meta = log.meta
-    except (OSError, LogFormatError, ValueError):
-        return True                     # unreadable: do not make it worse
-    return bool(meta.get("keep") or meta.get("notes") or meta.get("tags"))
+def is_protected(entry: DriveEntry) -> bool:
+    """True if the drive's own row says to keep it."""
+    return bool(entry.keep or entry.notes or entry.tags)
 
 
 @dataclass
 class RetentionPolicy:
-    max_age_days: float | None = None       # delete session logs older than this
-    max_total_mb: float | None = None       # then delete oldest until the folder fits
-    max_files: int | None = None            # and until at most this many session logs remain
-    keep_captures: bool = True              # never delete stall_*/capture files
-    keep_newest: int = 1                    # always keep this many of the newest session logs
+    max_age_days: float | None = None       # delete drives older than this
+    max_total_mb: float | None = None       # then delete oldest until the database fits
+    max_drives: int | None = None           # and until at most this many drives remain
+    keep_captures: bool = True              # never delete a drive that has a capture (a stall) in it
+    keep_newest: int = 1                    # always keep this many of the newest drives
+    full_vacuum: bool = False               # rewrite the whole file after deleting (slow on a big one)
 
     @property
     def active(self) -> bool:
-        return any(v is not None for v in (self.max_age_days, self.max_total_mb, self.max_files))
+        return any(v is not None for v in (self.max_age_days, self.max_total_mb, self.max_drives))
 
-    def plan(self, folder: str | os.PathLike, now: float | None = None) -> list[Path]:
-        """Files this policy would delete, oldest first."""
-        folder = Path(folder)
-        if not self.active or not folder.is_dir():
+    def plan(self, path: str | os.PathLike | None = None, now: float | None = None) -> list[DriveRef]:
+        """Drives this policy would delete, oldest first."""
+        target = db.db_path(path)
+        if not self.active or not target.is_file():
             return []
         now = time.time() if now is None else now
-        files = [p for p in folder.iterdir() if p.is_file() and p.suffix in LOG_SUFFIXES]
-        stats = {p: p.stat() for p in files}
-        candidates = sorted((p for p in files if is_session_log(p) or not self.keep_captures),
-                            key=lambda p: stats[p].st_mtime)
+        conn = db.connect(target)
+        try:
+            drives = [e for e in list_entries(conn, target) if e.kind == "drive"]
+            pages, free, page_size = (int(conn.execute(f"PRAGMA {name}").fetchone()[0])
+                                      for name in ("page_count", "freelist_count", "page_size"))
+        finally:
+            conn.close()
+        drives.sort(key=lambda e: (e.started_unix, e.drive_id))
+        candidates = [e for e in drives if e.status != "recording"]
         if self.keep_newest > 0:
-            sessions = [p for p in candidates if is_session_log(p)]
-            spared = set(sessions[-self.keep_newest:])
-            candidates = [p for p in candidates if p not in spared]
-        candidates = [p for p in candidates if not is_protected(p)]
+            spared = {e.name for e in drives[-self.keep_newest:]}
+            candidates = [e for e in candidates if e.name not in spared]
+        candidates = [e for e in candidates if not is_protected(e)
+                      and not (self.keep_captures and e.captures)]
 
-        doomed: list[Path] = []
+        doomed: list[DriveEntry] = []
         if self.max_age_days is not None:
             limit = now - self.max_age_days * 86400.0
-            doomed += [p for p in candidates if stats[p].st_mtime < limit]
-        remaining = [p for p in candidates if p not in doomed]
-        if self.max_files is not None:
-            sessions_left = sum(1 for p in files if is_session_log(p) and p not in doomed)
-            while remaining and sessions_left > self.max_files:
-                victim = remaining.pop(0)
-                doomed.append(victim)
-                sessions_left -= is_session_log(victim)
+            doomed += [e for e in candidates if e.started_unix < limit]
+        remaining = [e for e in candidates if e not in doomed]
+        if self.max_drives is not None:
+            left = len(drives) - len(doomed)
+            while remaining and left > self.max_drives:
+                doomed.append(remaining.pop(0))
+                left -= 1
         if self.max_total_mb is not None:
-            total = sum(stats[p].st_size for p in files if p not in doomed)
+            # a drive's size in its row is an estimate: scale them so they add up to the file
+            used = float((pages - free) * page_size)
+            scale = used / (sum(e.size for e in drives) or 1.0)
+            total = used - scale * sum(e.size for e in doomed)
             while remaining and total > self.max_total_mb * 1e6:
                 victim = remaining.pop(0)
                 doomed.append(victim)
-                total -= stats[victim].st_size
-        return sorted(doomed, key=lambda p: stats[p].st_mtime)
+                total -= scale * victim.size
+        doomed.sort(key=lambda e: (e.started_unix, e.drive_id))
+        return [e.ref for e in doomed]
 
-    def apply(self, folder: str | os.PathLike, now: float | None = None) -> list[Path]:
-        """Delete what ``plan`` lists. Returns the files that were removed."""
-        removed = []
-        for path in self.plan(folder, now):
-            try:
-                path.unlink()
-                removed.append(path)
-            except OSError:
-                pass
-        return removed
+    def apply(self, path: str | os.PathLike | None = None, now: float | None = None) -> list[DriveRef]:
+        """Delete what ``plan`` lists. Returns the drives that were removed."""
+        target = db.db_path(path)
+        doomed = self.plan(target, now)
+        if not doomed:
+            return []
+        conn = db.connect(target, write=True)
+        try:
+            gone = set(db.delete_drives(conn, [ref.drive for ref in doomed]))
+        finally:
+            conn.close()
+        try:
+            db.vacuum(target, full=self.full_vacuum)
+        except OSError:
+            pass                            # busy: the pages are free and get reused anyway
+        return [ref for ref in doomed if ref.drive in gone]

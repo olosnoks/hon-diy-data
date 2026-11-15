@@ -56,7 +56,7 @@ def test_wired_implementations_satisfy_the_protocols():
     assert isinstance(session.extra_sources[0], ad.ChannelSource)
     assert isinstance(session.alarms, wired.PipelineAlarms) and isinstance(session.alarms, ad.AlarmSource)
     assert isinstance(session.recording, wired.LiveRecording) and isinstance(session.recording, ad.Recording)
-    assert isinstance(session.logs, wired.HlogReader) and isinstance(session.logs, ad.LogReader)
+    assert isinstance(session.logs, wired.DriveReader) and isinstance(session.logs, ad.LogReader)
     assert isinstance(session.obsmap, wired.LogHistogramMap) and isinstance(session.obsmap, ad.ObservedMap)
     assert isinstance(session.mapper, wired.MappingSession) and isinstance(session.mapper, ad.MapperSession)
     assert isinstance(session.tables, wired.RomTableModel) and isinstance(session.tables, ad.TableModel)
@@ -122,7 +122,7 @@ def test_ecu_math_and_black_box_reach_the_bus_at_their_own_rates(live):
     assert s.bus.channel("fan").stale(now)
 
 
-def test_recording_is_the_native_log_with_public_trigger_status(live):
+def test_recording_is_a_drive_in_the_database_with_public_trigger_status(live):
     s = live
     assert pump_until(s, lambda: s.stall.state == "armed")       # Recorder.status(), no private fields
     assert s.stall.pre_s == 30 and s.stall.post_s == 10 and s.stall.buffer_s > 0
@@ -131,7 +131,7 @@ def test_recording_is_the_native_log_with_public_trigger_status(live):
     seen = ect.gen
     assert pump_until(s, lambda: ect.gen >= seen + 2)               # two more slow reads on file
     path = s.recording.path
-    assert path.suffix == ".hlog"
+    assert path.name.startswith("drive_") and path.db == s.logs.database and path.db.name == "hondalog.db"
     s.recording.stop()
     assert not s.recording.active and s.stall.state in ("armed", "standby", "off")
     with open_log(path) as log:
@@ -148,7 +148,13 @@ def test_recording_is_the_native_log_with_public_trigger_status(live):
     assert view.data["tach"].max() == pytest.approx(view.replay.log.series("bb_rpm_tach").v.max() / 30)
     assert view.align_residual_ms is not None and view.align_residual_ms < 5
     assert view.replay.readouts(["rpm"])[0].name == "rpm"           # W4's ReplaySession rides along
-    assert s.logs.recent()[0] == path
+    assert s.logs.recent()[0] == path and view.title == path.name
+    assert s.logs.read(str(path)).title == path.name and s.logs.read(path.name).title == path.name
+    rows = s.logs.drives()                                          # what the drive picker lists
+    assert [(r.ref, r.kind, r.status) for r in rows] == [(path, "drive", "complete")]
+    assert rows[0].duration_s > 0.5 and "mark 1" in rows[0].text and rows[0].started[:2] == "20"
+    with pytest.raises(ValueError, match="no drive or capture"):
+        s.logs.read("drive_1999_01_01_0000")
 
 
 def test_capture_from_the_trigger_engine_reaches_the_banner(live):
@@ -167,6 +173,11 @@ def test_capture_from_the_trigger_engine_reaches_the_banner(live):
     view = s.logs.read(s.banner.path)
     assert view.trigger_t == 0.0 and min(view.t["rpm"]) < 0 and "bbatt" in view.data
     assert s.logs.recent(stalls_only=True) == [s.banner.path]
+    assert view.title == s.banner.path.name and s.banner.path.drive == s.recording.path.name
+    assert s.logs.recent() == [s.banner.path, s.recording.path]     # the capture, then the drive it is in
+    rows = s.logs.drives()
+    assert [(r.name, r.kind) for r in rows] == [(s.recording.path.name, "drive"), (s.banner.path.name, "stall")]
+    assert rows[0].stalls == 1 and "black box" in rows[1].notes and s.stall_paths()[0][0] == s.banner.path.name
     assert s.logs.analyze(view).loss[-1].signal == "STALL"
 
 
@@ -391,3 +402,4 @@ def test_table_model_is_the_rom_session_with_the_demo_as_fallback(tmp_path):
 
     session = build_session(rom=rom)                                         # the app's --rom
     assert session.tables.loaded and session.obsmap.rpm_axis.tolist() == DEMO_RPM
+

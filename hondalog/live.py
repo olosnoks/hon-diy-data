@@ -1,7 +1,7 @@
 """The one live path: readings in, math channels and alarms worked out,
 everything recorded and watched by the triggers.
 
-    Poller --on_block--> LiveSession --feed_read------------> Recorder (.hlog, raw bytes)
+    Poller --on_block--> LiveSession --feed_read------------> Recorder (hondalog.db, raw bytes)
            --on_sample->   LivePipeline (math + alarms) ----> Recorder ("math" stream,
                                                               alarm events, captures)
     BlackboxReader ---->   on the poller's t0 --------------> Recorder ("blackbox/live")
@@ -220,7 +220,8 @@ class LiveSession:
         return meta
 
     def start_recording(self, out_dir: str | Path | None = None, **opts: Any) -> Recorder:
-        """Begin a native log. Raises OSError if the file cannot be made."""
+        """Begin a drive in the database (``out_dir`` is the folder that holds
+        ``hondalog.db``). Raises OSError if the file cannot be made."""
         from .logger import Recorder
         if self.recorder is not None:
             return self.recorder
@@ -240,8 +241,8 @@ class LiveSession:
         return recorder
 
     def stop_recording(self) -> Recorder | None:
-        """Close the log (the header gets the final link counters). Returns
-        the recorder so the caller can read ``path``, ``rows`` and ``events``."""
+        """End the drive (its row gets the final link counters). Returns the
+        recorder so the caller can read ``path``, ``rows`` and ``events``."""
         recorder, self.recorder = self.recorder, None
         if recorder is not None:
             recorder.set_meta(**self.log_meta())
@@ -282,7 +283,7 @@ class LiveSession:
         recorder = self.recorder
         if recorder is not None:
             # the time the ECU sampled it: frame completion minus its estimated age
-            recorder.feed_read(read.t - read.latency_s, read.addr, read.data)
+            recorder.feed_read(read.t - read.latency_s, read.addr, read.data, read.latency_s)
         if self.on_read is not None:
             self.on_read(read)
 

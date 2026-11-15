@@ -15,27 +15,18 @@ from pathlib import Path
 
 import numpy as np
 
-from ..data.container import EXTENSION
+from ..data import db
+from ..data.db import DriveRef
 from ..data.reader import open_log
+from ..data.store import write_log
 from ..logger import LogData, log_dir, read_log
-from . import format as F
 from .align import Alignment, estimate
 from .diagnose import diagnose
 from .eventfile import BlackboxEvent, read_event
 
 
 def _wall_span(path: Path):
-    """(first, last) wall time of an ECU log (.hlog or 0.1.0 CSV) as unix
-    seconds, or None."""
-    if path.suffix.lower() == EXTENSION:
-        try:
-            with open_log(path) as log:
-                epoch = log.meta.get("epoch_unix")
-                if not isinstance(epoch, (int, float)) or log.rows == 0:
-                    return None
-                return (epoch + log.t0, epoch + log.t1)
-        except (OSError, ValueError):
-            return None
+    """(first, last) wall time of a 0.1.0 CSV log as unix seconds, or None."""
     first = last = None
     wi = None
     try:
@@ -71,22 +62,43 @@ def _wall_span(path: Path):
     return (first, last) if first is not None and last is not None else None
 
 
-def find_ecu_log(ev: BlackboxEvent, directory=None) -> Path | None:
-    """The ECU log that was recording when the capture triggered. Needs the
-    capture's clock to have been set. Prefers the full ``log_*`` recording
-    over the ``stall_*`` capture cut from it, and a native log over a CSV."""
+def find_drive(ev: BlackboxEvent, database=None) -> DriveRef | None:
+    """The drive that was being recorded when the capture triggered."""
+    wall = ev.trigger_wall
+    path = db.db_path(database)
+    if wall is None or not path.is_file():
+        return None
+    at = wall.timestamp()
+    try:
+        _, rows = db.query(
+            path, "SELECT name FROM drives WHERE epoch_unix IS NOT NULL AND ("
+                  "(t_last IS NOT NULL AND epoch_unix + t_first - 1.0 <= ?1 AND ?1 <= epoch_unix + t_last + 15.0) "
+                  "OR (status = 'recording' AND coalesce(started_at, epoch_unix) - 1.0 <= ?1)) "
+                  "ORDER BY status = 'recording', duration_s DESC LIMIT 1", (at,))
+    except (OSError, ValueError):
+        return None
+    return DriveRef(path, rows[0][0]) if rows else None
+
+
+def find_ecu_log(ev: BlackboxEvent, directory=None):
+    """The ECU log that was recording when the capture triggered: a drive in
+    the database (``directory`` is the folder that holds ``hondalog.db``, or
+    the file), else a 0.1.0 CSV log lying in that folder. Needs the
+    capture's clock to have been set."""
     wall = ev.trigger_wall
     if wall is None:
         return None
+    drive = find_drive(ev, directory)
+    if drive is not None:
+        return drive
     at = wall.timestamp()
     best = None
-    folder = Path(directory or log_dir())
-    for path in sorted([*folder.glob("*" + EXTENSION), *folder.glob("*.csv")]):
+    folder = db.files_dir(directory)
+    for path in sorted(folder.glob("*.csv")):
         span = _wall_span(path)
         if span is None or not span[0] - 1.0 <= at <= span[1] + 15.0:
             continue
-        rank = (0 if path.name.startswith("log_") else 1,
-                0 if path.suffix.lower() == EXTENSION else 1, -(span[1] - span[0]))
+        rank = (0 if path.name.startswith("log_") else 1, -(span[1] - span[0]))
         if best is None or rank < best[0]:
             best = (rank, path)
     return best[1] if best else None
@@ -159,9 +171,10 @@ def merge(ev: BlackboxEvent, ecu_log: LogData | None = None,
 def open_event(path, ecu_log="auto", directory=None) -> LogData:
     """Read a ``.bbx`` capture and merge the matching ECU log into it.
 
-    ``ecu_log``: ``"auto"`` looks in ``directory`` (default: the log folder)
-    for the log that was recording at the time; a path uses that file;
-    ``None`` opens the capture alone.
+    ``ecu_log``: ``"auto"`` looks in the database in ``directory`` (default:
+    the data folder) for the drive that was being recorded at the time; a
+    ``DriveRef`` or a path uses that drive or file; ``None`` opens the
+    capture alone.
 
     The result also has ``.blackbox`` (the ``BlackboxEvent``), ``.alignment``
     and ``.verdict`` (``diagnose.Verdict``).
@@ -173,28 +186,38 @@ def open_event(path, ecu_log="auto", directory=None) -> LogData:
         try:
             ecu = read_log(ecu_path)
             alignment = estimate(ecu, ev)
-        except (OSError, ValueError):
+        except (OSError, ValueError, KeyError):
             ecu = alignment = None
     return merge(ev, ecu, alignment)
 
 
 def bundle(event_path, ecu_log_path=None, out_dir=None) -> Path:
-    """Copy a capture and its ECU log into one folder with a ``bundle.json``
-    that records how they line up. Returns the folder."""
+    """Put a capture and its ECU log into one folder with a ``bundle.json``
+    that records how they line up: the ``.bbx`` file, and ``ecu.db`` holding
+    the drive (a CSV log is copied as it is). Returns the folder."""
     ev = read_event(event_path)
-    ecu_path = Path(ecu_log_path) if ecu_log_path else find_ecu_log(ev)
+    ecu_path = ecu_log_path if ecu_log_path else find_ecu_log(ev)
+    if ecu_path is not None and not isinstance(ecu_path, DriveRef):
+        ecu_path = db.parse_ref(ecu_path) or Path(ecu_path)
     stamp = ev.trigger_wall.strftime("%Y%m%d_%H%M%S") if ev.trigger_wall else f"ev{ev.event_no:06d}"
     folder = Path(out_dir or log_dir()) / f"event_{stamp}_{ev.reason_name}"
     folder.mkdir(parents=True, exist_ok=True)
     shutil.copy2(event_path, folder / Path(event_path).name)
     alignment = None
-    if ecu_path:
+    ecu_name = None
+    if isinstance(ecu_path, DriveRef):
+        alignment = estimate(read_log(ecu_path), ev)
+        with open_log(ecu_path) as log:
+            copy = write_log(log.window(log.t0, log.t1), folder / "ecu.db", {"exported_from": str(ecu_path)})
+        ecu_name = f"ecu.db#{copy.name}"
+    elif ecu_path:
         shutil.copy2(ecu_path, folder / ecu_path.name)
         alignment = estimate(read_log(ecu_path), ev)
+        ecu_name = ecu_path.name
     verdict = diagnose(ev)
     (folder / "bundle.json").write_text(json.dumps({
         "blackbox": Path(event_path).name,
-        "ecu_log": ecu_path.name if ecu_path else None,
+        "ecu_log": ecu_name,
         "reason": ev.reason_name,
         "trigger_wall_time": ev.trigger_wall.isoformat(timespec="milliseconds") if ev.trigger_wall else None,
         "offset_s": alignment.offset_s if alignment else None,

@@ -21,8 +21,8 @@ from hondalog.data.synth import write_synthetic  # noqa: E402
 
 @pytest.fixture(scope="session")
 def synth_path(tmp_path_factory):
-    """A 10-minute multi-rate log shared by the read-only tests."""
-    return write_synthetic(tmp_path_factory.mktemp("synth") / "synth.hlog", duration_s=600)
+    """A 10-minute multi-rate drive shared by the read-only tests (a DriveRef)."""
+    return write_synthetic(tmp_path_factory.mktemp("synth") / "synth.db", duration_s=600)
 
 
 @pytest.fixture()

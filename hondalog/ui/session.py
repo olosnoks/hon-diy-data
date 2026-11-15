@@ -9,7 +9,8 @@ object and never import a backend module.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+
+import numpy as np
 
 from . import adapters as ad
 from .bus import ChannelBus
@@ -155,7 +156,13 @@ class Session:
                 continue
             t = view.t["rpm"]
             keep = (t >= -30.0) & (t <= 0.0)
-            out.append((path.name, view.data["rpm"][keep], view.data["map"][keep]))
+            # RPM and MAP are read in different blocks, each at its own times:
+            # take the MAP value that was current at each RPM read
+            tm = view.t["map"]
+            if not len(tm):
+                continue
+            at = np.clip(np.searchsorted(tm, t[keep], side="right") - 1, 0, len(tm) - 1)
+            out.append((path.name, view.data["rpm"][keep], view.data["map"][at]))
             if len(out) >= limit:
                 break
         return out
@@ -205,7 +212,7 @@ class Session:
                     summary = ""
                 self.banner = cap
                 self.banner_cause = " ".join(x for x in (cause, summary,
-                                                         f"Saved {Path(cap.path).name}") if x)
+                                                         f"Saved {getattr(cap.path, 'name', cap.path)}") if x)
                 events.append(UiEvent("stall", self.banner_cause, cap))
         return events
 
@@ -245,7 +252,7 @@ def build_session(demo: bool = False, log_dir=None, writable_tables: bool = Fals
     session = Session(ecu, wired.BlackboxSource(ecu, blackbox_port), wired.PipelineAlarms(ecu),
                       wired.LiveRecording(ecu, log_dir), None, wired.LogHistogramMap(tables),
                       wired.MappingSession(ecu), tables, extra_sources=[wired.MathSource(ecu)])
-    session.logs = wired.HlogReader(_lookup(session), log_dir)
+    session.logs = wired.DriveReader(_lookup(session), log_dir)
     return session
 
 

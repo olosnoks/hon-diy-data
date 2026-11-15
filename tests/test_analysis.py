@@ -12,7 +12,8 @@ from hondalog.analysis import cursors, filters, histogram
 from hondalog.analysis.lod import decimate_points
 from hondalog.analysis.report import capture_report, write_report
 from hondalog.expr import compile_expr
-from hondalog.data import Column, Log, Stream, StreamInfo
+from hondalog.analysis import compare_logs
+from hondalog.data import Column, Log, Stream, StreamInfo, open_log, write_log
 from hondalog.data.model import Event, Series, Table
 
 
@@ -378,6 +379,44 @@ def test_histogram_delta_between_logs():
     fs = FilterSet([Filter("low", "rpm < 1800")])
     filtered, fa, _ = Comparison(a, b).histogram_delta("rpm", "map", "stft", xb, yb, filters=fs)
     assert fa.samples < ha.samples and np.isnan(filtered[:, 1:]).all()
+
+
+def test_compare_two_drives_of_one_database_and_of_two(tmp_path):
+    """The same comparison on drives read back from SQLite: both from one
+    database, then the second one from another file."""
+    a, b = two_runs()
+    home, other = tmp_path / "hondalog.db", tmp_path / "friend.db"
+    ref_a = write_log(a, home, {"started_unix": 1794812400.0, "notes": "before the new IACV"})
+    ref_b = write_log(b, home, {"started_unix": 1794898800.0})
+    ref_c = write_log(b, other, {"started_unix": 1794898800.0})
+    assert ref_a.db == ref_b.db and ref_a.name != ref_b.name and ref_c.db == other
+    for second in (ref_b, ref_c, f"{other}#{ref_c.name}"):
+        with open_log(ref_a) as one, open_log(second) as two:
+            cmp = Comparison(one, two)
+            assert cmp.common_channels() == ["rpm", "stft", "map"]
+            assert cmp.align("marker") == pytest.approx(7.0) and cmp.align("trigger") == pytest.approx(7.0)
+            assert cmp.overlay("rpm").summary()["max_abs"] < 1e-3            # values are 32-bit in the file
+            assert cmp.overlay("stft").summary()["mean"] == pytest.approx(3.0)
+            xb, yb = Bins.linear(800, 3800, 3), Bins.linear(30, 90, 2)
+            delta, ha, hb = cmp.histogram_delta("rpm", "map", "stft", xb, yb)
+            assert np.nanmax(np.abs(delta - 3.0)) < 1e-6 and ha.samples == 600 and hb.samples == 500
+
+            result = compare_logs(one, two, align="marker", text="pull")
+            assert result.offset == pytest.approx(7.0) and result.aligned_on == "marker"
+            rows = {r.name: r for r in result.rows}
+            assert list(rows) == ["rpm", "stft", "map"] and rows["rpm"].units == "" and rows["rpm"].n == 500
+            assert rows["stft"].mean == pytest.approx(3.0) and rows["stft"].mean_a == 2.0 and rows["stft"].mean_b == -1.0
+            assert rows["map"].max_abs < 1e-3 and result.only_a == [] and result.only_b == []
+            fallback = compare_logs(one, two, ["stft", "nope"], align="crossing", channel="rpm", level=1e9)
+            assert fallback.aligned_on == "start" and fallback.offset == 0 and [r.name for r in fallback.rows] == ["stft"]
+
+            session = ReplaySession(one)                                     # Replay's overlay, same drives
+            assert session.set_overlay(two, "marker") == pytest.approx(7.0)
+            assert session.overlay_trace("rpm").t[0] >= 7.0 - 0.2
+    extra = mem_log({"rpm": [800.0, 900.0], "knock": [0.0, 1.0]}, [0.0, 1.0])
+    with open_log(ref_a) as one:
+        result = compare_logs(one, extra)
+        assert [r.name for r in result.rows] == ["rpm"] and result.only_a == ["stft", "map"] and result.only_b == ["knock"]
 
 
 # ---- replay session ----
