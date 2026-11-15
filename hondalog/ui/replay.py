@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QHeaderView, QLabel, QL
                                QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
 
 from ..addressmap import Channel
+from ..blackbox.channels import bb_channel
 from ..logger import log_dir, read_log
 from . import theme
 from .plots import StripCharts
@@ -102,7 +103,8 @@ class Replay(QWidget):
     def open_dialog(self) -> None:
         start = self.settings.value("replay/dir", str(log_dir()))
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open log", start, "Logs (*.hlog *.csv *.msl *.mlg);;All files (*)")
+            self, "Open log", start, "Logs and black box captures (*.hlog *.csv *.msl *.mlg *.bbx);;"
+            "Black box capture (*.bbx);;All files (*)")
         if path:
             self.open(path)
 
@@ -139,7 +141,7 @@ class Replay(QWidget):
         self.settings.setValue("replay/dir", str(Path(path).parent))
         self._channels = {}
         for name in log.names:
-            ch = self.amap.channel(name) if self.amap else None
+            ch = (self.amap.channel(name) if self.amap else None) or bb_channel(name)
             if ch is None:                  # column the current map does not know
                 kind = "flag" if name == "link" else "value"
                 ch = Channel(name, 0, label=name, decimals=0 if kind == "flag" else 2,
@@ -151,7 +153,8 @@ class Replay(QWidget):
         meta = log.meta
         self.meta_label.setText("\n".join(
             f"{k}: {meta[k]}" for k in ("started", "ecu_id", "address_map_version",
-                                        "stall_trigger", "stall_time_s") if k in meta))
+                                        "stall_trigger", "stall_time_s", "bb_verdict",
+                                        "bb_alignment", "bb_notes") if k in meta))
 
         default = [n for n in log.names if (c := self._channels[n]).plot and c.kind == "value"]
         default = default or [n for n in log.names if n != "link"][:5]

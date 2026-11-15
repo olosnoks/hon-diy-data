@@ -34,7 +34,7 @@ from .data.model import Column
 from .data.reader import open_log
 from .data.retention import RetentionPolicy
 from .data.store import extract_window
-from .triggers import MANUAL, Capture, Fired, TriggerEngine, TriggerRule, default_rules
+from .triggers import MANUAL, Capture, Fired, TriggerEngine, TriggerRule, default_rules, external_rule
 
 LINK = "link"
 ECU_STREAM = "ecu"
@@ -197,6 +197,15 @@ class Recorder:
             if self.active:
                 self._handle_fired([self._engine.fire(rule, self._last_t if t is None else t)])
 
+    def external_trigger(self, why: str, t: float | None = None) -> None:
+        """Another source (the black box) reported a trigger: save a capture
+        around now. It goes through the same engine as the rules, so a stall
+        the ECU log also sees within the window lands in the same file."""
+        with self._lock:
+            if self.active:
+                rule = external_rule(why, self._engine.rules)
+                self._handle_fired([self._engine.fire(rule, self._last_t if t is None else t)])
+
     def stop(self) -> None:
         with self._lock:
             if not self.active:
@@ -291,6 +300,10 @@ class Recorder:
     def _begin(self, t: float, wall: datetime | None) -> None:
         if self._epoch is None:
             self._epoch = (wall or datetime.now()) - timedelta(seconds=t)
+            # wall time of session time 0: what lines this log up with a
+            # black box capture, or with another log of the same drive
+            self.header["epoch_unix"] = self._epoch.timestamp()
+            self._log.set_meta(epoch_unix=self.header["epoch_unix"])
         if self._part_t0 is None:
             self._part_t0 = t
         elif not self._engine.capturing and (
@@ -436,7 +449,12 @@ def read_log(path: str | os.PathLike) -> LogData:
 
     Channels read at different rates are put on the grid of the densest one.
     New code should use ``hondalog.data.open_log`` and keep the real rates.
+    A black box capture (``.bbx``) is opened through
+    ``hondalog.blackbox.open_event``, merged with its ECU log.
     """
+    if str(path).lower().endswith(".bbx"):
+        from .blackbox.importer import open_event
+        return open_event(path)
     with open_log(path) as log:
         if not log.channels or log.rows == 0:
             raise ValueError(f"{path}: no data")

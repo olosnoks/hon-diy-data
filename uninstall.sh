@@ -10,6 +10,9 @@ fi
 echo "==> Removing hondalog"
 sudo rm -f /usr/local/bin/hondalog /usr/local/bin/hondalog-sim \
     /usr/local/bin/hondalog-firstcontact /usr/local/bin/hondalog-map \
+    /usr/local/bin/hondalog-log /usr/local/bin/hondalog-bb \
+    /usr/local/bin/hondalog-bbsim
+    /usr/local/bin/hondalog-firstcontact /usr/local/bin/hondalog-map \
     /usr/local/bin/hondalog-log
     /usr/local/bin/hondalog-map
 sudo rm -f /usr/local/share/applications/hondalog.desktop

@@ -61,6 +61,18 @@ MANUAL = TriggerRule("manual", when="0", pre_s=30, post_s=10, label="CAPTURE",
                      message="capture requested", kind="capture")
 
 
+def external_rule(why: str, rules: Iterable[TriggerRule] = ()) -> TriggerRule:
+    """The one-off rule for a trigger that came from outside (the black box).
+
+    It is a stall capture like the two built-in rules and uses their window,
+    so the file looks the same whichever side saw the engine die first.
+    """
+    stall = next((r for r in rules if r.kind == "stall"), None)
+    pre_s, post_s = (stall.pre_s, stall.post_s) if stall else (30.0, 10.0)
+    return TriggerRule("external", when="0", pre_s=pre_s, post_s=post_s, label=f"STALL ({why})",
+                       message=why, kind="stall", reason="external", group="stall")
+
+
 def load_rules(path: str | Path) -> list[TriggerRule]:
     """Read rules from TOML::
 

@@ -358,6 +358,61 @@ project yet. Parquet is not offered: Debian trixie has no `python3-pyarrow`.
 `redecode` needs a log that holds raw bytes. Those are stored when the
 poller hands over single reads (`Recorder.feed_read`); a log recorded sweep
 by sweep has decoded values only.
+## Black box (Track B)
+
+A K-line log cannot show a millisecond power dropout: the ECU just stops
+answering. The black box is a separate recorder, an ESP32-S3 wired to the
+battery, ECU +B (main relay output), fuel pump feed, IG1, tach, ignition
+trigger, one injector and a marker button. It keeps the last 30 s in RAM and
+writes them, plus 10 s more, to a microSD card when a trigger rule fires. It
+works with no laptop in the car.
+
+| what | where |
+|------|-------|
+| wiring, parts, where to tap, bench tests | `firmware/blackbox/HARDWARE.md` |
+| USB protocol | `firmware/blackbox/PROTOCOL.md` |
+| file format, reason codes, settings, trigger rules | `firmware/blackbox/FORMAT.md` |
+| firmware (PlatformIO, ESP-IDF) | `firmware/blackbox/` |
+| laptop side | `hondalog/blackbox/` |
+
+**Try it with no hardware:**
+
+```sh
+hondalog-bbsim --fault main_relay --fault-after 15     # terminal 1; keys m i f k b inject faults
+hondalog-bb live --port /tmp/hondalog-bbsim            # terminal 2
+hondalog-bb fetch --port /tmp/hondalog-bbsim           # copies captures to ~/hondalog/logs
+hondalog-bb info ~/hondalog/logs/bb*EV000001.bbx       # order of events and a verdict
+```
+
+`hondalog-bb info` prints what fell first, for example:
+
+```
+ECU +B dropped while IG1 and battery stayed up  (confidence: high)
+       +0.0 ms  ecub      dipped below 6 V and came back (2 times)
+     +400.0 ms  ecub      fell below 6 V
+     +423.6 ms  tach      first missing pulse
+```
+
+**Replay.** Open a `.bbx` file in the Replay tab. If an ECU log was
+recording at the time and the laptop was plugged into the box, the two are
+merged on one time axis (good to a few ms; the box's clock is set from the
+laptop once a second). Without the clock it falls back to shared markers
+(about ±50 ms) or to matching RPM (about ±100 ms). Black box channels are
+named `bb_...`.
+
+**Build and flash** (needs internet for the first build):
+
+```sh
+pip install platformio
+cd firmware/blackbox && pio run -t upload
+```
+
+**Other commands:** `hondalog-bb list`, `config [--set key=value] [--save]`,
+`selftest`, `csv FILE`, `cal RAIL --low METER SHOWN --high METER SHOWN`.
+
+**Not done yet:** the live black box channels are not on the dashboard (the
+UI is being redesigned; the API it needs is `hondalog.blackbox.BlackboxReader`,
+documented in `hondalog/blackbox/__init__.py`). No Wi-Fi download.
 
 ## Files
 
@@ -381,7 +436,8 @@ editing), `live.py` (math + alarms per sample), `logger.py` (the recorder),
 `data/` (native log format, reader, library, retention), `triggers/`
 (trigger engine, stall presets), `analysis/` (filters, table histogram,
 scatter, cursors, compare, plot decimation), `export/` (MLG, MSL, CSV,
-importers), `logtool.py` (`hondalog-log`), `sim.py` (fake ECU), `ui/` (Qt).
+importers), `logtool.py` (`hondalog-log`), `blackbox/` (Track B: reader,
+simulator, file parser, alignment), `sim.py` (fake ECU), `ui/` (Qt).
 
 ## Link: how fast, and how it copes
 
@@ -467,7 +523,7 @@ same model in-process, with ISO 9141-2.
 
 ```sh
 cd /opt/hondalog
-python3 -m pytest                                   # unit tests
+python3 -m pytest                                   # unit tests (the black box C core needs gcc and make; skipped without)
 python3 -m hondalog.bench.expr_bench                # math/alarm CPU cost against the budget
 QT_QPA_PLATFORM=offscreen python3 tools/smoke.py    # full run against the simulator
 python3 bench/bench_data.py                         # log write/open/histogram timings
@@ -501,6 +557,15 @@ real car:
 - the alarm limits, the 240 cc/min injector size and the 0.85 VE guess behind
   the fuel flow and AFR estimates
 - the ISO PID cross-check against a real ISO 9141-2 session
+
+The black box is further behind:
+
+- the firmware has never been compiled or run on a board (the build tools
+  could not be downloaded where it was written). Its logic (`bbcore`) is the
+  same C that the tests run on the PC; the ESP32 driver layer
+  (`main/hal/hal_esp32s3.c`) is untested
+- the ECU pins and wire colours to tap, the signal levels, the hold-up time
+  and the SD write speed: see the list at the end of `HARDWARE.md`
 
 ## Uninstall
 
