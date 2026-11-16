@@ -310,10 +310,9 @@ def _write_link(drive: Any, df: DriveFile) -> None:
         drive.append(LINK_STREAM, df.seconds(t_us), [up])
 
 
-def _write_gps(drive: Any, df: DriveFile) -> None:
-    if not df.gps:
-        return
-    drive.add_stream(GPS_STREAM, [
+def gps_columns() -> list[Column]:
+    """The "gps" stream's columns: a drive file's fixes, and the live ones over serial."""
+    return [
         Column("gps_lat", "f8", "°", "Latitude", decimals=6, lo=-90.0, hi=90.0),
         Column("gps_lon", "f8", "°", "Longitude", decimals=6, lo=-180.0, hi=180.0),
         Column("gps_speed", "f4", "km/h", "GPS speed", decimals=1, lo=0.0, hi=200.0),
@@ -322,7 +321,13 @@ def _write_gps(drive: Any, df: DriveFile) -> None:
         Column("gps_fix", "u1", "", "GPS fix", kind="flag", decimals=0),
         Column("gps_hdop", "f4", "", "HDOP", decimals=1, lo=0.0, hi=20.0),
         Column("gps_utc", "f8", "s", "GPS time (unix)", decimals=0),
-    ], source="gps", storage="rows")
+    ]
+
+
+def _write_gps(drive: Any, df: DriveFile) -> None:
+    if not df.gps:
+        return
+    drive.add_stream(GPS_STREAM, gps_columns(), source="gps", storage="rows")
     for g in df.gps:
         has = bool(g.fix)
         drive.append(GPS_STREAM, df.seconds(g.t_us),
@@ -439,5 +444,5 @@ def summary(results: list[ImportResult]) -> str:
     return json.dumps(counts)
 
 
-__all__ = ["GPS_STREAM", "ImportResult", "already_imported", "find_map", "import_card", "import_file"]
+__all__ = ["GPS_STREAM", "ImportResult", "gps_columns", "already_imported", "find_map", "import_card", "import_file"]
 _ = timezone  # (datetime.fromtimestamp gives local time, as the recorder does; files hold UTC)

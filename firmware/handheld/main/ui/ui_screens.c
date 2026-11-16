@@ -229,11 +229,11 @@ static void gps_update(const hh_snapshot_t *s, const ui_derived_t *d)
 
 /* ---- Link / status --------------------------------------------------------- */
 
-static struct { row_t link, backend, ecu, rate, reads, errors, sd, log, stall; lv_obj_t *reason; } lnk;
+static struct { row_t link, backend, ecu, rate, reads, errors, sd, log, pc, pc_lost, stall; lv_obj_t *reason; } lnk;
 
 static void link_create(lv_obj_t *body)
 {
-    int w = (UI_W - 2 * GRID_X - 12) / 2, x2 = GRID_X + w + 12, rh = (UI_BODY_H - 2 * GAP) / 6;
+    int w = (UI_W - 2 * GRID_X - 12) / 2, x2 = GRID_X + w + 12, rh = (UI_BODY_H - 2 * GAP) / 7;
     const lv_font_t *f = &hh_font_20;
     lnk.link    = row_create(body, GRID_X, GAP + 0 * rh, w, rh, "LINK", f, true);
     lnk.backend = row_create(body, GRID_X, GAP + 1 * rh, w, rh, "BACKEND", f, false);
@@ -243,11 +243,14 @@ static void link_create(lv_obj_t *body)
     lnk.errors  = row_create(body, x2, GAP + 1 * rh, w, rh, "ERRORS", f, false);
     lnk.sd      = row_create(body, x2, GAP + 2 * rh, w, rh, "SD", f, true);
     lnk.log     = row_create(body, x2, GAP + 3 * rh, w, rh, "LOG", f, false);
-    lnk.stall   = row_create(body, GRID_X, GAP + 4 * rh, UI_W - 2 * GRID_X, rh, "STALL CATCHER", f, true);
-    lv_obj_t *k = ui_label(body, &hh_font_16, GRID_X + 2, GAP + 5 * rh + (rh - 20) / 2, 0, LV_TEXT_ALIGN_LEFT);
+    /* the laptop on the USB-C port (SERIAL.md) */
+    lnk.pc      = row_create(body, GRID_X, GAP + 4 * rh, w, rh, "PC", f, true);
+    lnk.pc_lost = row_create(body, x2, GAP + 4 * rh, w, rh, "PC SENT/LOST", f, false);
+    lnk.stall   = row_create(body, GRID_X, GAP + 5 * rh, UI_W - 2 * GRID_X, rh, "STALL CATCHER", f, true);
+    lv_obj_t *k = ui_label(body, &hh_font_16, GRID_X + 2, GAP + 6 * rh + (rh - 20) / 2, 0, LV_TEXT_ALIGN_LEFT);
     lv_label_set_text(k, "LAST");
     ui_ink(k, TK(fg2));
-    lnk.reason = ui_label(body, f, GRID_X + 50, GAP + 5 * rh + (rh - 24) / 2, UI_W - 2 * GRID_X - 52, LV_TEXT_ALIGN_RIGHT);
+    lnk.reason = ui_label(body, f, GRID_X + 50, GAP + 6 * rh + (rh - 24) / 2, UI_W - 2 * GRID_X - 52, LV_TEXT_ALIGN_RIGHT);
     ui_ink(lnk.reason, TK(fg));
 }
 
@@ -291,6 +294,15 @@ static void link_update(const hh_snapshot_t *s, const ui_derived_t *d)
     if (s->log.recording) snprintf(text, sizeof(text), "#%u  %s MB", (unsigned)s->log.drive_no, num);
     else snprintf(text, sizeof(text), "NOT RECORDING");
     ui_set_text(lnk.log.value, text);
+
+    /* PC: two-way knows whether the laptop is there (it is heard); tx-only can only say that it is sending */
+    if (s->pc.mode == 0) ui_shape_set(lnk.pc.shape, UI_SHAPE_SQUARE, TK(fg), TK(fg));
+    else if (s->pc.mode == 1 || s->pc.host) ui_shape_set(lnk.pc.shape, UI_SHAPE_DOT, TK(ok), TK(fg));
+    else ui_shape_set(lnk.pc.shape, UI_SHAPE_RING, TK(fg), TK(fg));
+    ui_set_text(lnk.pc.value, s->pc.mode == 0 ? "OFF" : s->pc.mode == 1 ? "TX" : s->pc.host ? "PC" : "NO PC");
+    if (s->pc.frames >= 100000) snprintf(text, sizeof(text), "%uk / %u", (unsigned)(s->pc.frames / 1000), (unsigned)s->pc.dropped);
+    else snprintf(text, sizeof(text), "%u / %u", (unsigned)s->pc.frames, (unsigned)s->pc.dropped);
+    ui_set_text(lnk.pc_lost.value, text);
 
     snprintf(text, sizeof(text), "%s   COUNT %u", s->stall.triggered ? "CAUGHT" : s->stall.armed ? "ARMED" : "OFF", (unsigned)s->stall.count);
     ui_set_text(lnk.stall.value, text);

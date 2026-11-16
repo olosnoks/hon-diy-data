@@ -69,6 +69,8 @@ def _record(args: argparse.Namespace) -> int:
     recorder = None
     try:
         poller.ready.wait(10)
+        if getattr(poller, "warning", ""):
+            print(f"handheld: {poller.warning}", file=sys.stderr)
         if poller.ecu_id is None:
             print(f"no reply from the ECU on {args.port} yet ({poller.last_error or 'key on?'}); "
                   "recording anyway", file=sys.stderr)
@@ -311,7 +313,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("record", help="record from the ECU without the GUI")
-    p.add_argument("--port", required=True, help="serial device, or sim: for the built-in simulator")
+    p.add_argument("--port", required=True, help="serial device, or sim: for the built-in simulator, "
+                   "or cyd: for the handheld's USB serial stream (cyd:/dev/ttyUSB0, cyd:sim)")
     p.add_argument("--bb", help="black box port (bbsim: for the built-in simulator)")
     p.add_argument("--seconds", type=float, help="stop after this long (default: until Ctrl-C)")
     p.add_argument("--map", help="address map TOML (default: your map)")

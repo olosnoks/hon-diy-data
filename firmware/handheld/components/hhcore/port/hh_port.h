@@ -8,5 +8,8 @@
 void hh_kline_usb_init(hh_transport_t *tr, int latency_ms);
 /* Plan B: UART + L9637D. */
 void hh_kline_uart_init(hh_transport_t *tr);
+/* The link to the laptop on the USB-C port (hh_serial_port.c). 0 = started. */
+int  hh_serial_port_start(hh_core_t *core, const hh_config_t *cfg, int sd_ok);
+void hh_serial_port_status(uint8_t *mode, uint8_t *host, uint32_t *frames, uint32_t *dropped);
 
 #endif

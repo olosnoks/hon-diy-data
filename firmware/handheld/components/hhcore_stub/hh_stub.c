@@ -133,6 +133,7 @@ void hh_snapshot(hh_snapshot_t *out)
     out->link.backend = 1;
     out->link.hz_fast = 10.8f + 0.2f * fast;
     out->link.reads = (uint32_t)(t * 43);
+    out->pc.mode = 1; out->pc.frames = (uint32_t)(t * 80); out->pc.dropped = 0;    /* streaming to a laptop, GPS on P1 */
     out->link.errors = (uint32_t)(t / 40);
     snprintf(out->link.ecu_id, sizeof(out->link.ecu_id), "37820-P2P");
 

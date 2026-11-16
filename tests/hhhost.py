@@ -90,6 +90,13 @@ def lib(build_dir: Path):
     L.hh_checksum.argtypes = [C.c_char_p, C.c_size_t]
     L.hh_frame_allowed.argtypes = [C.c_void_p, C.c_char_p, C.c_size_t]
     L.hh_iso_allowed.argtypes = [C.c_char_p, C.c_size_t]
+    L.hhhost_serial.restype = C.c_void_p
+    L.hhhost_serial.argtypes = [C.c_void_p, C.c_int, C.c_uint32]
+    L.hhhost_serial_poll.restype = C.c_size_t
+    L.hhhost_serial_poll.argtypes = [C.c_void_p, U8P, C.c_size_t]
+    L.hhhost_serial_rx.argtypes = [C.c_void_p, C.c_char_p, C.c_size_t]
+    L.hhhost_serial_stat.restype = C.c_uint32
+    L.hhhost_serial_stat.argtypes = [C.c_void_p, C.c_char_p]
     _lib = L
     return L
 
@@ -203,6 +210,29 @@ class Handheld:
     @property
     def time_set(self) -> int:
         return self.L.hhhost_time_set(self.h)
+
+    # -- the laptop link (hh_serial.c) on this engine --
+
+    def serial(self, tx_only: bool = False, ring_size: int = 0) -> None:
+        """Attach the link, as the default build (two-way) or GPS-on-P1 build makes it."""
+        assert self.L.hhhost_serial(self.h, 1 if tx_only else 0, ring_size)
+
+    def serial_poll(self) -> bytes:
+        """Everything the UART would send now."""
+        out = bytearray()
+        buf = (C.c_uint8 * 4096)()
+        while True:
+            n = self.L.hhhost_serial_poll(self.h, buf, 4096)
+            if not n:
+                return bytes(out)
+            out += bytes(buf[:n])
+
+    def serial_rx(self, data: bytes) -> None:
+        """Bytes from the laptop (the card is serviced after them)."""
+        self.L.hhhost_serial_rx(self.h, data, len(data))
+
+    def serial_stat(self, what: str) -> int:
+        return self.L.hhhost_serial_stat(self.h, what.encode())
 
     def close(self) -> None:
         if self.h:

@@ -22,6 +22,9 @@ struct hhhost {
     long budget;
     int64_t time_set, time_base;    /* unix us at clock 0 once set */
     uint32_t syncs;
+    hh_serial_t *ser;
+    hh_serfs_t serfs;
+    uint8_t *ser_ring;
 };
 
 size_t hhhost_default_map(const uint8_t **out) { *out = DEFAULT_MAP; return sizeof(DEFAULT_MAP); }
@@ -148,6 +151,9 @@ void hhhost_free(hhhost_t *h)
     if (!h) return;
     hh_core_stop(h->core, HH_END_STOPPED);
     while (hh_core_storage_step(h->core)) {}
+    if (h->serfs.fh) fclose(h->serfs.fh);
+    if (h->serfs.put) fclose(h->serfs.put);
+    free(h->ser); free(h->ser_ring);
     free(h->core); free(h->ring); free(h->queue); free(h->map_buf); free(h);
 }
 
@@ -177,6 +183,48 @@ void hhhost_set_write_budget(hhhost_t *h, long bytes) { h->budget = bytes; }
 void hhhost_set_stale(hhhost_t *h, const char *path) { snprintf(h->stale, sizeof(h->stale), "%s", path ? path : ""); }
 int64_t hhhost_time_set(const hhhost_t *h) { return h->time_set; }
 uint32_t hhhost_syncs(const hhhost_t *h) { return h->syncs; }
+
+/* ---- the laptop link ------------------------------------------------------------ */
+
+hh_serial_t *hhhost_serial(hhhost_t *h, int tx_only, uint32_t ring_size)
+{
+    if (h->ser) return h->ser;
+    if (!ring_size) ring_size = 32 * 1024;
+    h->ser = calloc(1, sizeof(*h->ser));
+    h->ser_ring = malloc(ring_size);
+    hh_serial_init(h->ser, &h->plat.clk, h->ser_ring, ring_size,
+                   tx_only ? HH_SER_VARIANT_GPS_P1 : HH_SER_VARIANT_DEFAULT,
+                   tx_only ? HH_SER_CAP_LOG : HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_LOG, 921600);
+    if (!tx_only) hh_serfs_init(&h->serfs, h->root, h->core, &h->ser->fs);
+    hh_serial_attach(h->ser, h->core);
+    hh_core_set_tap(h->core, hh_serial_tap, h->ser);
+    return h->ser;
+}
+
+size_t hhhost_serial_poll(hhhost_t *h, uint8_t *out, size_t cap) { return h->ser ? hh_serial_poll(h->ser, out, cap) : 0; }
+
+void hhhost_serial_rx(hhhost_t *h, const uint8_t *data, size_t len)
+{
+    if (!h->ser) return;
+    hh_serial_rx(h->ser, data, len);
+    while (hh_core_storage_step(h->core)) {}
+}
+
+uint32_t hhhost_serial_stat(hhhost_t *h, const char *what)
+{
+    const hh_serial_t *s = h->ser;
+    if (!s) return 0;
+    if (!strcmp(what, "tx_frames")) return s->tx_frames;
+    if (!strcmp(what, "tx_dropped")) return s->tx_dropped;
+    if (!strcmp(what, "tx_bytes")) return s->tx_bytes;
+    if (!strcmp(what, "rx_frames")) return s->rx_frames;
+    if (!strcmp(what, "rx_bad")) return s->rx_bad;
+    if (!strcmp(what, "ring_peak")) return s->ring_peak;
+    if (!strcmp(what, "caps")) return s->caps;
+    if (!strcmp(what, "host")) return (uint32_t)hh_serial_host_attached(s);
+    if (!strcmp(what, "blocked")) return hh_core_link_stats(h->core)->blocked;
+    return 0;
+}
 
 /* ---- flat entry points for the Python tests (ctypes) -------------------------- */
 

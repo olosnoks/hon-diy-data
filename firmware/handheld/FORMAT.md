@@ -147,7 +147,8 @@ is the drive's own data between start and end; a stall whose record is
 missing (power went first) is still marked by its event.
 
 **Time record**, 24 bytes: `u64 t_us, i64 Unix µs at that moment, u8 source
-(1 GPS, 2 the clock as it was), 7 reserved`. The handheld has no battery
+(1 GPS, 2 the clock as it was, 3 set by the laptop over the serial link,
+SERIAL.md), 7 reserved`. The handheld has no battery
 clock: a drive that starts before the first GPS fix has 0 in its header and
 gets its wall time from the first TIME record. Readers use the newest GPS
 one: `epoch = unix - (t - t0)`.
@@ -253,3 +254,5 @@ range is skipped; the rest still applies.
 | `sleep_probe_s` | 20 | asleep: wake this often and ask the ECU |
 | `usb_latency_ms` | 1 | FTDI latency timer |
 | `utc_offset_min` | 0 | for the clock on the screen; files are UTC |
+| `serial` | 1 | the binary link to the laptop on the USB-C port (SERIAL.md); 0 = plain log console |
+| `serial_baud` | 921600 | its speed; 460800 if the laptop sees damaged frames |

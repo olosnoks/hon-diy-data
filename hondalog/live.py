@@ -6,6 +6,8 @@ everything recorded and watched by the triggers.
                                                               alarm events, captures)
     BlackboxReader ---->   on the poller's t0 --------------> Recorder ("blackbox/live";
                                                               key on keeps the drive open)
+    CydPoller --------->   (the handheld over USB serial: the same two callbacks,
+                           plus GPS fixes and the handheld's events) -> Recorder
                            frames (deque), on_frame --------> UI / CLI
 
 ``LivePipeline`` is the per-sample step on its own (no I/O, no threads):
@@ -20,7 +22,7 @@ everything recorded and watched by the triggers.
 all use:
 
     session = LiveSession(amap)
-    session.connect("sim:")              # or attach(poller)
+    session.connect("sim:")              # or attach(poller); "cyd:" = the handheld
     session.open_blackbox("bbsim:")      # optional
     session.start_recording()
     ...
@@ -148,6 +150,8 @@ class LiveSession:
         self._lock = threading.RLock()
         self._bb_asked_at = float("-inf")
         self._bb_columns: list[Any] | None = None
+        self._gps_columns: list[Any] | None = None
+        self._cyd_marks: collections.deque[float] = collections.deque(maxlen=16)   # sent to the handheld, when
 
     # ---- sources ----
 
@@ -163,10 +167,17 @@ class LiveSession:
         return 0.0
 
     def connect(self, port: str, start: bool = True) -> Poller:
-        """Open ``port`` (a device, ``sim:`` ...) with a new poller and attach it."""
-        from .poller import Poller
-        from .transport import make_transport
-        poller = Poller(make_transport(port, self.amap.framing), self.amap)
+        """Open ``port`` (a device, ``sim:`` ...) with a new poller and attach it.
+        ``cyd:`` ports are the handheld's stream (``hondalog.handheld.serial_link``):
+        a ``CydPoller`` takes the poller's place and the laptop decodes its raw reads."""
+        from .handheld.serial_link import is_cyd_port
+        if is_cyd_port(port):
+            from .handheld.serial_link import CydPoller
+            poller: Any = CydPoller(port, self.amap)
+        else:
+            from .poller import Poller
+            from .transport import make_transport
+            poller = Poller(make_transport(port, self.amap.framing), self.amap)
         poller.port_name = port
         self.attach(poller)
         if start:
@@ -182,6 +193,9 @@ class LiveSession:
         self.poller = poller
         poller.on_block = self._on_block
         poller.on_sample = self._on_sample
+        if hasattr(poller, "on_event"):          # the handheld: its GPS and its own events too
+            poller.on_gps = self._on_cyd_gps
+            poller.on_event = self._on_cyd_event
 
     def open_blackbox(self, port: Any, start: bool = True, **opts: Any) -> BlackboxReader:
         """Start a ``BlackboxReader`` on the poller's time axis and record it."""
@@ -230,6 +244,11 @@ class LiveSession:
             "unlocked_frames": unlocked,
             "read_plan": [f"{addr:02X}+{length}" for addr, length in poller.blocks],
         }
+        if getattr(poller, "source", "") == "cyd":
+            meta["source"] = "cyd"
+            meta["cyd"] = poller.cyd_meta()
+            if poller.warning:
+                meta["cyd_warning"] = poller.warning
         reader = self.blackbox
         if reader is not None and reader.hello is not None:
             meta["blackbox"] = reader.device_text
@@ -274,6 +293,7 @@ class LiveSession:
             return 0
         n = recorder.markers + 1
         recorder.mark(text or f"MARK {n}")
+        self._cyd_command("mark", text is None)
         reader = self.blackbox
         if reader is not None and text is None:
             try:
@@ -292,7 +312,20 @@ class LiveSession:
         with self._lock:
             events = self.pipeline.alarms.acknowledge()
         self._record_alarms(events)
+        self._cyd_command("ack_alarm")
         return events
+
+    def _cyd_command(self, what: str, when: bool = True) -> None:
+        """The same button on the handheld, if it is a two-way one (its SD file gets it too)."""
+        poller = self.poller
+        if not when or not getattr(poller, "two_way", False):
+            return
+        try:
+            getattr(poller, what)()
+            if what == "mark":
+                self._cyd_marks.append(time.monotonic())
+        except Exception as exc:
+            self.last_error = f"handheld {what}: {exc}"
 
     # ---- poller thread ----
 
@@ -355,6 +388,45 @@ class LiveSession:
             reader.trigger()
         except Exception as exc:
             self.last_error = f"black box trigger: {exc}"
+
+    # ---- the handheld (CydPoller thread) ----
+
+    def _on_cyd_gps(self, t: float, fix: Mapping[str, Any]) -> None:
+        recorder = self.recorder
+        if recorder is None:
+            return
+        if self._gps_columns is None:
+            from .handheld.importer import GPS_STREAM, gps_columns
+            self._gps_columns = gps_columns()
+            self._gps_stream = GPS_STREAM
+        recorder.feed_values(self._gps_stream, t, fix, source="gps", columns=self._gps_columns, evaluate=False)
+
+    def _on_cyd_event(self, event: Any) -> None:
+        """The handheld's own events: its button's markers, its stall trigger,
+        trouble codes it read. Alarms are worked out here from the same data,
+        so the handheld's alarm events are only noted."""
+        recorder = self.recorder
+        if recorder is None:
+            return
+        from .handheld import format as F
+        data = {"code": event.code, "name": event.name, "src": event.src, "aux": event.aux,
+                "value": event.value, "handheld_us": event.t_dev_us}
+        if event.code == F.EV_MARKER:
+            now = time.monotonic()
+            while self._cyd_marks and now - self._cyd_marks[0] >= 3.0:
+                self._cyd_marks.popleft()       # sent, never echoed
+            if self._cyd_marks:
+                self._cyd_marks.popleft()       # the echo of a marker sent from here
+                return
+            recorder.mark(f"MARK (handheld button {event.value})")
+        elif event.code in (F.EV_DTC, F.EV_DTC_NONE):
+            recorder.event("dtc", event.text, data, t=event.t)
+        else:
+            recorder.event("handheld", event.text, data, t=event.t)
+        if event.is_stall:
+            recorder.external_trigger(f"handheld: {event.text}", t=event.t)
+
+    _gps_stream = "gps"
 
     # ---- black box thread ----
 

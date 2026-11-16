@@ -63,7 +63,7 @@ else
     fi
 fi
 
-echo "==> Commands in /usr/local/bin: hondalog hondalog-sim hondalog-firstcontact hondalog-map hondalog-log hondalog-bb hondalog-bbsim hondalog-tune hondalog-handheld"
+echo "==> Commands in /usr/local/bin: hondalog hondalog-sim hondalog-firstcontact hondalog-map hondalog-log hondalog-bb hondalog-bbsim hondalog-tune hondalog-handheld hondalog-cydsim"
 sudo ln -sf "$PREFIX/bin/hondalog" /usr/local/bin/hondalog
 sudo ln -sf "$PREFIX/bin/hondalog-sim" /usr/local/bin/hondalog-sim
 sudo ln -sf "$PREFIX/bin/hondalog-firstcontact" /usr/local/bin/hondalog-firstcontact
@@ -73,8 +73,10 @@ sudo ln -sf "$PREFIX/bin/hondalog-bb" /usr/local/bin/hondalog-bb
 sudo ln -sf "$PREFIX/bin/hondalog-bbsim" /usr/local/bin/hondalog-bbsim
 sudo ln -sf "$PREFIX/bin/hondalog-tune" /usr/local/bin/hondalog-tune
 sudo ln -sf "$PREFIX/bin/hondalog-handheld" /usr/local/bin/hondalog-handheld
+sudo ln -sf "$PREFIX/bin/hondalog-cydsim" /usr/local/bin/hondalog-cydsim
 
-echo "==> udev rule: /dev/hondalog for the FTDI cable (0403:6001)"
+echo "==> udev rules: /dev/hondalog (FTDI cable 0403:6001), /dev/hondalog-bb (black box),"
+echo "    /dev/hondalog-cyd (the handheld's USB-C port, CH340 1a86:7523)"
 sudo install -m 644 "$SRC/packaging/99-hondalog.rules" /etc/udev/rules.d/99-hondalog.rules
 sudo udevadm control --reload-rules || true
 sudo udevadm trigger --subsystem-match=tty || true
@@ -101,8 +103,15 @@ fi
 
 if dpkg -s brltty >/dev/null 2>&1; then
     echo
-    echo "WARNING: brltty is installed. It grabs FTDI adapters, and the cable will"
-    echo "         vanish right after plugging in. Fix: sudo apt remove brltty"
+    echo "WARNING: brltty is installed. It grabs FTDI adapters and the CH340 of the"
+    echo "         handheld (1a86:7523 is on its list of braille displays): the port"
+    echo "         vanishes right after plugging in. Fix: sudo apt remove brltty"
+fi
+if systemctl is-active --quiet ModemManager 2>/dev/null; then
+    echo
+    echo "NOTE: ModemManager is running. The udev rule tells it to leave the cable and"
+    echo "      the handheld alone. If a port still seems busy for a few seconds after"
+    echo "      plugging in: sudo systemctl disable --now ModemManager"
 fi
 
 echo

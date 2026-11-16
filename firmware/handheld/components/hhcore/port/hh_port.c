@@ -4,6 +4,7 @@
  *   link task      hh_core_step(): owns the K-line (USB host cable or UART)
  *   gps task       NMEA bytes in
  *   storage task   writes what the engine queued; free space; the sleep decision
+ *   serial tasks   the link to the laptop (hh_serial_port.c), below all of these
  *
  * All on core 0; the display has core 1. One mutex guards what the tasks and
  * the UI share; it is never held across a K-line exchange or a card write.
@@ -389,6 +390,10 @@ void hh_core_start(void)
 
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER && cfg.sleep_after_s > 0) quiet_probe();
 
+    /* from here on ESP_LOG lines are frames on the laptop link, not text on the console */
+    if (cfg.serial && hh_serial_port_start(core, &cfg, card != NULL) != 0)
+        ESP_LOGW(TAG, "the laptop link did not start");
+
     xTaskCreatePinnedToCore(link_task, "hh_link", 8192, NULL, 6, NULL, 0);
     xTaskCreatePinnedToCore(storage_task, "hh_store", 6144, NULL, 4, NULL, 0);
     if (gps_start() == 0) xTaskCreatePinnedToCore(gps_task, "hh_gps", 4096, NULL, 5, NULL, 0);
@@ -408,6 +413,7 @@ void hh_snapshot(hh_snapshot_t *out)
         return;
     }
     hh_core_snapshot(core, out);
+    hh_serial_port_status(&out->pc.mode, &out->pc.host, &out->pc.frames, &out->pc.dropped);
 }
 
 void hh_mark(void) { if (core) hh_core_mark(core); }

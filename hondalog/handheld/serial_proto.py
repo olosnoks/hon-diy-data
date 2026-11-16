@@ -1,0 +1,154 @@
+"""The handheld's serial link (firmware/handheld/SERIAL.md): frame types and
+payload layouts, mirroring ``components/hhcore/include/hh_serial.h`` byte for
+byte (``tests/test_hh_serial.py`` checks them against the compiled C).
+
+The frame is the black box's: ``COBS(ver type seq payload crc16) 0x00``. The
+COBS, CRC and deframer are ``hondalog.blackbox.format``'s, used as they are.
+"""
+
+from __future__ import annotations
+
+import struct
+from dataclasses import dataclass
+
+from ..blackbox.format import Deframer, cobs_decode, cobs_encode, crc16, frame_encode
+from . import format as F
+
+REV = 1
+MAX_PAYLOAD = 512
+CHUNK = 480
+HELLO_S = 2.0
+HOST_S = 3.0
+MAGIC = b"HHSL"
+BAUDS = (921600, 460800, 115200)        # tried in this order when the port stays unreadable
+
+# handheld -> laptop
+(SF_HELLO, SF_READ, SF_TICK, SF_LINK, SF_GPS, SF_EVENT, SF_STATS, SF_LOG, SF_ISO, SF_TIME_RSP, SF_ACK,
+ SF_FILE_INFO, SF_FILE_DATA) = range(0x40, 0x4D)
+# laptop -> handheld (two-way only)
+(SC_GET_HELLO, SC_TIME_REQ, SC_TIME_SET, SC_MARK, SC_ACK_ALARM, SC_DRIVE, SC_LIST_FILES, SC_READ_FILE,
+ SC_PUT_BEGIN, SC_PUT_DATA, SC_PUT_END, SC_DTC) = range(0x60, 0x6C)
+FRAME_NAMES = {SF_HELLO: "hello", SF_READ: "read", SF_TICK: "tick", SF_LINK: "link", SF_GPS: "gps",
+               SF_EVENT: "event", SF_STATS: "stats", SF_LOG: "log", SF_ISO: "iso", SF_TIME_RSP: "time_rsp",
+               SF_ACK: "ack", SF_FILE_INFO: "file_info", SF_FILE_DATA: "file_data"}
+
+VARIANT_DEFAULT, VARIANT_GPS_P1 = 0, 1
+VARIANTS = {VARIANT_DEFAULT: "default", VARIANT_GPS_P1: "gps-p1"}
+CAP_RX, CAP_FILES, CAP_PUT, CAP_LOG = 1, 2, 4, 8
+F_DRIVE, F_CAPTURE, F_MAP, F_CFG = 1, 2, 3, 4
+FILE_KINDS = {F_DRIVE: "drive", F_CAPTURE: "capture", F_MAP: "map", F_CFG: "cfg"}
+OK, IGNORED, E_ARG, E_IO, E_CRC, E_STATE, E_REFUSED, E_BUSY, E_UNSUPPORTED, E_OFFSET = 0, 1, -1, -2, -3, -4, -5, -6, -7, -8
+STATUS_TEXT = {OK: "ok", IGNORED: "ignored", E_ARG: "bad argument", E_IO: "card error", E_CRC: "checksum mismatch",
+               E_STATE: "not expected now", E_REFUSED: "refused: the handheld could not load it",
+               E_BUSY: "busy", E_UNSUPPORTED: "not supported (no card, or an older firmware)",
+               E_OFFSET: "wrong offset"}
+LINK_OFF, LINK_CONNECTING, LINK_OK, LINK_ISO_ONLY, LINK_ERROR = range(5)
+LINK_NAMES = {LINK_OFF: "no reply from the ECU", LINK_CONNECTING: "connecting", LINK_OK: "ok",
+              LINK_ISO_ONLY: "OBD2 only", LINK_ERROR: "K-line cable not found"}
+ST_SD_OK, ST_RECORDING, ST_GPS_FIX, ST_TIME, ST_ARMED, ST_CAPTURING, ST_HOST, ST_BUILTIN = (1 << i for i in range(8))
+FI_OPEN, FI_MORE = 1, 2
+FD_EOF, FD_BUSY = 1, 2
+NO_FILE = 0xFFFFFFFF
+
+HELLO = struct.Struct("<4sBBH12s12s12s8s10sBBBBBBIIQqHH")       # 96
+READ = struct.Struct("<QBBH")                                   # 12, then len bytes
+TICK = struct.Struct("<QHHI")                                   # 16
+LINK = struct.Struct("<QBBBB")                                  # 12
+ISO = struct.Struct("<QBBBB")                                   # 12, then len bytes
+STATS = struct.Struct("<Qq6IHBB7I6I")                           # 96
+TIME_RSP = struct.Struct("<qQQ")                                # 24
+ACK = struct.Struct("<BBhI")                                    # 8
+FILE_INFO = struct.Struct("<BBHII")                             # 12
+FILE_DATA = struct.Struct("<BBHIII")                            # 16, then data
+LIST = struct.Struct("<B3xI")                                   # 8
+READ_FILE = struct.Struct("<BxHII")                             # 12
+PUT_BEGIN = struct.Struct("<B3xII")                             # 12
+assert HELLO.size == 96 and STATS.size == 96 and READ.size == 12 and TICK.size == 16 and LINK.size == 12
+assert ACK.size == 8 and FILE_INFO.size == 12 and FILE_DATA.size == 16 and LIST.size == 8
+assert READ_FILE.size == 12 and PUT_BEGIN.size == 12 and TIME_RSP.size == 24
+
+
+@dataclass
+class Hello:
+    rev: int
+    variant: int
+    caps: int
+    fw: str
+    device: str
+    map_hash: str
+    map_sha: bytes
+    ecu_id: bytes
+    link_state: int
+    backend: int
+    link_mode: int
+    n_ch: int
+    flags: int
+    boot_no: int
+    baud: int
+    t_us: int
+    unix_us: int
+    hello_ms: int
+    max_payload: int
+
+    @property
+    def two_way(self) -> bool:
+        return bool(self.caps & CAP_RX)
+
+    @property
+    def variant_name(self) -> str:
+        return VARIANTS.get(self.variant, f"variant {self.variant}")
+
+    @property
+    def builtin_map(self) -> bool:
+        return bool(self.flags & 1)
+
+    @property
+    def text(self) -> str:
+        way = "two-way" if self.two_way else "tx-only"
+        return (f"handheld {self.device or '?'} fw {self.fw}, {self.variant_name}, {way}, "
+                f"map #{self.map_hash}{' (built in)' if self.builtin_map else ''}, boot {self.boot_no}")
+
+    def pack(self) -> bytes:
+        return HELLO.pack(MAGIC, self.rev, self.variant, self.caps, F.fit(self.fw, 12), F.fit(self.device, 12),
+                          hash12(self.map_hash), self.map_sha[:8].ljust(8, b"\0"),
+                          self.ecu_id[:10].ljust(10, b"\0"), min(len(self.ecu_id), 10), self.link_state,
+                          self.backend, self.link_mode, self.n_ch, self.flags, self.boot_no, self.baud, self.t_us,
+                          self.unix_us, self.hello_ms, self.max_payload)
+
+
+def hash12(text: str) -> bytes:
+    """A map hash as the firmware keeps it: all 12 characters, no terminator."""
+    return text.encode("ascii", "replace")[:12].ljust(12, b"\0")
+
+
+def parse_hello(p: bytes) -> Hello | None:
+    """None if this is not a handheld's hello."""
+    if len(p) < HELLO.size or p[:4] != MAGIC:
+        return None
+    (_, rev, variant, caps, fw, device, map_hash, sha, ecu, ecu_len, state, backend, mode, n_ch, flags, boot,
+     baud, t_us, unix_us, hello_ms, max_payload) = HELLO.unpack(p[:HELLO.size])
+    return Hello(rev, variant, caps, F.cstr(fw), F.cstr(device), F.cstr(map_hash), sha, ecu[:min(ecu_len, 10)],
+                 state, backend, mode, n_ch, flags, boot, baud, t_us, unix_us, hello_ms, max_payload)
+
+
+STATS_FIELDS = ("t_us", "unix_us", "reads", "errors", "timeouts", "checksum_failures", "retries", "reconnects",
+                "hz_c", "link_state", "flags", "drive_no", "log_bytes", "free_mb", "markers", "stall_count",
+                "nmea_good", "nmea_bad", "tx_frames", "tx_dropped", "tx_bytes", "rx_frames", "rx_bad", "ring_peak")
+
+
+def parse_stats(p: bytes) -> dict[str, int] | None:
+    if len(p) < STATS.size:
+        return None
+    return dict(zip(STATS_FIELDS, STATS.unpack(p[:STATS.size])))
+
+
+def pack_stats(**fields: int) -> bytes:
+    return STATS.pack(*(int(fields.get(name, 0)) for name in STATS_FIELDS))
+
+
+def status_text(status: int) -> str:
+    return STATUS_TEXT.get(status, f"error {status}")
+
+
+__all__ = ["Deframer", "cobs_decode", "cobs_encode", "crc16", "frame_encode"] + [n for n in dir() if n.isupper()] + [
+    "Hello", "hash12", "parse_hello", "parse_stats", "pack_stats", "status_text"]
