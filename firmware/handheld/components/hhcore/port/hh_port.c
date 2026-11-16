@@ -290,6 +290,11 @@ static pcnt_unit_handle_t gps_pcnt[N_PROBE];
 static volatile int gps_overflows[N_PROBE];
 static volatile int64_t pps_last_us;
 static volatile uint32_t pps_count;
+/* The edges, as the interrupt saw them (esp_timer us), for the gps task to hand to the engine (hh_core_pps_edge):
+ * the filter and the pairing are portable (hh_pps.c); only this ring is glue. */
+#define PPS_RING 16
+static volatile int64_t pps_ring[PPS_RING];
+static uint32_t pps_tail;               /* gps task only */
 
 static bool gps_pcnt_overflow(pcnt_unit_handle_t u, const pcnt_watch_event_data_t *e, void *ctx)
 {
@@ -302,8 +307,25 @@ static bool gps_pcnt_overflow(pcnt_unit_handle_t u, const pcnt_watch_event_data_
 static void IRAM_ATTR pps_isr(void *arg)
 {
     (void)arg;
-    pps_last_us = esp_timer_get_time();
-    pps_count++;
+    int64_t t = esp_timer_get_time();
+    uint32_t n = pps_count;
+    pps_last_us = t;
+    pps_ring[n % PPS_RING] = t;
+    __atomic_store_n(&pps_count, n + 1, __ATOMIC_RELEASE);      /* the slot is written before the count says so */
+}
+
+/* Hand the engine the edges up to t_us (the time the bytes about to be fed were read), oldest first. An edge
+ * after t_us waits for the next call, so a sentence is never paired with a pulse that came after it. */
+static void pps_drain(int64_t t_us)
+{
+    uint32_t head = __atomic_load_n(&pps_count, __ATOMIC_ACQUIRE);
+    if (head - pps_tail > PPS_RING) pps_tail = head - PPS_RING;     /* NMEA on the pin: we were swamped */
+    while (pps_tail != head) {
+        int64_t t = pps_ring[pps_tail % PPS_RING];
+        if (t > t_us) break;
+        hh_core_pps_edge(core, t);
+        pps_tail++;
+    }
 }
 
 static void probe_init(int i)
@@ -378,6 +400,7 @@ static void gps_diag_log(void)
         e = last_edges[PIN_DATA]; last_edges[PIN_DATA] = last_edges[PIN_PPS]; last_edges[PIN_PPS] = e;
         gps_route_rx(gps_pin[PIN_DATA]);
         pps_attach(gps_pin[PIN_PPS]);
+        pps_tail = pps_count;           /* what the data pin gave as "edges" was not a pulse */
         ESP_LOGW(TAG, "gps: NMEA found on GPIO%d, PPS expected on GPIO%d: swapped (P3 wired the other way round)",
                  gps_pin[PIN_DATA], gps_pin[PIN_PPS]);
     }
@@ -388,6 +411,20 @@ static void gps_diag_log(void)
     memcpy(tail, gps_tail, sizeof(tail));
     uint32_t pps = pps_count;
     int64_t age = pps_last_us ? (esp_timer_get_time() - pps_last_us) / 1000 : -1;
+    hh_pps_info_t pi;
+    hh_core_pps_info(core, &pi);
+    {
+        static const char *const SRC[] = {"none", "nmea", "pps", "host"};
+        int64_t off = pi.offset_us;                 /* unix us - esp_timer us: the digits below the second are the clock's phase */
+        int dppb = (int)(pi.drift_ppm * 1000.0 + (pi.drift_ppm < 0 ? -0.5 : 0.5));
+        int jit = (int)(pi.jitter_us * 10.0 + 0.5);
+        ESP_LOGI(TAG, "gps time: %s%s, pps off %lld.%06lld s drift %c%d.%03d ppm jitter %d.%d us last resid %d us err %u us, "
+                 "pairs %u outliers %u relocks %u stale %u, edges %u glitches %u missed %u",
+                 SRC[pi.source & 3], pi.locked ? " locked" : "", (long long)(off / 1000000), (long long)(off % 1000000),
+                 dppb < 0 ? '-' : '+', abs(dppb) / 1000, abs(dppb) % 1000, jit / 10, jit % 10, (int)pi.resid_us,
+                 (unsigned)pi.err_us, (unsigned)pi.pairs, (unsigned)pi.outliers, (unsigned)pi.relocks, (unsigned)pi.stale,
+                 (unsigned)pi.edges, (unsigned)pi.glitches, (unsigned)pi.missed);
+    }
     ESP_LOGI(TAG, "gps diag: reader %s, uart%d data GPIO%d @%d baud (%s), bytes %u (+%u), data edges %u (+%u), "
              "PPS GPIO%d edges +%u pulses %u (+%u, last %lld ms ago), sentences ok %u bad %u, fix %u sats %u, last \"%s\"",
              gps_status == 0 ? "running" : "NOT running", (int)HH_GPS_UART_NUM, gps_pin[PIN_DATA], (int)cfg.gps_baud,
@@ -406,9 +443,12 @@ static void gps_task(void *arg)
     (void)arg;
     int64_t next_diag = esp_timer_get_time() + 2000000;
     for (;;) {
-        int n = uart_read_bytes((uart_port_t)HH_GPS_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(100));
+        /* a short wait: the bytes are stamped when they are read, so the less time they sit in the driver the better the pairing */
+        int n = uart_read_bytes((uart_port_t)HH_GPS_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(10));
+        int64_t t_read = esp_timer_get_time();
+        pps_drain(t_read);
         if (n > 0) {
-            hh_core_gps_bytes(core, buf, (size_t)n);
+            hh_core_gps_bytes_at(core, buf, (size_t)n, t_read);
             gps_bytes += (uint32_t)n;
             /* keep the last 48 bytes as printable text for the log */
             size_t keep = sizeof(gps_tail) - 1, len = strlen(gps_tail);
