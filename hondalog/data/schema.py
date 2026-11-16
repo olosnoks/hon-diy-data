@@ -20,7 +20,9 @@ Views: one per drive (``drive_2026_11_16_0712``: every channel on the time
 grid of the fastest stream), ``readings`` (every value of every drive in long
 form: K-line reads and math channels), ``blackbox_1s`` (the black box streams,
 one row per channel per second), ``ecu_reads`` (the raw K-line bytes),
-``markers``, ``stalls``, ``drive_summary``. The shared views are plain joins,
+``markers``, ``stalls``, ``drive_summary``, ``gps_track`` (every GPS fix of
+every drive) and ``stall_locations`` (every capture with the GPS fix nearest
+its trigger). The shared views are plain joins,
 so a condition on drive, channel and time in the query that uses them
 becomes an index range search (CROSS JOIN pins the join order: the channel
 is looked up first, then its rows by time).
@@ -236,9 +238,20 @@ def _v1(conn: sqlite3.Connection) -> None:
     run_script(conn, _V1)
 
 
+def _views_only(conn: sqlite3.Connection) -> None:
+    """Nothing to change in the tables: the views are made again after every migration."""
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "drives, streams, channels, samples, chunks, events, alarms, captures", _v1),
+    Migration(2, "views gps_track and stall_locations", _views_only),
 ]
+
+#: the GPS stream and where its columns are (``hondalog.geo.gps_columns``:
+#: lat, lon, speed, heading in part 0; sats, fix, hdop, utc in part 1)
+GPS_STREAM_NAME = "gps"
+#: how far from a capture's trigger the nearest fix may be for ``stall_locations``
+NEAREST_FIX_S = 60.0
 
 _SLOT_CASE = "CASE c.slot " + " ".join(f"WHEN {i} THEN s.v{i}" for i in range(SLOTS)) + " END"
 
@@ -283,6 +296,32 @@ SHARED_VIEWS: dict[str, str] = {
                d.map_version AS map_version, d.notes AS drive_notes
         FROM captures c JOIN drives d ON d.id = c.drive_id
         WHERE c.kind = 'stall'""",
+    "gps_track": f"""
+        SELECT d.id AS drive_id, d.name AS drive, g.t AS t, coalesce(d.epoch_unix, d.started_at) + g.t AS unix_time,
+               g.v0 AS lat, g.v1 AS lon, g.v2 AS speed, g.v2 * 0.621371192 AS speed_mph, g.v3 AS heading,
+               h.v1 AS fix, h.v0 AS sats, h.v2 AS hdop
+        FROM drives d
+        JOIN streams st ON st.drive_id = d.id AND st.name = '{GPS_STREAM_NAME}'
+        CROSS JOIN samples g ON g.drive_id = st.drive_id AND g.stream_id = st.id AND g.part = 0
+        LEFT JOIN samples h ON h.drive_id = g.drive_id AND h.stream_id = g.stream_id AND h.part = 1
+                               AND h.t = g.t AND h.n = g.n""",
+    "stall_locations": f"""
+        SELECT c.id AS capture_id, c.name AS name, c.kind AS kind, c.reason AS reason, c.rule AS rule,
+               c.message AS message, c.drive_id AS drive_id, d.name AS drive, c.wall_iso AS wall_time,
+               c.wall_unix AS wall_unix, c.t_trigger AS t_trigger,
+               g.t AS gps_t, g.t - c.t_trigger AS gps_dt, g.v0 AS lat, g.v1 AS lon, g.v2 AS speed,
+               g.v2 * 0.621371192 AS speed_mph, g.v3 AS heading,
+               (SELECT max(s.v2) FROM samples s WHERE s.drive_id = c.drive_id AND s.stream_id = st.id
+                AND s.part = 0 AND s.t BETWEEN c.t_trigger - 30 AND c.t_trigger) AS max_speed_30s
+        FROM captures c
+        JOIN drives d ON d.id = c.drive_id
+        LEFT JOIN streams st ON st.drive_id = c.drive_id AND st.name = '{GPS_STREAM_NAME}'
+        LEFT JOIN samples g ON g.drive_id = c.drive_id AND g.stream_id = st.id AND g.part = 0
+             AND (g.t, g.n) = (SELECT s.t, s.n FROM samples s
+                               WHERE s.drive_id = c.drive_id AND s.stream_id = st.id AND s.part = 0
+                                 AND s.v0 IS NOT NULL
+                                 AND s.t BETWEEN c.t_trigger - {NEAREST_FIX_S} AND c.t_trigger + {NEAREST_FIX_S}
+                               ORDER BY abs(s.t - c.t_trigger) LIMIT 1)""",
     "drive_summary": """
         SELECT d.id AS drive_id, d.name AS drive, d.status AS status, d.end_reason AS end_reason,
                d.started_iso AS started, d.ended_iso AS ended,
