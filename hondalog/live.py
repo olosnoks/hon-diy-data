@@ -146,6 +146,9 @@ class LiveSession:
         self.on_frame: Callable[[LiveFrame], None] | None = None
         self.on_read: Callable[[BlockRead], None] | None = None
         self.on_blackbox: Callable[[Any], None] | None = None       # a reader Sample
+        #: the handheld's GPS fixes (session seconds, the ``gps`` stream's columns),
+        #: recording or not: the Map screen shows where the car is
+        self.on_gps: Callable[[float, Mapping[str, Any]], None] | None = None
         self.last_error = ""
         self._lock = threading.RLock()
         self._bb_asked_at = float("-inf")
@@ -392,11 +395,17 @@ class LiveSession:
     # ---- the handheld (CydPoller thread) ----
 
     def _on_cyd_gps(self, t: float, fix: Mapping[str, Any]) -> None:
+        hook = self.on_gps
+        if hook is not None:
+            try:
+                hook(t, fix)
+            except Exception as exc:            # the UI's problem must not stop the recording
+                self.last_error = f"gps: {exc}"
         recorder = self.recorder
         if recorder is None:
             return
         if self._gps_columns is None:
-            from .handheld.importer import GPS_STREAM, gps_columns
+            from .geo.track import GPS_STREAM, gps_columns
             self._gps_columns = gps_columns()
             self._gps_stream = GPS_STREAM
         recorder.feed_values(self._gps_stream, t, fix, source="gps", columns=self._gps_columns, evaluate=False)

@@ -156,6 +156,11 @@ class CydSim:
         self._next_hello = 0.0
         self._next_stats = 0.0
         self._next_gps = 1.0
+        # the car drives a loop of streets in Pearl, MS while the engine runs, and
+        # rolls to a halt where it stalls (hondalog.geo.route)
+        from ..geo.route import PEARL_LOOP, Driver
+        self._driver = Driver(PEARL_LOOP, seed=seed, start_m=0.0)
+        self._gps_t: float | None = None
         self._last_tick: float | None = None
         self.hz = 0.0
         self.reads = self.errors = self.markers = self.stalls = self.ticks = 0
@@ -363,8 +368,7 @@ class CydSim:
                 self._stats()
             elif self.gps and due == self._next_gps:
                 self._next_gps += 1.0
-                gps = F.REC_GPS.pack(_us(due), int((32.27412 + 1e-5 * due) * 1e7), int((-90.13021 - 7e-6 * due) * 1e7),
-                                     int(self._unix0 + due), 1150, 8440, 1, 9, 90)
+                gps = self.gps_fix(due)
                 self._send(P.SF_GPS, gps)
                 if self._drive is not None:
                     self._drive.flush()
@@ -372,6 +376,14 @@ class CydSim:
             else:
                 self._exchange()
         self.now = max(self.now, t)
+
+    def gps_fix(self, t: float) -> bytes:
+        """One GPS record at device time ``t``: where the car has got to."""
+        dt = 0.0 if self._gps_t is None else max(0.0, t - self._gps_t)
+        self._gps_t = t
+        lat, lon, kmh, heading = self._driver.step(dt, running=self.model.running)
+        return F.REC_GPS.pack(_us(t), int(round(lat * 1e7)), int(round(lon * 1e7)), int(self._unix0 + t),
+                              int(round(kmh / 0.036)), int(round(heading * 100)) % 36000, 1, 9, 90)
 
     # ---- commands (two-way) ----
 

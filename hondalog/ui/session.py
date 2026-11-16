@@ -241,7 +241,8 @@ def build_session(demo: bool = False, log_dir=None, writable_tables: bool = Fals
         obsmap = be.HistogramMap()
         obsmap.load_demo()
         session = Session(ecu, blackbox, be.LimitAlarms(), recording, None, obsmap,
-                          be.DemoMapper(ecu), be.DemoTableModel(writable=True), demo=True)
+                          be.DemoMapper(ecu), be.DemoTableModel(writable=True), demo=True,
+                          extra_sources=[be.DemoGps(demo_clock)])
         session.logs = be.CsvLogReader(_lookup(session), log_dir)
         return session
 

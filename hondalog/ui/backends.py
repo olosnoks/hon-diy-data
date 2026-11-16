@@ -5,6 +5,7 @@ Real use is wired in ``wired.py`` (the W1-W5 backends). What stays here:
     DemoSource, DemoMapper, DemoTableModel, NullRecording, demo_*   ``--demo``
     PollerSource, PollerMapper      the bases ``wired.LinkSource`` and
                                     ``wired.MappingSession`` build on
+    DemoGps                         the handheld's GPS in the demo: the Pearl, MS loop
     LimitAlarms                     plain limits (demo; the black box rails)
     HistogramMap, CsvLogReader      demo mode
     order_of_loss                   the forensics reading for any LogView
@@ -74,6 +75,20 @@ BLACKBOX_SPECS = (
     ChannelSpec("injp", "Inj pulse", "ms", 2, 0, 16, source="BB", verified=True),
     ChannelSpec("bbmark", "Marker", kind="flag", source="BB", verified=True),
 )
+
+# The handheld's GPS (the "gps" stream's columns, hondalog.geo.gps_columns),
+# as the live bus carries it for the Map screen. Source "GPS".
+GPS_SPECS = (
+    ChannelSpec("gps_lat", "Latitude", "°", 6, -90, 90, source="GPS", verified=True),
+    ChannelSpec("gps_lon", "Longitude", "°", 6, -180, 180, source="GPS", verified=True),
+    ChannelSpec("gps_speed", "GPS speed", "km/h", 1, 0, 200, source="GPS", verified=True),
+    ChannelSpec("gps_heading", "Heading", "°", 0, 0, 360, source="GPS", verified=True),
+    ChannelSpec("gps_sats", "Satellites", "", 0, 0, 16, source="GPS", verified=True),
+    ChannelSpec("gps_fix", "GPS fix", kind="flag", source="GPS", verified=True),
+)
+GPS_IDS = tuple(s.id for s in GPS_SPECS)
+#: a fix comes once a second: after this long without one the position is stale
+GPS_TIMEOUT_S = 3.5
 
 
 def with_limits(spec: ChannelSpec) -> ChannelSpec:
@@ -698,6 +713,54 @@ def demo_stall_view() -> ad.LogView:
     for cid, col in cols.items():
         view.specs[cid], view.t[cid], view.data[cid] = specs[cid], t, col.astype(np.float32)
     return view
+
+
+class DemoGps(_Ticker):
+    """The handheld's GPS in the demo: once a second, the car drives the
+    Pearl, MS loop (``hondalog.geo.route``) at the demo's speed. Source "GPS"."""
+
+    name = "GPS"
+    hz = 1.0
+
+    def __init__(self, clock=None, seed: int = 4):
+        super().__init__()
+        from ..geo import route
+        self.clock = clock
+        self.driver = route.Driver(route.PEARL_LOOP, seed=seed, start_m=4200.0, noise_m=1.0)
+        self._t: float | None = None
+
+    def specs(self):
+        return GPS_SPECS
+
+    def start(self, bus: ChannelBus) -> None:
+        super().start(bus)
+        bus.set_timeout(self.name, GPS_TIMEOUT_S)
+
+    def status(self) -> ad.SourceStatus:
+        return ad.SourceStatus(ad.OK, self.hz, simulated=True)
+
+    def _fix(self, dt: float) -> dict:
+        lat, lon, kmh, heading = self.driver.step(dt)
+        return {"gps_lat": lat, "gps_lon": lon, "gps_speed": kmh, "gps_heading": heading,
+                "gps_sats": 9.0, "gps_fix": 1.0}
+
+    def _step(self, t: float) -> None:
+        now = self.clock() if self.clock else t
+        dt = 0.0 if self._t is None else max(0.0, now - self._t)
+        self._t = now
+        if dt or self.clock is None:
+            self.bus.publish(self._fix(dt or 1.0), t=t, source=self.name)
+
+    def prefill(self, bus: ChannelBus, seconds: float = 300.0) -> None:
+        """A trail, as if the car had been driving for a while."""
+        steps = int(seconds)
+        cols = {k: np.empty(steps, dtype=np.float32) for k in GPS_IDS}
+        tt = bus.now() - (steps - 1 - np.arange(steps)) * 1.0
+        for i in range(steps):
+            for k, v in self._fix(1.0).items():
+                cols[k][i] = v
+        # the bus keeps history as float32: under a metre at Pearl's latitude, fine for a trail
+        bus.publish_block(tt, cols, source=self.name)
 
 
 # ---- observed map (stopgap histogram) ---------------------------------------
