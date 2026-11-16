@@ -273,6 +273,77 @@ def test_key_off_ends_the_drive_and_the_next_answer_starts_a_new_one(amap, tmp_p
     assert started[1].startswith("2026-11-15T08:01:40")     # the second drive began 100 s into the session
 
 
+def test_key_on_with_a_dead_ecu_stays_in_the_drive(amap, tmp_path):
+    """The stall being hunted: key on, ECU dead. While another source (the
+    black box) sees the key on, the drive stays open and its frames are
+    recorded; key off ends the drive; key on with the ECU still dead starts
+    the next one; the ECU coming back lands in that same drive."""
+    rec = recorder(amap, tmp_path, drive_gap_s=20.0, pre_s=15, post_s=2, link_down_s=1.0)
+    cols = [Column("bb_ig1", units="V"), Column("bb_ecub", units="V")]
+
+    def box(t0, t1, key=True, ecub=12.3):
+        for t in np.arange(t0, t1, 0.05):
+            rec.feed_values("blackbox/live", float(t), {"bb_ig1": 12.4 if key else 0.0, "bb_ecub": ecub},
+                            source="blackbox", columns=cols, evaluate=False, alive=key)
+
+    def both(t0, t1, **kw):                                 # interleaved, one second at a time
+        for t in range(t0, t1):
+            run(rec, t, t + 1, **kw)
+            box(t, t + 1, ecub=12.3 if kw.get("link", True) else 0.2)
+    both(0, 30)
+    both(30, 100, link=False)                               # ECU dead for 70 s, key on all the while
+    assert not rec.parked and len(rec.drives) == 1          # well past drive_gap_s: still one drive
+    assert rec.events.get_nowait().reason == "link"         # the stall catcher saw the ECU go
+    for t in range(100, 130):                               # key off: the box says so, the ECU stays silent
+        run(rec, t, t + 1, link=False)
+        box(t, t + 1, key=False, ecub=0.0)
+    assert rec.parked and len(rec.drives) == 1
+    box(130, 200, key=False, ecub=0.0)                      # parked: nothing is recorded
+    run(rec, 130, 200, link=False, step=1.0)
+    assert rec.parked
+    box(200, 210, ecub=0.2)                                 # key on again, the ECU does not answer
+    assert not rec.parked and len(rec.drives) == 2
+    run(rec, 200, 210, link=False, step=0.5)
+    both(210, 220)                                          # now it does
+    rec.stop()
+    first, second = rec.drives
+    with open_log(first) as a, open_log(second) as b:
+        assert a.meta["end_reason"] == "key_off" and "started_by" not in a.meta
+        ig1 = a.series("bb_ig1")
+        assert ig1.t[0] == 0 and ig1.t[-1] == pytest.approx(120.0, abs=0.06)    # through the dead ECU and 20 s of key off
+        dead = (ig1.t >= 30) & (ig1.t < 100)
+        assert dead.sum() == 1400 and np.all(ig1.v[dead] > 12)                  # every frame of the silent stretch
+        assert np.all(a.series("bb_ecub").v[dead] < 1)                          # ... and what it was for: ECU +B gone
+        rpm = a.series("rpm")
+        assert np.isnan(rpm.v[rpm.t >= 30]).all() and a.series("link").v[-1] == 0  # the ECU side: nothing after 30 s
+        assert b.meta["started_by"].startswith("key on seen") and b.meta["previous_drive"] == first.name
+        assert b.t0 == pytest.approx(200.0) and b.series("bb_ig1").t[0] == pytest.approx(200.0)
+        rpm = b.series("rpm")
+        assert rpm.t[~np.isnan(rpm.v)][0] == pytest.approx(210.0) and b.meta["end_reason"] == "stopped"
+        link = b.series("link")
+        assert link.v[0] == 0 and link.v[-1] == 1           # silent at first, answering at the end
+    conn = sqlite3.connect(rec.db)
+    assert conn.execute("SELECT count(*) FROM drives").fetchone()[0] == 2
+
+
+def test_a_source_that_cannot_see_the_key_does_not_hold_the_drive_open(amap, tmp_path):
+    """alive=False from the first frame (the IG1 input is not wired): the
+    drive ends on the ECU's silence as it did before, and is not ended early
+    while the ECU answers."""
+    rec = recorder(amap, tmp_path, drive_gap_s=5.0, link_down_s=60.0)
+    for t in range(0, 30):
+        run(rec, t, t + 1)
+        rec.feed_values("blackbox/live", t + 0.5, {"bb_ig1": 0.0}, source="blackbox", alive=False)
+    assert not rec.parked                                   # 30 s of "key off" from the box, the ECU answering
+    for t in range(30, 40):
+        run(rec, t, t + 1, link=False)
+        rec.feed_values("blackbox/live", t + 0.5, {"bb_ig1": 0.0}, source="blackbox", alive=False)
+    assert rec.parked
+    rec.stop()
+    with open_log(rec.drives[0]) as log:
+        assert log.t1 == pytest.approx(35.0, abs=0.6) and log.meta["end_reason"] == "key_off"
+
+
 def test_a_capture_near_the_start_of_a_drive_is_cut_at_the_drive(amap, tmp_path):
     rec = recorder(amap, tmp_path, drive_gap_s=5.0, pre_s=30, post_s=1, link_down_s=60.0)
     run(rec, 0, 10)

@@ -218,7 +218,11 @@ bytes the ECU sent. It is committed every half second, so a crash or a dead
 laptop battery costs at most the last second: the next start shows that
 drive as "crashed", with everything up to the last commit in it. A drive
 ends when you stop recording or when the ECU has been silent for two minutes
-(key off); the next answer starts a new drive. Logs from 0.1.0 (`.csv`) and
+(key off); the next answer starts a new drive. With the black box connected
+the drive stays open, and the box keeps being recorded, for as long as it sees
+the key on (IG1, ECU +B or the engine turning): a stall with the key on and the
+ECU dead is all in one drive, and turning the key on with the ECU still dead
+starts one. Logs from 0.1.0 (`.csv`) and
 MegaLogViewer files are read in with "Import file" or `hondalog-log import`.
 
 **Stall catcher.** While recording, once RPM has been above 400:

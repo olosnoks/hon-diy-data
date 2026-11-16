@@ -9,9 +9,22 @@ it is entered in the ``captures`` table as a time range of the drive: no
 data is copied, and every stream that was being recorded is in it.
 
 A session is one or more *drives*. The first starts with the recorder. A
-drive ends when the recorder stops, or when the ECU has not answered for
-``drive_gap_s`` seconds (key off); the next answer starts a new drive on the
-same clock. Nothing is recorded in between.
+drive ends when the recorder stops, or when nothing has shown the car to be
+switched on for ``drive_gap_s`` seconds (key off). "Switched on" is the ECU
+answering, or another source saying so: the black box feeds its frames with
+``alive=True`` while it sees the key on (IG1, ECU +B or the engine turning).
+So a drive stays open, and the black box frames keep being recorded, while
+the key is on and the ECU is dead: the stall this tool exists to catch. The
+next sign of life starts a new drive on the same clock, whether it is the
+ECU answering or the box seeing the key come on with the ECU still silent.
+Between drives (key off) nothing is recorded.
+
+Why one drive and not a second, "black box only" drive for the silent
+stretch: the ECU dying, the dead time and the restart are one event. In one
+drive they are on one time axis, in one capture window and on one Replay
+screen; split at the 120 s mark they would be two or three drives cut at a
+moment that means nothing. And tying the drive to key-on (not to "the box is
+plugged in") keeps a laptop left in the parked car from recording all night.
 
 How it is fed (``hondalog.live.LiveSession`` does this wiring):
 
@@ -20,7 +33,8 @@ How it is fed (``hondalog.live.LiveSession`` does this wiring):
                                  stored next to the decoded values
     feed_link(t, up)             the ECU stopped or started answering
     feed_values(stream, t, {})   anything else on the session timebase:
-                                 math channels, black box frames
+                                 math channels, black box frames (``alive=``
+                                 says whether that source sees the key on)
     feed(sample)                 one whole row of decoded values, for sources
                                  that have no single reads (imports, tests)
 
@@ -169,7 +183,8 @@ class Recorder:
         self._last_t = 0.0
         self._t_first: float | None = None      # session time of the first thing recorded
         self._drive_t0: float | None = None     # ... of the first thing in the current drive
-        self._down_since: float | None = None   # the link went down then and has not come back
+        self._down_since: float | None = None   # no sign of life since then: ECU silent, key not seen on
+        self._key_off_seen = False              # ... and another source saw the key off meanwhile
         self._link: bool | None = None
         self.events: queue.Queue[CaptureEvent] = queue.Queue()
         self.notices: queue.Queue[Fired] = queue.Queue()
@@ -188,7 +203,8 @@ class Recorder:
 
     @property
     def parked(self) -> bool:
-        """Between drives: the ECU has been silent for ``drive_gap_s``."""
+        """Between drives: for ``drive_gap_s`` the ECU has been silent and
+        nothing else has shown the key to be on."""
         return self._log is None
 
     @property
@@ -317,12 +333,18 @@ class Recorder:
 
     def feed_values(self, stream: str, t: float, values: Mapping[str, float | None], *,
                     source: str = "", columns: Sequence[Column] | None = None,
-                    evaluate: bool = True) -> None:
+                    evaluate: bool = True, alive: bool | None = None) -> None:
         """One row of any other stream on the session timebase. The stream's
         columns are fixed by the first call (``columns``, or the keys of
-        ``values`` as 32-bit floats)."""
+        ``values`` as 32-bit floats).
+
+        ``alive``: this source can tell whether the car is switched on, and
+        says it is (True) or is not (False). While it is, the drive stays
+        open although the ECU is silent, and a new drive starts if there is
+        none. None (the default): the source knows nothing about that; its
+        rows are recorded while a drive is open and dropped between drives."""
         with self._lock:
-            if not self.active or not self._begin(t, None, None):
+            if not self.active or not self._begin(t, None, None, alive):
                 return
             log = self._drive()
             names = self._custom.get(stream)
@@ -361,10 +383,13 @@ class Recorder:
         if log is not None:
             log.end(reason=reason)
 
-    def _begin(self, t: float, wall: datetime | None, link: bool | None) -> bool:
+    def _begin(self, t: float, wall: datetime | None, link: bool | None,
+               alive: bool | None = None) -> bool:
         """Bookkeeping before a row is stored. ``link``: this feed shows the
         ECU answering (True), silent (False), or says nothing about it (None).
-        False means the recorder is between drives and the row is dropped."""
+        ``alive``: another source sees the key on (True), off (False), or
+        cannot tell (None). Returns False when the recorder is between
+        drives and the row is dropped."""
         if self._epoch is None:
             self._epoch = (wall or datetime.now()) - timedelta(seconds=t)
             # wall time of session time 0: what lines this log up with a
@@ -372,18 +397,26 @@ class Recorder:
             self.header["epoch_unix"] = self._epoch.timestamp()
             if self._log is not None:
                 self._log.set_meta(epoch_unix=self.header["epoch_unix"])
-        if link:
-            self._down_since = None
-        elif link is False and self._down_since is None and self._link is not None:
-            self._down_since = t
+        if link or alive:
+            self._down_since = None                 # a sign of life: the ECU, or the key seen on
+            self._key_off_seen = False
+        else:
+            if alive is False:
+                self._key_off_seen = True
+            if self._down_since is None and ((link is False and self._link is not None) or alive is False):
+                self._down_since = t
         if self._log is not None and self._down_since is not None and self.drive_gap_s is not None \
                 and t - self._down_since >= self.drive_gap_s and not self._engine.capturing:
-            self._end_drive("link_lost")            # key off: this drive is over
+            # this drive is over. "key_off" when a second witness saw the key off;
+            # "link_lost" when all that is known is that the ECU stopped answering
+            self._end_drive("key_off" if self._key_off_seen else "link_lost")
         if self._log is None:
-            if not link:
+            if not (link or alive):
                 self._last_t = t
                 return False
-            self._open_drive(self._wall(t))
+            log = self._open_drive(self._wall(t))
+            if not link:                            # the key is on and the ECU has not answered
+                log.set_meta(started_by="key on seen by another source, ECU silent")
         if self._t_first is None:
             self._t_first = t
         if self._drive_t0 is None:
