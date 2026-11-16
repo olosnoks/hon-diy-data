@@ -198,7 +198,9 @@ def test_ui_wiring_alarm_readout_and_finder(env):
             feed(i, ect=112.0)
         assert kinds == ["alarm"]
         top = session.alarms.active()[0]
-        assert top.severity == "alarm" and "Coolant 112" in top.limit_text and top.label == "COOLANT"
+        assert top.severity == "alarm" and top.label == "COOLANT"
+        assert "Coolant 234 °F" in top.limit_text and top.value_text == "234 °F"    # the screen: the owner's units
+        assert "Coolant 112 °C" in top.log_text                                     # the log: the map's
         assert session.alarms.state("ect") == "alarm" and session.alarms.unacked("ect")
         win.show_screen(ALARMS)
         win.frame()
@@ -212,7 +214,7 @@ def test_ui_wiring_alarm_readout_and_finder(env):
         import numpy as np
         from mapping_helpers import ram
         mapper = session.mapper
-        assert mapper.rank_against("rpm") == [] and "sweep continuously" in mapper.console()
+        assert mapper.rank_against("rpm") == [] and "0 sweeps so far" in mapper.console()
         for i in range(30):
             mapper._hist[:-1] = mapper._hist[1:]
             mapper._hist[-1] = ram(rpm=800 + 150 * (i % 9), noise=i)

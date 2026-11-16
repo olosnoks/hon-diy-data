@@ -1009,36 +1009,36 @@ class MappingSession(be.PollerMapper):
         self._matches: dict[int, Any] = {}
         self._message = ""
         self._channel = ""
-        self._sweep_t: collections.deque = collections.deque(maxlen=self.HIST)
 
-    # -- the correlation finder on the sweep history --
+    # -- the correlation finder: the base class ranks; here the result is written to the map file --
 
-    def sweep_recording(self):
-        """The grid's sweep history as a W3 ``SweepRecording`` (oldest first)."""
-        from ..mapping.sweeps import from_rows
-        rows = [row for row in self._hist if (row >= 0).any()]
-        return from_rows(rows, list(self._sweep_t)[-len(rows):] if rows else [])
-
-    def rank_against(self, channel: str, top: int = 5) -> list[ad.Candidate]:
-        """Which other bytes follow a channel (ideally a verified one) in the
-        sweeps so far: W3's correlation finder. Needs a few sweeps in which
-        the channel moved."""
-        rec = self.sweep_recording()
-        if len(rec) < 5:
-            self._console = "sweep continuously for a few seconds first, then rank"
-            self.revision += 1
-            return []
+    def assign(self, row: ad.RankRow, channel: str) -> str:
+        """Give a ranked address to a channel: its addr, length and byte order
+        go into the user's map file through W3's map editor
+        (``mapedit.update_channel``), which resets the channel to unverified,
+        drops evidence that described the old address and bumps the map
+        version. The formula is left alone. Returns a line for the user."""
+        amap = self.ecu.amap
+        ch = amap.channel(channel)
+        path = Path(amap.path) if amap.path else None
+        if ch is None:
+            return f"No channel named {channel!r} in the map"
+        if path is None or path == addressmap.DEFAULT_MAP:
+            return "The shipped map is read-only; your copy is made on first connect."
+        fields: dict[str, Any] = {"addr": row.addr, "length": row.width}
+        if row.width > 1:
+            fields["endian"] = row.endian
+        if (ch.addr, ch.length) == (row.addr, row.width) and (row.width == 1 or ch.endian == row.endian):
+            return f"{channel} already reads {row.label}: nothing to write"
         try:
-            matches = correlate.rank_against_channel(rec, self.ecu.amap, channel, top=top)
-        except addressmap.MapError as exc:
-            self._console = f"!! {exc}"
-            self.revision += 1
-            return []
-        self._console = "  ·  ".join(f"{m.candidate.label} {m.score:.2f}" for m in matches) \
-            or f"nothing follows {channel}"
+            mapedit.update_channel(path, channel, amap.variant or None, **fields)
+        except (addressmap.MapError, OSError, ValueError) as exc:
+            return f"Not written: {exc}"
+        self.ecu.reload_map()
+        self.map_revision += 1
         self.revision += 1
-        return [ad.Candidate(m.candidate.addr, float(m.score), int(self.minv[m.candidate.addr]),
-                             int(self.maxv[m.candidate.addr])) for m in matches]
+        return (f"{channel} now reads {row.label} in {path.name} (was 0x{ch.addr:02X}); it is "
+                "unverified. Reconnect, then prove it with the guided check.")
 
     # -- console: W1's guard --
 
@@ -1071,7 +1071,6 @@ class MappingSession(be.PollerMapper):
         super()._chunk(addr, fut)
         if self.sweeps == before:
             return
-        self._sweep_t.append(time.monotonic())
         session = self._session
         if session is not None and session.state == "running":
             session.add_sweep(self.cur)
@@ -1219,10 +1218,6 @@ class MappingSession(be.PollerMapper):
         else:
             self.ecu.reload_map()
         self._step = 4
-
-    def clear_changes(self) -> None:
-        super().clear_changes()
-        self._sweep_t.clear()
 
     def wizard_back(self) -> None:
         self._step, self._session = 0, None

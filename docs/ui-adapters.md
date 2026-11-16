@@ -62,8 +62,6 @@ definition)`, `tables.editor` and the rest of `RomTableModel` (see TableModel).
 
 What is not bound yet:
 
-- `mapper.rank_against()` (the correlation finder on the sweep history) has
-  no button.
 - Captures on the box's SD card are fetched with `hondalog-bb fetch`.
 
 ### ChannelSource / Connectable (W1, W2)
@@ -242,6 +240,24 @@ def wizard_next(self, selected_addr=None) -> None
 def wizard_back(self) -> None
 def wizard_retry(self) -> None
 ```
+
+The correlation finder (`RankCard`, R on the Raw tools screen) uses four
+more methods, on both shipped sessions:
+
+```python
+def rank_references(self) -> Sequence[RankReference]   # channels of the map (verified first), then the shapes
+def rank(self, reference_key, top=8) -> Sequence[RankRow]   # W3 correlate on sweep_recording(); [] + console() says why
+def assign_targets(self) -> Sequence[tuple[str, str]]  # (channel name, "label (name)  now 0x14")
+def assign(self, row: RankRow, channel) -> str         # mapedit.update_channel + reload; a line for the user
+map_revision: int                                      # bumps when mapped() would answer differently
+```
+
+`rank` is `correlate.rank_against_channel` for a channel key and
+`correlate.rank_shape` over the whole sweep history for `shape:rise` /
+`shape:fall`. `MappingSession.assign` writes addr, length and byte order
+through `mapping.mapedit.update_channel` (unverified, old evidence dropped,
+version bumped; the shipped map is refused) and reloads the map.
+`rank_against(channel)` remains as the short form.
 
 `WizardCard` is a host: it renders `WizardView` (five numbered steps, one
 instruction box, a target list or a candidate table, three buttons) and calls

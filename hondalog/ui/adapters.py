@@ -300,6 +300,33 @@ class Candidate:
 
 
 @dataclass
+class RankRow:
+    """One line of the correlation finder's answer: an address, read one way,
+    and how closely it followed the reference."""
+    addr: int
+    width: int = 1              # bytes
+    endian: str = "big"
+    inverse: bool = False       # compared as 1/x
+    label: str = ""             # "0x14 u8", "0x00 u16be 1/x"
+    score: float = 0.0          # 0..1
+    r: float = 0.0              # Pearson: positive = moves the same way as the reference
+    formula: str = ""           # least-squares fit to the reference, as map formula text
+    lo: int = 0                 # raw range seen in the sweeps
+    hi: int = 0
+    mapped: str = ""            # the channel the map already has on this address
+    note: str = ""              # "barely moves (2 counts)"
+
+
+@dataclass
+class RankReference:
+    """Something to rank addresses against: a channel of the map, or a shape."""
+    key: str                    # channel name, or "shape:rise" / "shape:fall"
+    label: str                  # "RPM", "Rises steadily"
+    kind: str = "channel"       # "channel" or "shape"
+    verified: bool = False      # a channel whose address has been proven
+
+
+@dataclass
 class WizardView:
     steps: tuple = ("Target", "Baseline", "Stimulus", "Candidates", "Confirm")
     step: int = 0
@@ -364,6 +391,13 @@ class MapperSession(Protocol):
     def wizard_back(self) -> None: ...
 
     def wizard_retry(self) -> None: ...
+
+    # The correlation finder ("Rank addresses"). Both shipped sessions have
+    # it; the screen reaches these four with getattr.
+    #   rank_references() -> Sequence[RankReference]     what can be ranked against
+    #   rank(reference_key, top=8) -> Sequence[RankRow]  best first; console() says why when it is empty
+    #   assign_targets() -> Sequence[tuple[str, str]]    (channel name, "label  now 0x12") to assign to
+    #   assign(row, channel_name) -> str                 write it through the map editor; a line for the user
 
 
 # ---- tuning tables ----------------------------------------------------------

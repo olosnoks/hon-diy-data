@@ -281,6 +281,19 @@ it tells you what to do, judges the recorded data, and on a pass writes
 `status = "verified"` and the evidence into your address map. When the
 check fails it lists the addresses that did behave as expected.
 
+R shows **Rank addresses** in the wizard's place: the correlation finder on
+the sweeps so far. Pick what to compare with: a channel of the map (a
+verified one is the best reference; its own bytes are left out), or a shape
+you make by hand ("rises steadily": clear with C, press the pedal slowly or
+let the engine warm while it sweeps). G ranks: each address as a byte and as
+a 16-bit value in both byte orders, how closely it followed (and which way
+it runs), the range it covered, its value now and the channel the map
+already has there. A click selects the byte in the grid. "Assign to
+channel…" asks, then writes the address, length and byte order into your map
+through the map editor: the channel becomes unverified, evidence for the old
+address is dropped, the map version moves on, and the formula is left for
+you to check with the guided check.
+
 **Tune (F6).** Table grid with a 3D surface beside it. "Definition…" loads
 a ROM definition (a TunerPro `.xdf` or a hondalog `.toml`) and "Open ROM…" a
 ROM image; the table list, the grid and the surface are rebuilt from them

@@ -445,6 +445,8 @@ Raw tools
 | S | Sweep on / off |
 | C | Clear changes |
 | N / B | Wizard next / back |
+| R | Rank addresses panel in the wizard's place (again: the wizard back) |
+| G | Rank now |
 | Enter | Send the hex console line |
 
 Tune
