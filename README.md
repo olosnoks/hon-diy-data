@@ -142,6 +142,57 @@ scripts/build-firmware.sh            # host tests, simulator checks, both builds
 scripts/build-firmware.sh handheld --flash /dev/ttyUSB0
 ```
 
+## Querying your drives with SQL
+
+The database is ordinary SQLite. Open it with `hondalog-log sql`, the
+`sqlite3` shell or DB Browser for SQLite (read-only while the app records).
+Times (`t`) are seconds since the app connected.
+
+| name | what |
+|---|---|
+| `drive_2026_11_16_0712` | one view per drive: a row per RPM read, every channel as a column (slower channels hold their last value, black box channels show their one-second mean), plus `wall_time` |
+| `drive_..._blackbox` | the same drive's black box streams, a row per second: `<channel>_min`, `_mean`, `_max` |
+| `drive_summary` | a row per drive: when, how long, stalls, markers, status, notes |
+| `stalls` | every stall capture of every drive: when, why, the window |
+| `readings` | every K-line and math value in long form: drive, channel, t, value |
+| `blackbox_1s` | every black box channel per second: min, mean, max |
+| `ecu_reads` | the raw bytes of every K-line read, with its latency |
+| `markers` | markers, trigger firings and alarms |
+
+The queries below run as written (the test suite checks them). Tables,
+more examples and Python access: [Data and SQL](docs/data-and-sql.md#querying-with-sql).
+
+```sql
+-- every drive, newest first
+SELECT drive, started, minutes, stalls, markers, status, notes
+FROM drive_summary ORDER BY started DESC;
+
+-- the last 5 seconds before every stall: RPM as it was read, and ECU +B
+-- from the black box (the lowest value in each second)
+SELECT s.name AS stall, 'rpm' AS channel, round(r.t - s.t_trigger, 2) AS seconds, r.value
+FROM stalls s JOIN readings r ON r.drive_id = s.drive_id AND r.channel = 'rpm'
+WHERE r.t BETWEEN s.t_trigger - 5 AND s.t_trigger
+UNION ALL
+SELECT s.name, 'ecu +B', b.t - s.t_trigger, b.min
+FROM stalls s JOIN blackbox_1s b ON b.drive_id = s.drive_id AND b.channel = 'bb_ecub'
+WHERE b.t BETWEEN s.t_trigger - 5 AND s.t_trigger
+ORDER BY 1, 2, 3;
+
+-- one drive as a table: where was it lean at a warm idle?
+SELECT t, wall_time, rpm, map, o2, stft
+FROM drive_2026_11_16_0712
+WHERE ect > 80 AND rpm < 1000 AND o2 < 0.2;
+
+-- lowest battery voltage the ECU reported, per drive
+SELECT drive, min(value) AS lowest_batt, count(*) AS reads
+FROM readings WHERE channel = 'batt' GROUP BY drive;
+
+-- the raw K-line bytes within a second of each marker
+SELECT m.drive, m.text, e.t, e.block, e.raw_hex, e.latency_ms
+FROM markers m JOIN ecu_reads e ON e.drive_id = m.drive_id
+WHERE m.kind = 'marker' AND e.t BETWEEN m.t - 1 AND m.t + 1;
+```
+
 ## Documentation
 
 Start at the [documentation index](docs/README.md), which has a reading
