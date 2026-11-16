@@ -348,6 +348,7 @@ typedef struct {
     int32_t utc_offset_min;     /* for the clock on screen only; files are UTC */
     int32_t serial;             /* 1: the binary link to the laptop on the USB-C port (SERIAL.md); 0 = off */
     int32_t serial_baud;        /* its baud rate */
+    int32_t rotate;             /* display: 0 or 180 degrees (180 = picture upside down, for mounting the other way up) */
 } hh_config_t;
 
 void   hh_config_default(hh_config_t *c);

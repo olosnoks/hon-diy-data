@@ -16,6 +16,7 @@
  * Everything here runs on core 1, the interrupt included (it is installed
  * from the UI task), which leaves core 0 to hh-core.
  */
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -35,6 +36,7 @@
 #include "lvgl.h"
 
 #include "board_pins.h"
+#include "hh_data.h"
 #include "port.h"
 #include "ui.h"
 #include "ui_perf.h"
@@ -175,8 +177,42 @@ static bool IRAM_ATTR frame_finish_cb(esp_lcd_panel_handle_t p, const esp_lcd_rg
     return woken == pdTRUE;
 }
 
+/* 180 degree rotation (HANDHELD.CFG rotate = 180). The panel has no command
+ * interface to flip itself, and LVGL cannot rotate in direct mode. But a
+ * 180 degree turn of a W x H picture is just the whole frame read backwards:
+ * pixel i is shown at N-1-i. So esp_lcd runs with no frame buffers of its own
+ * (num_fbs = 0) and asks us to fill each bounce buffer; we copy that slice from
+ * the far end of our frame buffer, reversed. Swapping buffers happens at the
+ * frame wrap, exactly as esp_lcd does it with its own buffers. */
+#define FB_PX (HH_LCD_H_RES * HH_LCD_V_RES)
+static uint16_t *rot_fb[2];
+static uint16_t *volatile rot_shown;     /* being sent to the glass */
+static uint16_t *volatile rot_pending;   /* finished by LVGL, shown from the next frame */
+
+static bool IRAM_ATTR rot180_fill_cb(esp_lcd_panel_handle_t p, void *bounce, int pos_px, int len_bytes, void *ctx)
+{
+    (void)p; (void)ctx;
+    const int n = len_bytes / 2;                                  /* pixels, always even */
+    const uint32_t *src = (const uint32_t *)(rot_shown + (FB_PX - pos_px - n));
+    uint32_t *dst = bounce;
+    for (int i = 0, w = n / 2; i < w; i++) {
+        uint32_t v = src[w - 1 - i];
+        dst[i] = (v >> 16) | (v << 16);                           /* the two pixels in a word swap too */
+    }
+    return false;
+}
+
+static bool IRAM_ATTR rot180_frame_cb(esp_lcd_panel_handle_t p, const esp_lcd_rgb_panel_event_data_t *e, void *ctx)
+{
+    if (rot_pending) { rot_shown = rot_pending; rot_pending = NULL; }
+    return frame_finish_cb(p, e, ctx);
+}
+
+static bool rotated;
+
 static void panel_init(void **fb0, void **fb1)
 {
+    rotated = hh_display_rotation() == 180;
     esp_lcd_rgb_panel_config_t cfg = {
         .clk_src = LCD_CLK_SRC_PLL160M,
         .timings = {
@@ -199,7 +235,7 @@ static void panel_init(void **fb0, void **fb1)
         },
         .data_width = HH_LCD_DATA_WIDTH,
         .bits_per_pixel = HH_LCD_BITS_PER_PIXEL,
-        .num_fbs = 2,
+        .num_fbs = 2,                                 /* 0 when rotated: see rot180_fill_cb */
         .bounce_buffer_size_px = HH_LCD_BOUNCE_LINES * HH_LCD_H_RES,
         .psram_trans_align = HH_LCD_PSRAM_ALIGN,
         .hsync_gpio_num = HH_LCD_PIN_HSYNC,
@@ -225,14 +261,31 @@ static void panel_init(void **fb0, void **fb1)
             .fb_in_psram = HH_LCD_FB_IN_PSRAM,
         },
     };
+    if (rotated) {
+        cfg.num_fbs = 0;
+        cfg.flags.fb_in_psram = 0;
+        cfg.flags.no_fb = 1;
+        for (int i = 0; i < 2; i++) {
+            rot_fb[i] = heap_caps_aligned_calloc(64, FB_PX, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!rot_fb[i]) rot_fb[i] = heap_caps_aligned_calloc(64, FB_PX, 2, MALLOC_CAP_8BIT);
+            assert(rot_fb[i]);
+        }
+        rot_shown = rot_fb[0];
+    }
     ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&cfg, &panel));
     esp_lcd_rgb_panel_event_callbacks_t cbs = {
-        .on_bounce_frame_finish = frame_finish_cb,
+        .on_bounce_frame_finish = rotated ? rot180_frame_cb : frame_finish_cb,
+        .on_bounce_empty = rotated ? rot180_fill_cb : NULL,
     };
     ESP_ERROR_CHECK(esp_lcd_rgb_panel_register_event_callbacks(panel, &cbs, NULL));
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
-    ESP_ERROR_CHECK(esp_lcd_rgb_panel_get_frame_buffer(panel, 2, fb0, fb1));
+    if (rotated) {
+        *fb0 = rot_fb[0];
+        *fb1 = rot_fb[1];
+    } else {
+        ESP_ERROR_CHECK(esp_lcd_rgb_panel_get_frame_buffer(panel, 2, fb0, fb1));
+    }
 }
 
 /* Direct mode: px is the whole frame buffer LVGL has just finished, area one
@@ -244,7 +297,8 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
     ui_perf_flushed(area);
     if (lv_display_flush_is_last(disp)) {
         int64_t t0 = esp_timer_get_time();
-        esp_lcd_panel_draw_bitmap(panel, 0, 0, HH_LCD_H_RES, HH_LCD_V_RES, px);
+        if (rotated) rot_pending = (uint16_t *)px;   /* rot180_frame_cb switches to it at the next frame */
+        else esp_lcd_panel_draw_bitmap(panel, 0, 0, HH_LCD_H_RES, HH_LCD_V_RES, px);
         /* Drop a stale "frame finished", then wait for the next one. Clearing
          * after the hand-over can cost one extra frame, never a torn one. */
         xSemaphoreTake(frame_done, 0);
@@ -308,7 +362,7 @@ static void ui_task(void *arg)
     ui_tick(tick_ms(), false, false);
     lv_timer_handler();                     /* first frame */
     backlight_set(night ? HH_BL_NIGHT_PCT : HH_BL_DAY_PCT);
-    ESP_LOGI(TAG, "UI up: %d x %d, bounce %d lines, %s", HH_LCD_H_RES, HH_LCD_V_RES, HH_LCD_BOUNCE_LINES,
+    ESP_LOGI(TAG, "UI up: %d x %d%s, bounce %d lines, %s", HH_LCD_H_RES, HH_LCD_V_RES, rotated ? " rotated 180" : "", HH_LCD_BOUNCE_LINES,
              night ? "night" : "daylight");
 
     TickType_t wake = xTaskGetTickCount();

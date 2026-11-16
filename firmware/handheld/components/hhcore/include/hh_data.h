@@ -74,6 +74,7 @@ void hh_snapshot(hh_snapshot_t *out);   /* lock-protected copy, cheap, safe at 3
 void hh_mark(void);                     /* button long-press: marker */
 void hh_ack_alarm(void);
 void hh_core_start(void);               /* starts link, gps, logger tasks */
+int  hh_display_rotation(void);         /* 0 or 180, from HANDHELD.CFG `rotate`; valid after hh_core_start */
 
 /* ---- added ---- */
 /* A marker at an earlier moment: t_us is device time (the clock of

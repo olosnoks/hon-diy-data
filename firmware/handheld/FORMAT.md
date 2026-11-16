@@ -256,3 +256,4 @@ range is skipped; the rest still applies.
 | `utc_offset_min` | 0 | for the clock on the screen; files are UTC |
 | `serial` | 1 | the binary link to the laptop on the USB-C port (SERIAL.md); 0 = plain log console |
 | `serial_baud` | 921600 | its speed; 460800 if the laptop sees damaged frames |
+| `rotate` | 0 | display rotation, 0 or 180 (upside down). Firmware built with `-DHH_ROTATE_DEFAULT=180` defaults to 180 |

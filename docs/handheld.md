@@ -509,6 +509,16 @@ fixes and events, damaged or missing blocks, and how it ended.
 The card is not cleared by the import. Delete old `DRIVES/` files yourself
 when it fills.
 
+## Turning the picture upside down
+
+If the board is mounted the other way up, set `rotate = 180` in
+`HANDHELD.CFG` on the SD card (it is commented out in the file
+`export-map` writes; uncomment it). Without a card or the line, the firmware's
+built-in default is used: 0, or 180 for a build made with
+`-DHH_ROTATE_DEFAULT=180`. The panel cannot flip itself, so the firmware reads
+each frame backwards while sending it to the glass; if rotated mode shows
+flicker or a sideways shift that the normal mode does not, report it.
+
 ## Talking to the laptop over serial
 
 Plug the CYD's USB-C into the laptop. The handheld streams every ECU read,

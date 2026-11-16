@@ -15,6 +15,10 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 if(HH_GPS_P1)
     idf_build_set_property(COMPILE_DEFINITIONS "HH_GPS_P1=1" APPEND)
 endif()
+# Board mounted upside down: -DHH_ROTATE_DEFAULT=180 (HANDHELD.CFG `rotate` still overrides)
+if(HH_ROTATE_DEFAULT)
+    idf_build_set_property(COMPILE_DEFINITIONS "HH_ROTATE_DEFAULT=${HH_ROTATE_DEFAULT}" APPEND)
+endif()
 
 if(HH_LVGL_DIR)
     # the component is named after its directory; main/CMakeLists.txt requires it by that name

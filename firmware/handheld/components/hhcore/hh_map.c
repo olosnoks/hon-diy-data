@@ -7,6 +7,10 @@
 
 #include "hhcore.h"
 
+#ifndef HH_ROTATE_DEFAULT
+#define HH_ROTATE_DEFAULT 0     /* build with -DHH_ROTATE_DEFAULT=180 for a board mounted upside down */
+#endif
+
 /* ---- HANDHELD.MAP ---------------------------------------------------------- */
 
 void hh_map_chan(const hh_map_t *m, int i, hh_map_chan_t *out)
@@ -154,6 +158,7 @@ static const struct { const char *key; size_t off; int32_t def, lo, hi; } KEYS[]
     {"utc_offset_min", OFF(utc_offset_min), 0, -840, 840},
     {"serial", OFF(serial), 1, 0, 1},
     {"serial_baud", OFF(serial_baud), 921600, 9600, 2000000},
+    {"rotate", OFF(rotate), HH_ROTATE_DEFAULT, 0, 180},
 };
 #define N_KEYS (sizeof(KEYS) / sizeof(KEYS[0]))
 

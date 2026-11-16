@@ -83,6 +83,7 @@ int16_t hh_channel_index(const char *name)
 }
 void hh_ack_alarm(void) { acks++; }
 void hh_core_start(void) { t0_us = clock_us(); }
+int hh_display_rotation(void) { return 0; }
 
 static uint8_t level(const hh_channel_info_t *c, float v)
 {

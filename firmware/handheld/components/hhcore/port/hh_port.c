@@ -340,6 +340,8 @@ static void quiet_probe(void)
 
 /* ---- hh_data.h -------------------------------------------------------------------- */
 
+int hh_display_rotation(void) { return cfg.rotate == 180 ? 180 : 0; }
+
 void hh_core_start(void)
 {
     static hh_platform_t plat;
