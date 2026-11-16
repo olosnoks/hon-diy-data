@@ -177,6 +177,7 @@ class LinkSource(be.PollerSource):
         self.live = LiveSession(self.amap, out_dir=self.out_dir)
         self.live.on_read = self._on_read
         self.live.on_frame = self._on_frame
+        self.live.on_gps = self._on_gps
         self.frames.clear()
         if self.bus is not None:
             self.start(self.bus)            # pick up an edited map
@@ -300,6 +301,18 @@ class LinkSource(be.PollerSource):
             # reply byte arrived, which the link measures itself (BlockRead.mono).
             bus.publish(read.values, t=bus.bus_time(read.mono - read.latency_s),
                         wire=read.mono, source="ECU")
+
+    def _on_gps(self, t: float, fix) -> None:
+        """The handheld's GPS fix (``cyd:`` ports): onto the bus as source
+        "GPS" for the Map screen. The channels appear with the first fix."""
+        bus, poller = self.bus, self.poller
+        if bus is None or poller is None:
+            return
+        if bus.channel("gps_lat") is None:
+            for spec in be.GPS_SPECS:
+                bus.register(spec)
+            bus.set_timeout("GPS", be.GPS_TIMEOUT_S)
+        bus.publish({k: fix.get(k) for k in be.GPS_IDS}, t=bus.bus_time(poller.t0 + t), source="GPS")
 
     def _on_frame(self, frame) -> None:
         bus, poller = self.bus, self.poller

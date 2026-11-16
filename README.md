@@ -61,8 +61,11 @@ The handheld, from its PC simulator:
   9600 baud), about 17 reads a second on the fast channels in the
   simulator, with adaptive timing and recovery from key-off or a pulled
   cable.
-- Seven screens on F1 to F7: Sensors, Drive, Map 3D, Replay, Raw tools,
-  Tune, Alarms. Every action has a key.
+- Eight screens on F1 to F8: Sensors, Drive, Map 3D, Replay, Raw tools,
+  Tune, Alarms, Map. Every action has a key.
+- GPS track maps of drives (the handheld's GPS) on OpenStreetMap tiles,
+  offline first, coloured by any channel; every stall on one map, to see
+  whether they happen at the same places. GPX, KML and GeoJSON exports.
 - Every drive in `~/hondalog/hondalog.db`, with the raw bytes of every
   read; plain SQL views; exports to MegaLogViewer (`.mlg`, `.msl`), CSV and
   NPZ.

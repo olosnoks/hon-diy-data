@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Save every screen in both themes at exactly 1366x768 to docs/screenshots/,
 then three states the plain screens do not show (replay-compare, rawtools-rank,
-tune-rom).
+tune-rom), and the Map screen (F8) on a database of drives around Pearl, MS
+(``hondalog.data.synth.write_gps_drives``): one drive coloured by speed, all
+stalls, and the grid it falls back to without tiles. The map tiles are drawn
+by tools/fixture_tiles.py: no tile server is asked for anything.
 
 Uses the demo data (the mockup's simulated car) frozen at one moment, so the
 pictures are repeatable and can be compared with docs/mockups/.
@@ -21,6 +24,8 @@ sys.path.insert(0, str(ROOT))
 TMP = Path(tempfile.mkdtemp(prefix="hondalog-shots-"))
 os.environ["XDG_CONFIG_HOME"] = str(TMP / "config")
 os.environ["HONDALOG_DIR"] = str(TMP / "logs")
+os.environ["HONDALOG_TILES"] = "offline"                 # never the real OSM servers
+os.environ["HONDALOG_TILE_CACHE"] = str(TMP / "tiles")
 
 from hondalog import ui  # noqa: E402,F401
 from PySide6.QtCore import QSettings  # noqa: E402
@@ -90,6 +95,7 @@ def main(out: Path) -> int:
                 win.map3d.view_seg.set_current("surface")
                 win.map3d._set_mode("surface")
     extras(win, session, shot, settle, clock)
+    map_shots(win, session, shot, settle)
     gl_ok, reason = scene3d.gl_status()
     print(f"{len(saved)} screenshots in {out}  (3D: {'OpenGL, ' + reason if gl_ok else '2D fallback, ' + reason})")
     win.close()
@@ -144,6 +150,58 @@ def extras(win, session, shot, settle, clock) -> None:
         for index, screen in ((3, "replay-compare"), (4, "rawtools-rank"), (5, "tune-rom")):
             win.show_screen(index)
             shot(f"{screen}-{name}")
+
+
+def map_shots(win, session, shot, settle) -> None:
+    """F8 on real drives: four around the Pearl loop, three stalls on one rough stretch."""
+    from datetime import datetime
+
+    import fixture_tiles
+    from hondalog.data.synth import write_gps_drives
+    from hondalog.geo import tiles as gt
+    from hondalog.ui import wired
+    from hondalog.ui.main_window import MAP
+    from hondalog.ui.session import _lookup
+    from hondalog.ui.tilelayer import TileLayer
+
+    folder = Path(os.environ["HONDALOG_DIR"])
+    refs = write_gps_drives(folder / "hondalog.db", drives=4, duration_s=1500, gps_hz=1.0,
+                            started_unix=datetime(2026, 11, 2, 7, 12).timestamp())
+    session.logs = wired.DriveReader(_lookup(session), folder)
+    layer = fixture_tiles.fixture_layer(TMP / "fixture-tiles")
+    win.map.use_tiles(layer)
+    win.replay.open(refs[0])
+    win.show_screen(MAP)
+    win.map.set_mode("drive")
+    win.map.set_colour("speed")
+    settle()
+    win.map.move_cursor(win.replay.block.span[0] + 610.0)
+
+    def tiles_in(frames=200):
+        for _ in range(frames):
+            settle(1)
+            if not win.map.tiles.fetcher.pending:
+                break
+        win.map.canvas.finish_render()
+        settle(3)
+
+    for name in ("daylight", "night"):
+        theme.T.set(name)
+        win.map.set_mode("drive")
+        win.map.move_cursor(win.replay.block.span[0] + 610.0)
+        tiles_in()
+        shot(f"map-{name}")
+        win.map.set_mode("stalls")
+        win.map.select_pin(1, centre=False)
+        tiles_in()
+        shot(f"map-stalls-{name}")
+    # no tiles at all (offline, nothing cached): the plain grid; the track draws anyway
+    theme.T.set("daylight")
+    win.map.use_tiles(TileLayer(gt.TileSource(), online=False, root=TMP / "empty-cache"))
+    win.map.set_mode("drive")
+    win.map.move_cursor(win.replay.block.span[0] + 610.0)
+    tiles_in()
+    shot("map-offline-daylight")
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ hondalog-cydsim = "hondalog.handheld.cydsim:main"
 packages = ["hondalog", "hondalog.ui", "hondalog.ui.screens", "hondalog.link", "hondalog.diag", "hondalog.expr",
             "hondalog.mathch", "hondalog.alarms", "hondalog.mapping", "hondalog.bench",
             "hondalog.data", "hondalog.analysis", "hondalog.export", "hondalog.triggers",
-            "hondalog.blackbox", "hondalog.tuning", "hondalog.handheld"]
+            "hondalog.blackbox", "hondalog.tuning", "hondalog.handheld", "hondalog.geo"]
 
 [tool.setuptools.package-data]
 hondalog = ["data/*", "data/fonts/*", "tuning/data/*"]

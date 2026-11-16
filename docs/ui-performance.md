@@ -85,6 +85,36 @@ the laptop; the 50 Hz frames and eight more live tiles are.
 Latency is dominated by waiting for the next 33 ms frame; the UI adds no
 queue of its own.
 
+### The Map screen (F8)
+
+Same machine and bench, a later run (`tools/bench_ui.py --check`, all
+targets met; the other screens were 1 to 3 ms slower at p95 in that run,
+the machine is shared). The drive is one synthetic hour around the Pearl
+loop with a GPS fix every 0.1 s: **36 000 points**, the fixture tiles of
+`tools/fixture_tiles.py` cached on disk. "map-pan" drags the map 6 px a
+frame, turning every 2 s and zooming a level in or out every 3 s;
+"map-play" plays Replay with the dot moving on the map.
+
+| Screen | fps | min fps | frame p50 / p95 / max (ms) | CPU % | latency p50 / p95 / max (ms) |
+|---|---|---|---|---|---|
+| Map, dragging and zooming an hour | 30.3 | 25.3 | 0.1 / 7.6 / 23.4 | 30.6 | 5.5 / 15.1 / 20.2 |
+| Map, Replay playing (the dot moves) | 30.3 | 24.7 | 0.2 / 2.3 / 11.3 | 10.4 | 5.5 / 14.4 / 19.1 |
+
+The map's own paint: p50 1.4 ms, p95 5.7 ms, max 12.8 ms over about 530
+paints. At the zoom that fits the hour (14) the track is 2 728 of the
+36 000 points; its image takes 22 to 24 ms to draw, spread over frames in
+6 ms slices. The CPU of "map-pan" includes the tile threads decoding and
+theming the tiles that scroll in (and the simulator and the recorder, as in
+every row).
+
+How it got there: drawn the plain way (every kept point stroked in every
+paint, the GPS jitter kept by a pixel-grid decimation) the same hour took
+**206 ms a paint** (4.6 fps while dragging). Then: decimation by radial
+distance (1.5 px), the track drawn once per zoom into an image that panning
+moves, short runs of 64 points with bevel joins (Qt strokes many short
+antialiased polylines four times faster than one long one that crosses
+itself), and after a zoom the old image scaled until the new one is done.
+
 ## 3D with OpenGL: only software rendering was available
 
 There is no GPU here. Under Xvfb, Mesa's llvmpipe gives a 4.5 compatibility
@@ -128,3 +158,9 @@ small, but it has not been measured. If it is not small, `hondalog --no-gl`
   the table.
 - The 3D view repaints on demand: when data or the camera changed.
 - MSAA steps down 4x, 2x, off when 30 frames in a row take over 12 ms.
+- The Map screen keeps an image of the track per zoom and only moves it
+  while panning; a new image (zoom, or the view nearing the edge of a big
+  track) is drawn a few ms per frame while the old one is shown scaled.
+  Tiles are decoded and themed on the fetcher's two threads; the UI thread
+  turns an image into a pixmap. Everything the paint draws (positions,
+  elided strings, the grid path, pens) is prepared when the view changes.

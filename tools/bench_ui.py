@@ -14,6 +14,11 @@ Measures, per screen:
 
 Numbers from a server CPU say nothing certain about an HD 4000 laptop: run
 the last form, or `hondalog --profile`, on the T430.
+
+The Map screen (F8) runs on a one-hour drive with a fix every 0.1 s (36 000
+points, ``write_synthetic(gps_hz=10)``) and the tiles of tools/fixture_tiles.py
+cached on disk: "map-pan" drags the map around while zooming in and out,
+"map-play" plays Replay with the dot moving on the map.
 """
 
 import argparse
@@ -31,12 +36,14 @@ sys.path.insert(0, str(ROOT))
 TMP = Path(tempfile.mkdtemp(prefix="hondalog-bench-"))
 os.environ["XDG_CONFIG_HOME"] = str(TMP / "config")
 os.environ["HONDALOG_DIR"] = str(TMP / "logs")
+os.environ["HONDALOG_TILES"] = "offline"                 # never the real OSM servers
+os.environ["HONDALOG_TILE_CACHE"] = str(TMP / "tiles")
 
 TARGETS = {"fps_min": 20.0, "fps": 28.5, "cpu_pct": 50.0, "latency_p95": 100.0,
            # the screen that is up all day, with the simulated black box running
            "sensors_cpu_pct": 20.0}
 SCENARIOS = ("sensors", "drive", "map3d", "map3d-orbit", "replay-live", "replay-play",
-             "rawtools-sweep", "tune", "alarms", "sensors-again")
+             "rawtools-sweep", "tune", "alarms", "map-pan", "map-play", "sensors-again")
 
 
 def main(argv=None) -> int:
@@ -66,6 +73,18 @@ def main(argv=None) -> int:
     app = QApplication([])
     app.setStyle("Fusion")
     theme.apply(app)
+    # an hour around the Pearl loop with GPS at 10 Hz, and fixture tiles for it on disk
+    import fixture_tiles
+    from hondalog.data.synth import write_synthetic
+    from hondalog.geo import route as georoute
+    hour = write_synthetic(TMP / "logs" / "hondalog.db", duration_s=3600, fast_hz=8.0, blackbox_hz=0.0,
+                           gps_hz=10.0, stalls=(1500.0,), seed=7)
+    loop = georoute.PEARL_LOOP
+    from hondalog.geo import proj as geoproj
+    bx, by = geoproj.to_unit(loop.lon, loop.lat)
+    pad = 0.00003
+    fixture_tiles.prefill(TMP / "fixture-tiles", (bx.min() - pad, by.min() - pad, bx.max() + pad, by.max() + pad),
+                          range(13, 18))
     session = build_session(blackbox_port="off" if args.no_blackbox else None)
     win = mw.Shell(session, QSettings(str(TMP / "ui.ini"), QSettings.IniFormat), profile=True)
     theme.T.set(args.theme)
@@ -92,9 +111,25 @@ def main(argv=None) -> int:
     gl_ok, gl_reason = scene3d.gl_status()
     orbit = QTimer()
     orbit.timeout.connect(lambda: win.map3d.scene.orbit(math.radians(1.5), 0.0))
+    win.map.use_tiles(fixture_tiles.fixture_layer(TMP / "fixture-tiles", online=False))
+    pan = QTimer()
+    pan_state = {"k": 0}
+
+    def pan_step():
+        # a drag across the map, 6 px a step, turning every 2 s, a zoom level up or down every 3 s
+        k = pan_state["k"] = pan_state["k"] + 1
+        angle = (k // 120) * 2.1
+        win.map.canvas.pan_px(6 * math.cos(angle), 6 * math.sin(angle))
+        if k % 180 == 0:
+            canvas = win.map.canvas
+            canvas.zoom_by(1 if (k // 180) % 4 < 2 else -1)
+    pan.timeout.connect(pan_step)
 
     def setup(name):
         orbit.stop()
+        pan.stop()
+        if win.replay.playing:
+            win.replay.toggle_play()
         session.mapper.set_sweeping(False)
         if name.startswith("sensors"):
             win.show_screen(mw.SENSORS)
@@ -119,6 +154,18 @@ def main(argv=None) -> int:
             win.show_screen(mw.TUNE)
         elif name == "alarms":
             win.show_screen(mw.ALARMS)
+        elif name.startswith("map-"):
+            if win.replay.view is None or getattr(win.replay.view, "path", None) != hour:
+                win.replay.open(hour)
+            win.show_screen(mw.MAP)
+            win.map.set_mode("drive")
+            win.map.set_colour("speed")
+            win.map.fit()
+            if name == "map-pan":
+                pan.start(16)
+            else:
+                win.replay.block.set_cursor(win.replay.block.span[0] + 1300.0)
+                win.replay.toggle_play()
 
     results = {}
     names = args.only or SCENARIOS
@@ -135,6 +182,8 @@ def main(argv=None) -> int:
         s = win.perf.summary()
         if name.startswith("map3d"):
             s["scene"] = win.map3d.scene.stats()
+        elif name.startswith("map-"):
+            s["map"] = win.map.stats()
         elif name == "tune":
             s["scene"] = win.tune.scene.stats()
         results[name] = s
@@ -148,6 +197,13 @@ def main(argv=None) -> int:
     scene = results.get("map3d-orbit", results.get("map3d", {})).get("scene")
     print(f"poll rate {poll.rate_hz:.1f} Hz, {poll.errors} link errors, peak RSS {rss:.0f} MB, "
           f"{len(win.sensors.tiles)} tiles")
+    for name in ("map-pan", "map-play"):
+        m = results.get(name, {}).get("map")
+        if m:
+            print(f"{name}: {m['track_points']} track points, {m['points']} kept at zoom {m['zoom']} "
+                  f"({m['runs']} runs in the track image, last drawn in {m['render_ms']} ms in slices, "
+                  f"{m['renders']} images), {m['tiles']} tiles; map paint p50 {m['paint_p50']} ms, "
+                  f"p95 {m['paint_p95']} ms, max {m['paint_max']} ms over {m['paints']} paints")
     if scene:
         print(f"3D scene: {scene['draw_calls']} draw calls ({scene['geometry']} geometry + "
               f"{scene['labels']} labels), {scene['triangles']} triangles, "

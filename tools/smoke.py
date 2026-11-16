@@ -6,11 +6,14 @@ Part 1 (no GUI): LiveSession (poller -> pipeline -> recorder) on the sim pty:
                  stall capture (RPM to 0) that plain sqlite3 can see.
 Part 1b:         the same with the ECU going silent (power cut).
 Part 1c:         the handheld's USB serial stream (hondalog-cydsim on a pty,
-                 port "cyd:"): a recorded drive with the handheld's stall, then
-                 "hondalog-handheld sync" pulling its SD drives into the database.
+                 port "cyd:"): a recorded drive with the handheld's stall and
+                 its GPS (gps_track, stall_locations, GPX / KML, hondalog-log
+                 stalls --geojson), then "hondalog-handheld sync" pulling its
+                 SD drives into the database.
 Part 2 (offscreen GUI): main window at 1366x768 against a second sim run,
-        marker, memory sweep, stall banner, replay; saves screenshots to
-        docs/screenshots/sim-*.png.
+        marker, memory sweep, stall banner, replay, the Map screen (F8:
+        the capture, All stalls with the handheld's); saves screenshots to
+        docs/screenshots/sim-*.png. No map tile server is asked for anything.
 
     QT_QPA_PLATFORM=offscreen python3 tools/smoke.py
 """
@@ -29,6 +32,8 @@ TMP = Path(tempfile.mkdtemp(prefix="hondalog-smoke-"))
 os.environ["HONDALOG_DIR"] = str(TMP / "logs")
 os.environ["XDG_CONFIG_HOME"] = str(TMP / "config")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["HONDALOG_TILES"] = "offline"                 # the Map screen: cached tiles only
+os.environ["HONDALOG_TILE_CACHE"] = str(TMP / "tiles")
 LINK = str(TMP / "sim-pty")
 
 from hondalog import addressmap, protocol                    # noqa: E402
@@ -174,6 +179,7 @@ def headless_cyd():
     with open_log(rec.path) as native:
         check(native.meta.get("source") == "cyd" and "gps" in native.streams,
               f"drive {rec.path.name}: source cyd, {len(native.streams)} streams with GPS")
+    gps_checks(rec.path)
     from hondalog.handheld import cli
     try:
         code = cli.main(["sync", "--port", "cyd:" + link, "--end-drive"])
@@ -186,13 +192,43 @@ def headless_cyd():
     check(code == 0 and n >= 1, f"hondalog-handheld sync: {n} drive(s) from the handheld's SD card")
 
 
+def gps_checks(ref):
+    """The handheld's GPS of the drive just recorded: the views, the exports."""
+    import json
+    import xml.etree.ElementTree as ET
+
+    from hondalog import logtool
+    from hondalog.geo import route
+    conn = sqlite3.connect(ref.db)
+    n, lat0, lat1, lon0, lon1 = conn.execute(
+        "SELECT count(*), min(lat), max(lat), min(lon), max(lon) FROM gps_track WHERE drive = ? AND fix = 1",
+        (ref.name,)).fetchone()
+    loop = route.PEARL_LOOP
+    check(n >= 5 and loop.lat.min() - 0.002 < lat0 <= lat1 < loop.lat.max() + 0.002
+          and loop.lon.min() - 0.002 < lon0 <= lon1 < loop.lon.max() + 0.002,
+          f"gps_track: {n} fixes on the Pearl loop")
+    row = conn.execute("SELECT name, lat, lon, gps_dt FROM stall_locations WHERE drive = ? AND kind = 'stall'",
+                       (ref.name,)).fetchone()
+    conn.close()
+    check(row is not None and row[1] is not None and abs(row[3]) <= 1.5,
+          f"stall_locations: {row[0] if row else '-'} at {row[1]:.5f}, {row[2]:.5f}" if row and row[1] else
+          "stall_locations: the handheld's stall has a place")
+    gpx, kml, geo = TMP / "cyd.gpx", TMP / "cyd.kml", TMP / "stalls.geojson"
+    codes = [logtool.main(["export", ref.name, str(gpx)]), logtool.main(["export", ref.name, str(kml), "--channel", "rpm"]),
+             logtool.main(["stalls", "-q", "--geojson", str(geo)])]
+    pts = ET.parse(gpx).getroot().findall(".//{http://www.topografix.com/GPX/1/1}trkpt")
+    features = json.loads(geo.read_text())["features"]
+    check(codes == [0, 0, 0] and len(pts) == n and ET.parse(kml).getroot().tag.endswith("kml") and features,
+          f"GPX ({len(pts)} points), KML by rpm, GeoJSON ({len(features)} stall(s)) written and read back")
+
+
 def gui(docs: Path):
     print("Part 2: offscreen GUI at 1366x768")
     from hondalog import ui  # noqa: F401
     from PySide6.QtCore import QSettings
     from PySide6.QtWidgets import QApplication
     from hondalog.ui import adapters, scene3d, theme
-    from hondalog.ui.main_window import RAW, REPLAY, SENSORS, Shell
+    from hondalog.ui.main_window import MAP, RAW, REPLAY, SENSORS, Shell
     from hondalog.ui.session import build_session
 
     scene3d.default_surface_format()
@@ -276,6 +312,30 @@ def gui(docs: Path):
               + "; ".join(f"{r.signal} {r.t:+.1f}s" for r in win.replay.forensics.loss[:3]))
         spin(0.5)
         win.grab().save(str(shots / "sim-replay.png"))
+        win.show_screen(MAP)
+        spin(0.3)
+        check(win.map.track is not None and win.map.track.empty
+              and "No GPS" in win.map.canvas.caption, "Map (F8): a K-line-only capture says it has no GPS")
+        win.map.set_mode("stalls")
+        spin(0.3)
+        placed = [p for p in win.map.stall_pins if p.located]
+        check(len(win.map.stall_pins) >= 2 and placed and len(win.map.canvas.pins) == len(placed),
+              f"Map, All stalls: {len(win.map.stall_pins)} stalls, {len(placed)} with a place (the handheld's)")
+        win.map.canvas.pinClicked.emit(win.map.stall_pins.index(placed[0]))
+        spin(0.3)
+        check(win.current() == REPLAY and win.replay.view.title == placed[0].name,
+              f"a pin opens {placed[0].name} in Replay")
+        win.show_screen(MAP)
+        win.map.set_mode("drive")
+        spin(0.3)
+        tr = win.map.track
+        check(tr is not None and not tr.empty and win.map.canvas._timg is not None,
+              f"Map, Drive: the capture's track, {len(tr)} fixes, drawn without tiles")
+        c = win.map.canvas
+        sx, sy = c.screen_of(tr.x[len(tr) // 2], tr.y[len(tr) // 2])
+        c.clicked.emit(*c.unit_at(sx, sy))
+        check(abs(win.replay.block.cursor - tr.t[len(tr) // 2]) < 1.0,
+              f"a click on the track moves Replay's cursor to {win.replay.block.cursor:+.1f} s")
         session.disconnect()
         print(f"  window {win.width()}x{win.height()}, last poll rate {rate:.1f} Hz, "
               f"stall capture {stall_path.name} in {stall_path.db.name}")

@@ -10,6 +10,9 @@ _TMP = tempfile.mkdtemp(prefix="hondalog-test-")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(_TMP, "config")
 os.environ["HONDALOG_DIR"] = os.path.join(_TMP, "logs")
+# the Map screen never reaches a real tile server from the tests, and caches nothing in ~/.cache
+os.environ["HONDALOG_TILES"] = "offline"
+os.environ["HONDALOG_TILE_CACHE"] = os.path.join(_TMP, "tiles")
 
 sys.path.insert(0, str(Path(__file__).parent))
 

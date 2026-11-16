@@ -23,7 +23,8 @@ part runs headless and is tested that way.
 | `export/` | MLG / MSL / CSV / NPZ writers and importers | W4 |
 | `blackbox/` | Track B laptop side: reader, clock sync, simulator, capture files, alignment, verdicts | W2 |
 | `tuning/` | ROM definitions, ROM session, table editor, tracer, auto-tune, burner, emulator | W5 |
-| `ui/` | the Qt app: shell, seven screens, `ChannelBus`, adapter protocols | W6 |
+| `geo/`, `ramps.py` | GPS: Web Mercator, a drive's track (gaps, per-zoom decimation, time to place and back), map tiles with an offline-first disk cache (the OSM usage policy), stall locations and their grouping, the Pearl test loop; the colour ramps without Qt | GPS map |
+| `ui/` | the Qt app: shell, eight screens, `ChannelBus`, adapter protocols | W6 |
 | `firmware/blackbox/` (not Python) | the ESP32-S3 firmware; its core is the C that the host tests run | W2 |
 
 ## The live path
@@ -123,7 +124,9 @@ Views: one per drive, named like the drive (`drive_2026_11_16_0712`: a row
 per read of the stream that carries RPM, every channel as a column, slower
 streams held for up to 5 s, black box channels as their one-second mean)
 and `<drive>_blackbox`; shared: `drive_summary`, `stalls`, `readings`,
-`blackbox_1s`, `ecu_reads`, `markers`. The README has example queries.
+`blackbox_1s`, `ecu_reads`, `markers`, `gps_track` (the handheld's fixes)
+and `stall_locations` (each capture with the fix nearest its trigger). The
+README and docs/data-and-sql.md have example queries.
 
 **Storage layout of the decoded values.** `samples` is wide: one row per
 K-line read holds the raw bytes, the latency and the values decoded from
@@ -195,6 +198,9 @@ data.open_log(DriveRef | "db#name" | name | .csv | .msl | .mlg) -> Log
     analysis.Comparison / compare_logs             two drives, same database or two
     export.export_log -> .mlg .msl .csv .npz .db   export.export_capture(capture, file)
     data.redecode(log, amap) -> data.write_log(log, db) -> a new drive
+geo.Track.from_log(log)     the GPS fixes: .lod(zoom), .at(t), .nearest(x, y), .sample(t, v)
+geo.stalls.stall_pins(db)   every capture with its place (the stall_locations view), clusters()
+export.geo.export_geo       .gpx / .kml of a drive's track
 data.Library(db)            drives and captures from SQL, search, notes and tags
 data.RetentionPolicy        delete old drives, then incremental vacuum
 data.retention.delete       one drive or one capture by name (hondalog-log rm, the drive picker)
@@ -217,6 +223,14 @@ added to `meta`.
 into `ui/bus.ChannelBus` from their own threads; the shell reads the bus on
 one 33 ms timer. Details: `docs/ui-adapters.md`.
 
+The Map screen (`ui/screens/gpsmap.py`, `ui/mapview.py`) follows Replay:
+it draws the track of Replay's `LogView` (its `gps_*` channels) and moves
+Replay's cursor; live it reads the `GPS` source on the bus (the handheld's
+fixes, `LiveSession.on_gps`). Tiles come from `ui/tilelayer.py`: the
+`geo.tiles` fetcher's two threads read the disk cache or the server and
+decode and theme each tile there; the UI thread only polls for them once
+a frame. `HONDALOG_TILES=offline` keeps everything off the network.
+
 ## Commands
 
 | Command | Module | Does |
@@ -225,7 +239,7 @@ one 33 ms timer. Details: `docs/ui-adapters.md`.
 | `hondalog-sim` | `hondalog.sim` | fake ECU on a pty, with faults |
 | `hondalog-firstcontact` | `hondalog.diag.firstcontact` | first time on the car: adapter, echo, protocol, block size, timing, ISO |
 | `hondalog-map` | `hondalog.mapping.__main__` | status, guided verification, address finder, map diff / hash / upgrade |
-| `hondalog-log` | `hondalog.logtool` | record (headless), list, info, export, compare, import, report, redecode, prune, rm, keep, vacuum, sql |
+| `hondalog-log` | `hondalog.logtool` | record (headless), list, info, export (also .gpx, .kml), compare, import, report, redecode, prune, rm, keep, vacuum, sql, stalls (`--geojson`) |
 | `hondalog-bb` | `hondalog.blackbox.__main__` | black box: live, list, fetch, info, csv, config, selftest, cal |
 | `hondalog-bbsim` | `hondalog.blackbox.sim` | fake black box on a pty |
 | `hondalog-tune` | `hondalog.tuning.cli` | ROM files: info, list, show, diff, convert, burn-image, burn |

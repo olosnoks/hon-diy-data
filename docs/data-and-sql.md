@@ -9,6 +9,7 @@ that lists, exports, compares and deletes drives.
 - [hondalog-log](#hondalog-log)
 - [Naming a drive](#naming-a-drive)
 - [Exports](#exports)
+- [GPS: tracks and where the stalls happen](#gps-tracks-and-where-the-stalls-happen)
 - [Imports](#imports)
 - [Redecode](#redecode)
 - [Deleting and keeping](#deleting-and-keeping)
@@ -43,6 +44,8 @@ off. Its name is `drive_YYYY_MM_DD_HHMM`, for example
   the reply latency, and the decoded values;
 - the math channels;
 - the black box's live frames, if the box was connected;
+- the handheld's GPS fixes (the `gps` stream), when the drive came from the
+  handheld: imported from its SD card, or recorded live over `cyd:`;
 - markers, trigger firings and alarms;
 - a header: ECU id bytes, port, the address map's version and hash and its
   full text, link statistics, whether the expert unlock was used and which
@@ -67,7 +70,8 @@ hondalog-log [--db DB] COMMAND ...
 | `record --port PORT [--bb PORT] [--seconds N]` | Record without the window, until Ctrl-C |
 | `list [-q WORDS]` | Drives and captures; `-q` searches names, notes and marker texts |
 | `info [DRIVE] [--events N]` | Header, streams with their rates, events. Default: the newest drive |
-| `export DRIVE OUT` | Write `.mlg`, `.msl`, `.csv`, `.npz` or `.db` |
+| `export DRIVE OUT` | Write `.mlg`, `.msl`, `.csv`, `.npz` or `.db`; the GPS track as `.gpx` or `.kml` |
+| `stalls [--geojson OUT]` | Every stall with where it happened, grouped by place; `--geojson` writes them as a file |
 | `compare A B` | Two drives or captures, channel by channel |
 | `import FILE...` | Read CSV / MSL / MLG logs in as new drives |
 | `report DRIVE [-o OUT.html]` | A one-page HTML report |
@@ -173,6 +177,45 @@ The format follows the output file's extension.
   hondalog database with the raw bytes, so they can redecode it.
 - Parquet is not offered: Debian trixie has no `python3-pyarrow`.
 
+## GPS: tracks and where the stalls happen
+
+The GPS comes from the handheld (its own receiver): a drive imported from
+its SD card, or recorded live over `cyd:`, has a `gps` stream with a fix
+about once a second. A K-line-only drive has none, and the GPS commands say
+so. The [Map screen (F8)](user-guide.md#f8-map) draws the same data.
+
+```sh
+hondalog-log export last drive.gpx                       # GPX 1.1: the track with times, waypoints
+hondalog-log export last drive --format kml              # KML, coloured by speed (drive.kml)
+hondalog-log export last drive.kml --channel rpm         # ... coloured by another channel
+hondalog-log export stall_20261116_071455 stall.gpx      # a capture: its window only
+hondalog-log stalls                                      # every stall, where, how fast, which group
+hondalog-log stalls --geojson stalls.geojson             # the same as a GeoJSON file
+hondalog-log stalls --since 2026-11-01 --reason rpm --geojson -   # filtered, to stdout
+```
+
+- **GPX** has one track segment per stretch without a gap (no fix for 5 s
+  breaks the line), each point with its UTC time, and speed and heading in
+  a `hondalog:` extension (`--channel` adds that channel's value too).
+  Markers, alarms and captures are waypoints (`<type>marker</type>`,
+  `alarm`, `stall`, `capture`). A drive whose wall clock is not known gets
+  no times.
+- **KML** draws the track in the Map screen's colours (the cividis-like
+  ramp; blue to orange around zero for fuel trims), the range in the
+  document's description, and pins for markers, alarms and captures. Opens
+  in Google Earth and most map tools.
+- **`hondalog-log stalls`** lists every stall (`--all`: every capture) with
+  the GPS fix nearest its trigger, the speed there and the fastest in the
+  30 s before, and puts stalls within 150 m of each other (`--radius`) in a
+  numbered group. The last line names the biggest group:
+  `4 stalls. 3 of them within 150 m of one another, near 32.26977, -90.09992, ...`
+- **GeoJSON** is a FeatureCollection of Points (`[lon, lat]`, as RFC 7946
+  has it); each feature's properties are the capture's name, drive, time,
+  reason, speeds and its group (`cluster`, `cluster_size`). Stalls with no
+  fix within a minute of the trigger are left out and counted in
+  `unlocated`.
+- Speeds in exports are km/h (the GPS's unit); `speed_mph` in SQL.
+
 ## Imports
 
 ```sh
@@ -274,6 +317,8 @@ to it only through hondalog.
 | `blackbox_1s` | Every black box channel per second: `drive`, `channel`, `t`, `samples`, `min`, `mean`, `max` |
 | `ecu_reads` | The raw bytes of every K-line read: `drive`, `t`, `addr`, `block`, `raw`, `raw_hex`, `latency_ms` |
 | `markers` | Markers, trigger firings and alarms: `drive`, `t`, `wall_time`, `kind`, `text` |
+| `gps_track` | Every GPS fix of every drive: `drive`, `t`, `unix_time`, `lat`, `lon`, `speed` (km/h), `speed_mph`, `heading`, `fix` (1 = a position), `sats`, `hdop` |
+| `stall_locations` | Every capture with the GPS fix nearest its trigger (within 60 s): `name`, `kind`, `reason`, `message`, `drive`, `wall_time`, `t_trigger`, `gps_t`, `gps_dt` (fix minus trigger, s), `lat`, `lon`, `speed`, `speed_mph`, `heading`, `max_speed_30s` (km/h). No fix: `lat` is NULL |
 
 Every shared view also has `drive_id`, for joins.
 
@@ -394,6 +439,83 @@ SELECT name, status, end_reason, map_tag, expert_unlock, keep
 FROM drives;
 ```
 
+### GPS and where the stalls happen
+
+Run against a database with GPS drives (the handheld's) and stall
+captures. `fix = 1` leaves out the rows the receiver sent without a
+position.
+
+One drive's track, in mph:
+
+```sql
+SELECT t, lat, lon, round(speed_mph, 1) AS mph, heading, sats
+FROM gps_track
+WHERE drive = 'drive_2026_11_02_0712' AND fix = 1
+ORDER BY t;
+```
+
+Every drive with GPS: fixes, top speed and how far north and south it went:
+
+```sql
+SELECT drive, count(*) AS fixes, round(max(speed_mph)) AS top_mph,
+       round(min(lat), 4) AS south, round(max(lat), 4) AS north
+FROM gps_track
+WHERE fix = 1
+GROUP BY drive;
+```
+
+Every stall, where it happened, and how fast the car was going (at the
+nearest fix and at most in the 30 s before):
+
+```sql
+SELECT name, drive, wall_time, reason, round(lat, 5) AS lat, round(lon, 5) AS lon,
+       round(speed_mph) AS mph, round(max_speed_30s * 0.621371) AS mph_before, round(gps_dt, 1) AS fix_dt
+FROM stall_locations
+WHERE kind = 'stall'
+ORDER BY wall_time;
+```
+
+Stalls within about 150 m of another stall (a box test: 111 000 m per
+degree of latitude, 94 000 m per degree of longitude at Pearl's 32° N):
+
+```sql
+SELECT a.name AS stall, b.name AS also_here,
+       round(max(abs(a.lat - b.lat) * 111000, abs(a.lon - b.lon) * 94000)) AS metres_apart
+FROM stall_locations a
+JOIN stall_locations b ON b.capture_id > a.capture_id
+WHERE a.kind = 'stall' AND b.kind = 'stall'
+  AND abs(a.lat - b.lat) * 111000 < 150 AND abs(a.lon - b.lon) * 94000 < 150;
+```
+
+Stalls counted per square of about 100 m (three decimals of a degree):
+
+```sql
+SELECT round(lat, 3) AS lat, round(lon, 3) AS lon, count(*) AS stalls, group_concat(name, ' ') AS which
+FROM stall_locations
+WHERE kind = 'stall' AND lat IS NOT NULL
+GROUP BY 1, 2
+ORDER BY stalls DESC;
+```
+
+The car's speed and position in the 30 s before each stall:
+
+```sql
+SELECT s.name AS stall, round(g.t - s.t_trigger) AS seconds, round(g.speed_mph) AS mph,
+       round(g.lat, 5) AS lat, round(g.lon, 5) AS lon
+FROM stall_locations s
+JOIN gps_track g ON g.drive_id = s.drive_id
+WHERE s.kind = 'stall' AND g.t BETWEEN s.t_trigger - 30 AND s.t_trigger
+ORDER BY s.name, g.t;
+```
+
+Stalls with no GPS fix near them (K-line-only drives, a cold receiver):
+
+```sql
+SELECT name, drive, wall_time, reason
+FROM stall_locations
+WHERE lat IS NULL;
+```
+
 ### From Python
 
 ```python
@@ -402,6 +524,12 @@ from hondalog.data import open_log
 log = open_log("last")                    # or a drive or capture name
 rpm = log.series("rpm")                  # .t = times in seconds, .v = values
 print(log.meta["address_map_tag"], len(rpm), rpm.v.max())
+
+from hondalog.geo import Track, stalls
+
+track = Track.from_log(log)              # the GPS fixes: .t .lat .lon .speed, .at(t), .nearest(x, y)
+pins = stalls.stall_pins("~/hondalog/hondalog.db")       # every stall with its place
+print(stalls.summary(pins))
 ```
 
 ## Crash safety

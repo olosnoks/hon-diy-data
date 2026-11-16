@@ -58,10 +58,10 @@ against the simulators and the host builds of the firmware cores.
   of every K-line read. A short-lived `.hlog` file format came first and was
   replaced by the database.
 - A view per drive with a column per channel, and the views
-  `drive_summary`, `stalls`, `readings`, `blackbox_1s`, `ecu_reads` and
-  `markers` for plain SQL.
+  `drive_summary`, `stalls`, `readings`, `blackbox_1s`, `ecu_reads`,
+  `markers`, `gps_track` and `stall_locations` for plain SQL.
 - `hondalog-log`: `record`, `list`, `info`, `import`, `export`, `compare`,
-  `report`, `redecode`, `prune`, `rm`, `keep`, `vacuum`, `sql`.
+  `report`, `redecode`, `prune`, `rm`, `keep`, `vacuum`, `sql`, `stalls`.
 - Exports to MegaLogViewer MLG (v1 and v2) and MSL, CSV, NPZ and a database
   copy; imports of 0.1.0 CSV, MSL and MLG.
 - Analysis: filters, table histograms (with bins from a ROM's own axes),
@@ -77,9 +77,9 @@ against the simulators and the host builds of the firmware cores.
 ### The app
 
 - A new UI designed at 1366x768 for the ThinkPad T430, replacing the 0.1.0
-  window: Sensors, Drive, Map 3D, Replay, Raw tools, Tune and Alarms on F1
-  to F7, Daylight and Night themes (F9), every action on a key, state shown
-  by shape as well as colour.
+  window: Sensors, Drive, Map 3D, Replay, Raw tools, Tune, Alarms and Map
+  on F1 to F8, Daylight and Night themes (F9), every action on a key, state
+  shown by shape as well as colour.
 - Display units, US by default, chosen under Settings > Units; storage and
   exports stay metric.
 - Replay: drive picker with search, stacked lanes drawn as min/max per
@@ -93,6 +93,39 @@ against the simulators and the host builds of the firmware cores.
   `tools/screenshots.py` and `tools/smoke.py`. All sensors use under 20% of
   a core with the simulated black box (measured on a desktop CPU, not the
   T430).
+
+### GPS and the map
+
+- The Map screen (F8): the GPS track of the drive Replay has open, coloured
+  by speed, RPM, MAP, AFR or any channel, with shape-coded pins for marks,
+  alarms, stalls and other captures; a click on the track moves Replay's
+  cursor there, and Replay's cursor is a dot on the map. While Replay is
+  live: the car now and the last ten minutes. "All stalls": every stall of
+  the database on one map, filtered by date and trigger reason, with the
+  biggest group in one place named; a pin opens its capture in Replay.
+- OpenStreetMap raster tiles under the OSM tile usage policy (a User-Agent
+  naming hondalog, only the tiles on screen, two connections, the server's
+  cache headers, the attribution on the map), offline first: a disk cache
+  in `~/.cache/hondalog/tiles` with a size cap, a lower zoom's tile or a
+  plain grid where nothing is cached, the track, scale bar and north arrow
+  without any tiles. Tiles inverted and dimmed at night. The server is a
+  setting (Settings > Map tiles). No new packages.
+- An hour of driving with a fix every 0.1 s (36 000 points) draws and pans
+  at 30 fps in `tools/bench_ui.py`: decimated per zoom, drawn once per zoom
+  into an image (a slice per frame after a zoom) that panning moves.
+- Exports: GPX (track with times, waypoints for marks, alarms and captures)
+  and KML (coloured by a channel), from the screen and with
+  `hondalog-log export DRIVE OUT --format gpx|kml [--channel C]`;
+  `hondalog-log stalls [--geojson OUT]` lists every stall with its place and
+  groups them.
+- SQL views `gps_track` (every fix of every drive) and `stall_locations`
+  (every capture with the fix nearest its trigger); schema version 2.
+- The handheld's live GPS reaches the app's bus (source GPS); the CYD
+  simulator and the demo drive a loop of streets in Pearl, MS, and the car
+  stops where the engine stalls. `hondalog.data.synth.write_gps_drives`
+  makes test drives with stalls on one rough stretch;
+  `tools/fixture_tiles.py` draws stand-in tiles so no test or tool asks a
+  tile server for anything.
 
 ### Black box (Track B)
 
