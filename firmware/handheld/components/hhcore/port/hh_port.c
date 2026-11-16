@@ -36,6 +36,7 @@
 #include "soc/io_mux_reg.h"
 #include "soc/uart_periph.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_rom_sys.h"
@@ -433,6 +434,24 @@ static void gps_diag_log(void)
              (unsigned)gps_bytes, (unsigned)(gps_bytes - last_bytes), (unsigned)edges[PIN_DATA], (unsigned)d[PIN_DATA],
              gps_pin[PIN_PPS], (unsigned)d[PIN_PPS], (unsigned)pps, (unsigned)(pps - last_pps), (long long)age,
              (unsigned)s.nmea.good, (unsigned)s.nmea.bad, (unsigned)s.gps.fix, (unsigned)s.gps.sats, tail);
+    {
+        /* why the last reset happened, uptime and memory, every 10 s: a reboot mid-upload shows up as a
+           new "sys:" line with a small uptime and the reason it went down */
+        static unsigned sys_n;
+        if (sys_n++ % 5 == 0) {
+            static const char *const RR[] = {"unknown", "power-on", "ext", "sw", "PANIC", "INT_WDT", "TASK_WDT",
+                                             "WDT", "deep-sleep", "BROWNOUT", "sdio", "usb", "jtag", "efuse",
+                                             "pwr-glitch", "cpu-lockup"};
+            esp_reset_reason_t r = esp_reset_reason();
+            ESP_LOGI(TAG, "sys: reset %s, up %lld s, heap int %u (min %u, big %u), psram %u (min %u)",
+                     (unsigned)r < sizeof(RR) / sizeof(RR[0]) ? RR[r] : "?", (long long)(esp_timer_get_time() / 1000000),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                     (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
+        }
+    }
     last_bytes = gps_bytes;
     for (int i = 0; i < N_PROBE; i++) last_edges[i] = edges[i];
     last_pps = pps;

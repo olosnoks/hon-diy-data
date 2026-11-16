@@ -420,9 +420,11 @@ static void cmd_mapup(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *
         if (rc != HH_SER_OK) { ack(s, type, seq, rc == HH_SER_E_BUSY ? rc : HH_SER_E_STATE, 0); return; }
         rc = s->fs.mapup_write(s->fs.ctx, w.offset, data, (uint16_t)n);
         if (rc != HH_SER_OK) {
-            if (s->fs.mapup_abort) s->fs.mapup_abort(s->fs.ctx);
-            s->mapup_active = 0;
-            ack(s, type, seq, rc, 0);
+            /* the port closed the temp file but kept it: stay active and let the next chunk reopen it at
+               mapup_got (mapup_take), so the sender just retries this chunk; ack says how much is held */
+            s->mapup_held = 0;
+            if (s->map_hold) s->map_hold(0);
+            ack(s, type, seq, rc, s->mapup_got);
             return;
         }
         s->mapup_got += n;

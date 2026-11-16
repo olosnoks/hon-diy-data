@@ -140,7 +140,7 @@ def show(ftype: int, p: bytes, args, state: dict) -> None:
 SC_MAPUP_OPEN, SC_MAPUP_WRITE, SC_MAPUP_STATUS, SC_MAPUP_COMMIT = 0x6C, 0x6D, 0x6E, 0x6F
 T_ACK, T_MAPUP = 0x4A, 0x4D
 CAP_RX, CAP_MAPUP = 0x0001, 0x0010
-OK, E_CRC, E_STATE, E_REFUSED, E_BUSY, E_UNSUPPORTED, E_OFFSET = 0, -3, -4, -5, -6, -7, -8
+OK, E_IO, E_CRC, E_STATE, E_REFUSED, E_BUSY, E_UNSUPPORTED, E_OFFSET = 0, -2, -3, -4, -5, -6, -7, -8
 STATUS_TEXT = {0: "ok", -1: "bad argument", -2: "card error", -3: "checksum mismatch", -4: "not expected now",
                -5: "refused", -6: "busy", -7: "not supported", -8: "wrong offset"}
 ACK = struct.Struct("<BBhI")
@@ -264,6 +264,12 @@ def put_file(link: Link, name: str, data: bytes, final: bool, progress) -> None:
             bad_run += 1
             if bad_run > 8:
                 raise PutError(f"{full}: chunks keep arriving damaged at byte {offset} (try the port@460800)")
+            continue
+        if status in (E_IO, E_BUSY):              # a card write failed (the temp file is kept) or the map is drawing
+            bad_run += 1
+            if bad_run > 8:
+                raise PutError(f"{full}: {say_status(status)} keeps happening at byte {offset}")
+            time.sleep(0.3 * bad_run)
             continue
         if status == E_STATE:
             raise PutError(f"{full}: the handheld dropped the upload at byte {offset}; run the command again")

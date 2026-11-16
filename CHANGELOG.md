@@ -143,6 +143,12 @@ against the simulators and the host builds of the firmware cores.
 
 ### Handheld
 
+- Map upload survives a failed card write: the temporary file is kept and the
+  upload stays active, the handheld logs the step and errno (`serfs` warning),
+  and `put-map` / `cyd_debug.py --put-map` retry the chunk (up to 8 times)
+  instead of throwing the file away and starting again.
+- A `sys:` log line every 10 s with the last reset reason (PANIC, TASK_WDT,
+  BROWNOUT, ...), uptime and free internal/PSRAM heap, to explain reboots.
 - Hardware plan and pin header for the Sunton ESP32-4827S043N (CYD), with
   two ways to reach the K-line (the KKL cable on USB host, or an L9637D on
   a UART).

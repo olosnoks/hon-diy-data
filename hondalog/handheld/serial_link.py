@@ -1198,6 +1198,12 @@ class CydClient:
                     raise CydError(f"{full}: chunks keep arriving damaged at byte {offset} (a long cable? try "
                                    "--port cyd:...@460800)")
                 continue
+            if status in (P.E_IO, P.E_BUSY):            # a card write failed (temp file kept) or the map is drawing
+                bad_run += 1
+                if bad_run > 8:
+                    raise CydError(f"{full}: {P.status_text(status)} keeps happening at byte {offset}")
+                time.sleep(0.3 * bad_run)
+                continue
             if status == P.E_STATE:
                 raise CydError(f"{full}: the handheld dropped the upload at byte {offset} (it was silent for "
                                f"{P.MAPUP_IDLE_S:g} s or restarted); run the command again")
