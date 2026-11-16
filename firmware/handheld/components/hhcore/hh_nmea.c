@@ -87,6 +87,13 @@ int hh_nmea_feed(hh_nmea_t *g, char c)
         uint32_t hdop = scaled(f[8], 1, 10);    /* x 100 */
         g->fix.sats = (uint8_t)atoi(f[7]);
         g->fix.hdop_c = (uint16_t)(hdop > 65535 ? 65535 : hdop);
+        /* the time of day of a GGA with a fix: the pulse pairing uses it, it comes before the RMC */
+        if (atoi(f[6]) > 0 && strlen(f[1]) >= 6) {
+            #define D2(s, i) (((s)[i] - '0') * 10 + ((s)[(i) + 1] - '0'))
+            g->gga_tod = D2(f[1], 0) * 3600 + D2(f[1], 2) * 60 + D2(f[1], 4);
+            #undef D2
+            return 2;
+        }
         return 0;
     }
     if (strcmp(id, "RMC") != 0 || nf < 10) return 0;
