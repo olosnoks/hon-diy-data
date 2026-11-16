@@ -41,6 +41,7 @@ from ..sim import EcuModel
 from ..transport import LoopbackTransport
 from . import format as F
 from . import serial_proto as P
+from .cydsim_hl import HlMixin
 
 CYDSIM_SYMLINK = "/tmp/hondalog-cydsim"
 FW = "0.1.0-sim"
@@ -105,7 +106,7 @@ def _us(t: float) -> int:
     return max(0, int(t * 1e6 + 0.5))
 
 
-class CydSim:
+class CydSim(HlMixin):
     """The handheld as the laptop sees it on the serial port. ``advance(t)``
     runs it up to device time ``t`` (seconds since its boot); ``take_tx()``
     is what its UART sent; ``rx(data)`` is what the laptop wrote."""
@@ -114,7 +115,8 @@ class CydSim:
                  stall_after: float | None = None, stall_mode: str = "rpm", restart_after: float | None = 15.0,
                  gps: bool = True, baud: int = 921600, device: str = "HH-SIM001", boot_no: int = 1,
                  map_hash: str | None = None, record: bool = True, dtcs: tuple[int, ...] = (),
-                 unix_time: float | None = None, damage: float = 0.0, seed: int = 1):
+                 unix_time: float | None = None, damage: float = 0.0, seed: int = 1,
+                 logs: bool = False, sd_kbps: float | None = None):
         if variant not in ("default", "p1"):
             raise ValueError("variant is 'default' or 'p1'")
         self.variant = variant
@@ -167,7 +169,7 @@ class CydSim:
         # the link
         self._tx = bytearray()
         self._seq = 0
-        self._deframer = P.Deframer()
+        self._hl_init(logs, sd_kbps)
         self.tx_frames = self.tx_bytes = self.rx_frames = 0
         self.rx_ignored = 0                 # bytes the laptop wrote to a tx-only handheld
         self._last_rx: float | None = None
@@ -230,6 +232,9 @@ class CydSim:
     # ---- frames out ----
 
     def _send(self, ftype: int, payload: bytes = b"") -> None:
+        if self._hl_open:                   # an HL session has paused the stream (the engine goes on)
+            self.hl_paused += 1
+            return
         frame = P.frame_encode(ftype, payload, self._seq)
         self._seq = (self._seq + 1) & 0xFF
         self.tx_frames += 1
@@ -271,7 +276,7 @@ class CydSim:
             drive_no=self._drive.file_no if self._drive else 0,
             log_bytes=self._drive.fh.tell() if self._drive else 0, free_mb=14000 if self.sd else 0,
             markers=self.markers, stall_count=self.stalls, nmea_good=int(self.now) * 2 if self.gps else 0,
-            tx_frames=self.tx_frames, tx_bytes=self.tx_bytes, rx_frames=self.rx_frames, rx_bad=self._deframer.bad))
+            tx_frames=self.tx_frames, tx_bytes=self.tx_bytes, rx_frames=self.rx_frames, rx_bad=self._split.bad))
 
     def _event(self, t: float, code: int, src: int, aux: int, value: float | int) -> None:
         packed = struct.pack("<QBBHf" if code in F.FLOAT_EVENTS else "<QBBHi", _us(t), code, src, aux, value)
@@ -369,6 +374,7 @@ class CydSim:
             elif self.gps and due == self._next_gps:
                 self._next_gps += 1.0
                 gps = self.gps_fix(due)
+                self._gps_raw = gps
                 self._send(P.SF_GPS, gps)
                 if self._drive is not None:
                     self._drive.flush()
@@ -376,6 +382,7 @@ class CydSim:
             else:
                 self._exchange()
         self.now = max(self.now, t)
+        self._hl_tick()
 
     def gps_fix(self, t: float) -> bytes:
         """One GPS record at device time ``t``: where the car has got to."""
@@ -391,10 +398,8 @@ class CydSim:
         if self.tx_only:
             self.rx_ignored += len(data)    # GPIO44 is the GPS's: nothing is listening
             return
-        for ftype, seq, payload in self._deframer.feed(data):
-            self.rx_frames += 1
-            self._last_rx = self.now
-            self._command(ftype, seq, payload)
+        self._hl_feed(data)
+        self._hl_tick()
 
     def _ack(self, cmd: int, seq: int, status: int = P.OK, value: int = 0) -> None:
         self._send(P.SF_ACK, P.ACK.pack(cmd, seq, status, value & 0xFFFFFFFF))
@@ -639,7 +644,7 @@ HELP = "keys: s stall (rpm 0)  p power cut (ECU silent)  r restart  m marker  q 
 
 
 def serve(sim: CydSim, link_path: str = CYDSIM_SYMLINK, keys: bool = True, run_for: float | None = None,
-          out: Any = sys.stdout) -> None:
+          out: Any = sys.stdout, wire_baud: int | None = None) -> None:
     """Put the simulator on a pseudo-terminal until 'q', Ctrl+C or run_for."""
     import termios
     import tty
@@ -665,11 +670,18 @@ def serve(sim: CydSim, link_path: str = CYDSIM_SYMLINK, keys: bool = True, run_f
     out.flush()
     t0 = last_status = time.monotonic()
     backlog = bytearray()
+    rate = wire_baud / 10.0 if wire_baud else None          # bytes per second each way
+    credit_tx = credit_rx = 0.0
+    last_t = time.monotonic()
     try:
         while run_for is None or time.monotonic() - t0 < run_for:
             fds = [master] + ([stdin_fd] if stdin_fd is not None else [])
             ready, _, _ = select.select(fds, [], [], 0.004)
             now = time.monotonic()
+            if rate:
+                credit_tx = min(credit_tx + (now - last_t) * rate, 4096.0)
+                credit_rx = min(credit_rx + (now - last_t) * rate, 4096.0)
+            last_t = now
             sim.advance(now - t0)
             if stdin_fd is not None and stdin_fd in ready:
                 key = os.read(stdin_fd, 1).decode(errors="ignore").lower()
@@ -681,17 +693,24 @@ def serve(sim: CydSim, link_path: str = CYDSIM_SYMLINK, keys: bool = True, run_f
                     print(f"\n[{action.__name__}]", file=out)
             if master in ready:
                 try:
-                    sim.rx(os.read(master, 4096))
+                    want = 4096 if not rate else int(credit_rx)
+                    if want > 0:
+                        got = os.read(master, want)
+                        credit_rx -= len(got)
+                        sim.rx(got)
                 except (BlockingIOError, OSError):
                     pass
             backlog += sim.take_tx()
-            if len(backlog) > 65536:        # nobody is reading the pty: keep the newest, as the firmware's ring does
+            sim.pressure = len(backlog)
+            if len(backlog) > 65536 and not sim._hl_open:        # nobody is reading the pty: keep the newest, as the firmware's ring does
                 del backlog[:len(backlog) - 32768]
                 cut = backlog.find(0)
                 del backlog[:cut + 1]
             if backlog:
                 try:
-                    done = os.write(master, backlog[:4096])
+                    room = 4096 if not rate else int(credit_tx)
+                    done = os.write(master, backlog[:room]) if room > 0 else 0
+                    credit_tx -= done
                     del backlog[:done]
                 except (BlockingIOError, OSError):
                     pass
@@ -729,13 +748,19 @@ def main(argv: list[str] | None = None) -> int:
                     help="rpm: the ECU keeps answering. power: it goes silent")
     ap.add_argument("--restart-after", type=float, default=15.0, help="seconds until it starts again, 0 = stays dead")
     ap.add_argument("--no-gps", action="store_true")
+    ap.add_argument("--no-logs", action="store_true", help="no ESP_LOG text (LOG frames, plain lines in a session)")
+    ap.add_argument("--wire-baud", type=int, default=0, metavar="BAUD",
+                    help="limit the pty to this speed in both directions (10 bits per byte), as the CH340 would")
+    ap.add_argument("--sd-kbps", type=float, default=0.0, metavar="KB/S",
+                    help="model the card: an HL PUT chunk takes len / this before its ACK")
     ap.add_argument("--damage", type=float, default=0.0, help="share of frames sent with a flipped bit (0..1)")
     ap.add_argument("--run-for", type=float, default=None, help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     amap = addressmap.load(args.map) if args.map else addressmap.load_default()
     sim = CydSim(args.variant, args.sd, amap, args.stall_after, args.stall_mode, args.restart_after or None,
-                 gps=not args.no_gps, damage=args.damage)
-    serve(sim, args.link, run_for=args.run_for)
+                 gps=not args.no_gps, damage=args.damage, logs=not args.no_logs,
+                 sd_kbps=args.sd_kbps or None)
+    serve(sim, args.link, run_for=args.run_for, wire_baud=args.wire_baud or None)
     return 0
 
 
