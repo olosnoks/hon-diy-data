@@ -28,30 +28,30 @@ static int64_t platform_now_us(void)
 
 #define NO NAN
 
-/* lo hi warn_lo warn_hi alarm_lo alarm_hi decimals verified rate_class */
+/* lo hi warn_lo warn_hi alarm_lo alarm_hi decimals verified rate_class kind */
 static const hh_channel_info_t CH[] = {
-    {"rpm",   "RPM",        "rpm",  0, 8000, NO, 6500, NO, 6900, 0, 1, 0},
-    {"vss",   "Speed",      "km/h", 0, 200,  NO, NO,   NO, NO,   0, 0, 0},
-    {"ect",   "Coolant",    "\xC2\xB0""C", -40, 130, NO, 100, NO, 108, 0, 0, 1},
-    {"map",   "MAP",        "kPa",  0, 110,  NO, NO,   NO, NO,   0, 0, 0},
-    {"batt",  "Battery",    "V",    8, 16,   12.8f, NO, 11.5f, 15.2f, 1, 1, 1},
-    {"tps",   "Throttle",   "%",    0, 100,  NO, NO,   NO, NO,   0, 0, 0},
-    {"iat",   "Intake air", "\xC2\xB0""C", -40, 100, NO, 45, NO, NO, 0, 0, 1},
-    {"inj",   "Injector",   "ms",   0, 20,   NO, NO,   NO, NO,   2, 0, 0},
-    {"ign",   "Ignition",   "\xC2\xB0", -10, 50, NO, NO, NO, NO,  1, 0, 0},
-    {"o2",    "O2",         "V",    0, 1.2f, NO, NO,   NO, NO,   2, 0, 0},
-    {"stft",  "Short trim", "%",    -30, 30, -12, 15,  NO, NO,   1, 0, 0},
-    {"ltft",  "Long trim",  "%",    -30, 30, -12, 12,  NO, NO,   1, 0, 1},
-    {"baro",  "Baro",       "kPa",  60, 110, NO, NO,   NO, NO,   0, 0, 1},
-    {"iacv",  "Idle valve", "%",    0, 100,  NO, NO,   NO, NO,   0, 0, 1},
-    {"eld",   "Elec load",  "A",    0, 100,  NO, NO,   NO, NO,   0, 0, 1},
-    {"knock", "Knock",      "",     0, 10,   NO, 2,    NO, NO,   0, 0, 1},
-    {"cl",    "Closed loop","",     0, 1,    NO, NO,   NO, NO,   0, 0, 1},
-    {"vtec",  "VTEC",       "",     0, 1,    NO, NO,   NO, NO,   0, 0, 1},
-    {"ac",    "A/C",        "",     0, 1,    NO, NO,   NO, NO,   0, 0, 1},
-    {"fan",   "Rad fan",    "",     0, 1,    NO, NO,   NO, NO,   0, 0, 1},
-    {"pump",  "Fuel pump",  "",     0, 1,    NO, NO,   NO, NO,   0, 1, 1},
-    {"mil",   "MIL",        "",     0, 1,    NO, NO,   NO, 0.5f, 0, 0, 1},
+    {"rpm",   "RPM",        "rpm",  0, 8000, NO, 6500, NO, 6900, 0, 1, 0, 0},
+    {"vss",   "Speed",      "km/h", 0, 200,  NO, NO,   NO, NO,   0, 0, 0, 0},
+    {"ect",   "Coolant",    "\xC2\xB0""C", -40, 130, NO, 100, NO, 108, 0, 0, 1, 0},
+    {"map",   "MAP",        "kPa",  0, 110,  NO, NO,   NO, NO,   0, 0, 0, 0},
+    {"batt",  "Battery",    "V",    8, 16,   12.8f, NO, 11.5f, 15.2f, 1, 1, 1, 0},
+    {"tps",   "Throttle",   "%",    0, 100,  NO, NO,   NO, NO,   0, 0, 0, 0},
+    {"iat",   "Intake air", "\xC2\xB0""C", -40, 100, NO, 45, NO, NO, 0, 0, 1, 0},
+    {"inj",   "Injector",   "ms",   0, 20,   NO, NO,   NO, NO,   2, 0, 0, 0},
+    {"ign",   "Ignition",   "\xC2\xB0", -10, 50, NO, NO, NO, NO,  1, 0, 0, 0},
+    {"o2",    "O2",         "V",    0, 1.2f, NO, NO,   NO, NO,   2, 0, 0, 0},
+    {"stft",  "Short trim", "%",    -30, 30, -12, 15,  NO, NO,   1, 0, 0, 0},
+    {"ltft",  "Long trim",  "%",    -30, 30, -12, 12,  NO, NO,   1, 0, 1, 0},
+    {"baro",  "Baro",       "kPa",  60, 110, NO, NO,   NO, NO,   0, 0, 1, 0},
+    {"iacv",  "Idle valve", "%",    0, 100,  NO, NO,   NO, NO,   0, 0, 1, 0},
+    {"eld",   "Elec load",  "A",    0, 100,  NO, NO,   NO, NO,   0, 0, 1, 0},
+    {"knock", "Knock",      "",     0, 10,   NO, 2,    NO, NO,   0, 0, 1, 0},
+    {"cl",    "Closed loop","",     0, 1,    NO, NO,   NO, NO,   0, 0, 1, 1},
+    {"vtec",  "VTEC",       "",     0, 1,    NO, NO,   NO, NO,   0, 0, 1, 1},
+    {"ac",    "A/C",        "",     0, 1,    NO, NO,   NO, NO,   0, 0, 1, 1},
+    {"fan",   "Rad fan",    "",     0, 1,    NO, NO,   NO, NO,   0, 0, 1, 1},
+    {"pump",  "Fuel pump",  "",     0, 1,    NO, NO,   NO, NO,   0, 1, 1, 1},
+    {"mil",   "MIL",        "",     0, 1,    NO, NO,   NO, 0.5f, 0, 0, 1, 1},
 };
 #define N_CH ((uint16_t)(sizeof(CH) / sizeof(CH[0])))
 enum { C_RPM, C_VSS, C_ECT, C_MAP, C_BATT, C_TPS, C_IAT, C_INJ, C_IGN, C_O2, C_STFT, C_LTFT,
@@ -74,6 +74,13 @@ const hh_channel_info_t *hh_channels(uint16_t *n)
 }
 
 void hh_mark(void) { marks++; }
+void hh_mark_at(int64_t t_us) { (void)t_us; marks++; }
+void hh_request_dtc(void) {}
+int16_t hh_channel_index(const char *name)
+{
+    for (uint16_t i = 0; i < N_CH; i++) if (strcmp(CH[i].name, name) == 0) return (int16_t)i;
+    return -1;
+}
 void hh_ack_alarm(void) { acks++; }
 void hh_core_start(void) { t0_us = clock_us(); }
 

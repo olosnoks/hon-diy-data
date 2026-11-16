@@ -370,7 +370,8 @@ static void on_button(ui_btn_event_t ev, bool back)
         step(+1);
         break;
     case UI_BTN_LONG:
-        hh_mark();
+        /* decided on release; the marker belongs where the button went down */
+        hh_mark_at(ui_port_micros() - (int64_t)(uint32_t)(st.now - st.btn.t_down) * 1000);
         note("MARKED");
         break;
     case UI_BTN_VLONG:

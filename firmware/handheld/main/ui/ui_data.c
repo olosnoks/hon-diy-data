@@ -45,7 +45,8 @@ int ui_find_channel(const char *candidates)
 
 bool ui_is_flag(const hh_channel_info_t *c)
 {
-    return c->lo == 0.0f && c->hi == 1.0f && c->decimals == 0;
+    /* hh-core says so (kind 1); a 0..1 whole-number channel is shown the same way */
+    return c->kind == 1 || (c->lo == 0.0f && c->hi == 1.0f && c->decimals == 0);
 }
 
 void ui_fmt_float(char *buf, size_t n, float v, int decimals)
