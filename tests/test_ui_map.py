@@ -260,10 +260,19 @@ def test_an_hour_pans_without_redrawing_the_track(app):
         times.append(time.perf_counter() - t0)
     assert c.renders == renders                                             # panning only moved the image
     assert np.median(times) < 0.010 and first < 0.5
+    # a zoom shows the old image scaled at once and draws the new one a slice per frame
     t0 = time.perf_counter()
     c.zoom_by(2)
     c.repaint()
-    assert time.perf_counter() - t0 < 0.5 and c.renders == renders + 1
+    assert time.perf_counter() - t0 < 0.05 and c.renders == renders and c.stats()["pending"]
+    assert c._timg_target.width() == pytest.approx(c._timg.width() * 4)
+    slices = 0
+    while c.stats()["pending"]:
+        t0 = time.perf_counter()
+        c.refresh()
+        assert time.perf_counter() - t0 < 0.030                             # a slice is a few ms
+        slices += 1
+    assert c.renders == renders + 1 and c._timg_target.width() == pytest.approx(c._timg.width())
     c.close()
 
 

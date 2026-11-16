@@ -178,7 +178,7 @@ class StallList(Card):
     ROW = 34
 
     def __init__(self, parent=None):
-        super().__init__("Captures", parent=parent)
+        super().__init__("Captures · fastest in the 30 s before", parent=parent)
         self.rows: list[tuple[str, str, str, str]] = []     # kind, when, reason, speed
         self.selected = -1
         self.first = 0

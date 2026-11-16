@@ -14,8 +14,10 @@ the paint:
   polylines far faster than one long one that crosses itself).
 - The runs are drawn once into an image that covers the whole track at that
   zoom (or three screens around the view when the track is bigger); panning
-  draws that image at another place. It is drawn again on a zoom, a colour
-  or theme change, or when the view leaves it.
+  draws that image at another place. After a zoom, or when the view nears
+  the image's edge, the next image is drawn a few milliseconds per frame
+  (``refresh``) while the old one is shown, scaled: no frame waits for a
+  whole redraw. A colour or theme change redraws it at once.
 - Pens are made once per bin and theme.
 
 The map is offline first: a tile that is not on disk (and cannot be
@@ -49,6 +51,7 @@ N_BINS = 24
 RUN_MAX = 64                    # points per drawn run at most (keeps stroking fast, culling useful)
 LINE_W, CASING_W = 4.0, 7.0
 HIT_PX = 14.0
+RENDER_SLICE_S = 0.006          # track drawing per frame while a new image is made
 GRID_STEP = 64                  # the plain grid where no tile is
 
 
@@ -190,15 +193,18 @@ class MapCanvas(QWidget):
         self._xf = QTransform()
         self._runs_on: list = []
         self._casing_on: list = []
-        self._timg: QImage | None = None     # the track drawn at this zoom
-        self._timg_rect = QRectF()           # where, in world pixels at this zoom
+        self._timg: QImage | None = None     # the track drawn, at the zoom _timg_zoom
+        self._timg_rect = QRectF()           # where, in world pixels at that zoom
         self._timg_key: tuple = ()
+        self._timg_zoom = 0
         self._timg_whole = False
-        self._timg_pos = QPointF()
+        self._timg_target = QRectF()         # where it goes on screen now (scaled after a zoom)
+        self._job: dict | None = None        # the next image, being drawn a bit per frame
         self._values_rev = 0
         self.renders = 0
         self.render_ms = 0.0
         self._pins_on: list[Pin] = []
+        self._stacks: list = []              # (x, y, "3"): pins that lie on top of each other
         self._tiles_on: list = []            # (target QRectF, QPixmap, source QRectF | None)
         self._grid_on: list = []             # QRectF of tiles with nothing to show
         self._grid_path = QPainterPath()     # the plain grid's lines, inside the empty tiles
@@ -334,7 +340,10 @@ class MapCanvas(QWidget):
     # ---- tiles arriving, theme ----
 
     def refresh(self) -> None:
-        """Once per frame: tiles that arrived, the status text."""
+        """Once per frame: a slice of the track image being drawn, tiles that
+        arrived, the status text."""
+        if self._job is not None:
+            self._step_job(RENDER_SLICE_S)
         tiles = self.tiles
         if tiles is None:
             return
@@ -432,6 +441,19 @@ class MapCanvas(QWidget):
                 self._pins_on.append(pin)
         self._pins_on.sort(key=lambda p: (p.selected, ("start", "marker", "alarm", "capture", "stall").index(
             p.kind) if p.kind in ("start", "marker", "alarm", "capture", "stall") else 0))
+        # pins drawn on top of each other get a count, so three stalls in one place read as three
+        stacks, used = [], set()
+        stackable = [q for q in self._pins_on if q.kind in ("stall", "capture")]
+        for i, a in enumerate(stackable):
+            if i in used:
+                continue
+            group = [j for j in range(i, len(stackable)) if j not in used
+                     and math.hypot(stackable[j].sx - a.sx, stackable[j].sy - a.sy) < PIN_SIZE["stall"]]
+            used.update(group)
+            if len(group) > 1:
+                top = min((stackable[j] for j in group), key=lambda q: q.sy)
+                stacks.append((top.sx + 12, top.sy - 22, str(len(group))))
+        self._stacks = stacks
         self._cursor_xy = self.screen_of(*self.cursor) if self.cursor is not None else None
         self._live_xy = self.screen_of(*self.live) if self.live is not None else None
         lat = float(proj.from_unit(self.cx, self.cy)[1])
@@ -440,43 +462,62 @@ class MapCanvas(QWidget):
         self._layout_boxes()
         self.update()
 
-    def _layout_track(self) -> None:
-        """Make sure the track image covers the view; draw it again if not."""
+    def _layout_track(self, sync: bool = False) -> None:
+        """Make sure an image of the track covers the view: keep the one there
+        is (moved, or scaled after a zoom) and start drawing the next one when
+        it is not the right one. ``sync``: draw it now (colour, theme)."""
         if self.track is None:
-            self._timg, self._timg_key = None, ()
+            self._timg, self._timg_key, self._job = None, (), None
             self._runs_on, self._casing_on = [], []
             return
         w, h = self.width(), self.height()
         s = proj.world_px(self.zoom)
         left, top = self.cx * s - w / 2.0, self.cy * s - h / 2.0
         need = QRectF(left, top, w, h)
+        soon = need.adjusted(-w / 2.0, -h / 2.0, w / 2.0, h / 2.0)
         key = (self.zoom, self._pen_theme, self._values_rev, id(self.track))
-        if key != self._timg_key or not (self._timg_whole or self._timg_rect.contains(need)):
-            self._render_track(key, need)
-        self._timg_pos = QPointF(self._timg_rect.x() - left, self._timg_rect.y() - top)
+        good = key == self._timg_key and (self._timg_whole or self._timg_rect.contains(soon))
+        if not good:
+            job = self._job
+            if job is None or job["key"] != key or not (job["whole"] or job["rect"].contains(need)):
+                self._start_job(key, need)
+            if sync or self._timg is None or (key[1:] != self._timg_key[1:]):
+                self._step_job(None)            # first image, new colours or theme: draw it all now
+        self._place_image()
 
-    def _render_track(self, key: tuple, need: QRectF) -> None:
-        t0 = time.perf_counter()
+    def _place_image(self) -> None:
+        """Where the shown track image goes on screen (scaled if its zoom is not the view's)."""
+        if self._timg is None:
+            return
+        w, h = self.width(), self.height()
+        s = proj.world_px(self.zoom)
+        left, top = self.cx * s - w / 2.0, self.cy * s - h / 2.0
+        f = 2.0 ** (self.zoom - self._timg_zoom)
+        r = self._timg_rect
+        self._timg_target = QRectF(r.x() * f - left, r.y() * f - top, r.width() * f, r.height() * f)
+
+    def _start_job(self, key: tuple, need: QRectF) -> None:
+        """Set up the next track image: its region and what to draw in it."""
+        if self._job is not None and self._job.get("painter") is not None:
+            self._job["painter"].end()
         w, h = max(1, self.width()), max(1, self.height())
         z = self.zoom
         s = proj.world_px(z)
         x0, y0, x1, y1 = self.track.bbox()
         pad = CASING_W + 2
-        whole = QRectF(x0 * s - pad, y0 * s - pad, (x1 - x0) * s + 2 * pad, (y1 - y0) * s + 2 * pad)
-        self._timg_whole = whole.width() <= 3 * w and whole.height() <= 3 * h
-        region = whole if self._timg_whole else need.adjusted(-w, -h, w, h).intersected(whole)
-        self._timg_key, self._timg_rect = key, QRectF(region) if not region.isEmpty() else QRectF(need)
+        whole_rect = QRectF(x0 * s - pad, y0 * s - pad, (x1 - x0) * s + 2 * pad, (y1 - y0) * s + 2 * pad)
+        whole = whole_rect.width() <= 3 * w and whole_rect.height() <= 3 * h
+        region = whole_rect if whole else need.adjusted(-w, -h, w, h).intersected(whole_rect)
+        job = {"key": key, "zoom": z, "whole": whole, "rect": QRectF(need), "items": [], "i": 0,
+               "image": None, "painter": None}
+        self._job = job
         if region.isEmpty():
-            self._timg = None
-            self._runs_on, self._casing_on = [], []
             return
         region = QRectF(math.floor(region.x()), math.floor(region.y()), math.ceil(region.width()) + 1,
                         math.ceil(region.height()) + 1)
-        self._timg_rect = region
+        job["rect"] = region
         geo = self._geometry(z)
         ox, oy = self._origin
-        k = 2.0 ** (z - REF_Z)
-        # the region in the reference frame, for culling
         rx0, ry0 = (region.x() / s - ox) * REF_PX, (region.y() / s - oy) * REF_PX
         rx1, ry1 = (region.right() / s - ox) * REF_PX, (region.bottom() / s - oy) * REF_PX
 
@@ -485,24 +526,57 @@ class MapCanvas(QWidget):
                 return np.zeros(0, dtype=np.intp)
             return np.flatnonzero((boxes[:, 2] >= rx0) & (boxes[:, 0] <= rx1)
                                   & (boxes[:, 3] >= ry0) & (boxes[:, 1] <= ry1))
-        pens, nodata = self._pens, self._nodata_pen
-        self._runs_on = [(pens[b] if b >= 0 else nodata, poly) for b, poly in (geo.runs[i] for i in inside(geo.run_box))]
-        self._casing_on = [geo.casing[i] for i in inside(geo.casing_box)]
-        img = QImage(int(region.width()), int(region.height()), QImage.Format_ARGB32_Premultiplied)
-        img.fill(0)
-        p = QPainter(img)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        p.setTransform(QTransform(k, 0.0, 0.0, k, ox * s - region.x(), oy * s - region.y()))
-        p.setPen(self._casing_pen)
-        for poly in self._casing_on:
-            p.drawPolyline(poly)
-        for pen, poly in self._runs_on:
-            p.setPen(pen)
-            p.drawPolyline(poly)
-        p.end()
-        self._timg = img
+        pens, nodata, casing = self._pens, self._nodata_pen, self._casing_pen
+        job["items"] = ([(casing, geo.casing[i]) for i in inside(geo.casing_box)]
+                        + [(pens[b] if b >= 0 else nodata, poly)
+                           for b, poly in (geo.runs[i] for i in inside(geo.run_box))])
+        job["runs"] = len(job["items"])
+        k = 2.0 ** (z - REF_Z)
+        job["transform"] = QTransform(k, 0.0, 0.0, k, ox * s - region.x(), oy * s - region.y())
+
+    def _step_job(self, budget_s: float | None) -> None:
+        """Draw the next image for up to ``budget_s`` (None: to the end); show it when done."""
+        job = self._job
+        if job is None:
+            return
+        t0 = time.perf_counter()
+        items = job["items"]
+        if job["image"] is None and items:
+            rect = job["rect"]
+            img = QImage(int(rect.width()), int(rect.height()), QImage.Format_ARGB32_Premultiplied)
+            img.fill(0)
+            painter = QPainter(img)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setTransform(job["transform"])
+            job["image"], job["painter"] = img, painter
+        painter = job["painter"]
+        i, n = job["i"], len(items)
+        while i < n:
+            pen, poly = items[i]
+            painter.setPen(pen)
+            painter.drawPolyline(poly)
+            i += 1
+            if budget_s is not None and (i & 15) == 0 and time.perf_counter() - t0 > budget_s:
+                break
+        job["i"] = i
+        job["ms"] = job.get("ms", 0.0) + (time.perf_counter() - t0) * 1000.0
+        if i < n:
+            return
+        if painter is not None:
+            painter.end()
+        self._job = None
+        self._timg = job["image"]
+        self._timg_rect, self._timg_key, self._timg_zoom = job["rect"], job["key"], job["zoom"]
+        self._timg_whole = job["whole"]
+        self._runs_on = items
         self.renders += 1
-        self.render_ms = (time.perf_counter() - t0) * 1000.0
+        self.render_ms = job["ms"]
+        self._place_image()
+        self.update()
+
+    def finish_render(self) -> None:
+        """Draw the pending track image to the end now (tests, screenshots)."""
+        self._step_job(None)
 
     def _layout_tiles(self) -> None:
         w, h = self.width(), self.height()
@@ -621,9 +695,18 @@ class MapCanvas(QWidget):
             p.resetTransform()
             p.setRenderHint(QPainter.Antialiasing, False)
         if self._timg is not None:
-            p.drawImage(self._timg_pos, self._timg)
+            p.drawImage(self._timg_target, self._timg)
         for pin in self._pins_on:
             draw_pin(p, pin.kind, pin.sx, pin.sy, pin.label, pin.selected)
+        if self._stacks:
+            font = T.font(13, 800)
+            p.setFont(font)
+            for x, y, text in self._stacks:            # an inverted tag: "3" here
+                r = QRectF(x, y, 22, 20)
+                p.fillRect(r.adjusted(-2, -2, 2, 2), T.bg)
+                p.fillRect(r, T.fg)
+                p.setPen(T.bg)
+                p.drawText(r, Qt.AlignCenter, text)
         if self._live_xy is not None:
             draw_dot(p, self._live_xy[0], self._live_xy[1], 9.0, self.live_heading)
         if self._cursor_xy is not None:
@@ -736,7 +819,7 @@ class MapCanvas(QWidget):
     def stats(self) -> dict:
         geo = self._geo.get(self.zoom)
         times = np.array(self.paint_times) if self.paint_times else np.zeros(1)
-        return {"zoom": self.zoom, "runs": len(self._runs_on), "casing": len(self._casing_on),
+        return {"zoom": self.zoom, "runs": len(self._runs_on), "pending": self._job is not None,
                 "renders": self.renders, "render_ms": round(self.render_ms, 1),
                 "points": geo.points if geo else 0, "track_points": len(self.track) if self.track is not None else 0,
                 "tiles": len(self._tiles_on), "grid": len(self._grid_on), "pins": len(self._pins_on),
