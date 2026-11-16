@@ -19,6 +19,7 @@ from .screens.alarms import AlarmsScreen
 from .screens.drive import DriveScreen
 from .screens.gpsmap import MapScreen
 from .screens.map3d import Map3DScreen
+from .screens.handheld import HandheldScreen
 from .screens.rawtools import RawScreen
 from .screens.replay import ReplayScreen
 from .screens.sensors import SensorsScreen
@@ -28,7 +29,7 @@ from .units import PRESETS, QUANTITIES, U
 
 ICON = Path(__file__).parent.parent / "data" / "hondalog.svg"
 FRAME_MS = 33                   # about 30 fps
-SENSORS, DRIVE, MAP3D, REPLAY, RAW, TUNE, ALARMS, MAP = range(8)
+SENSORS, DRIVE, MAP3D, REPLAY, RAW, TUNE, ALARMS, MAP, HANDHELD = range(9)
 
 
 def apply_palette(app) -> None:
@@ -85,8 +86,9 @@ class Shell(QMainWindow):
         self.tune = TuneScreen(session, self.settings)
         self.alarms = AlarmsScreen(session)
         self.map = MapScreen(session, self.replay, self.settings)
+        self.handheld = HandheldScreen(session, self.settings)
         self.screens = [self.sensors, self.drive, self.map3d, self.replay, self.raw,
-                        self.tune, self.alarms, self.map]
+                        self.tune, self.alarms, self.map, self.handheld]
         for screen in self.screens:
             self.stack.addWidget(screen)
 
@@ -484,6 +486,9 @@ class Shell(QMainWindow):
         if Qt.Key_F1 <= key <= Qt.Key_F8:
             self.show_screen(key - Qt.Key_F1)
             return True
+        if key == Qt.Key_F10:
+            self.show_screen(HANDHELD)
+            return True
         if key == Qt.Key_F9:
             T.toggle()
             return True
@@ -514,6 +519,7 @@ class Shell(QMainWindow):
     def closeEvent(self, event) -> None:
         self.timer.stop()
         self.map.close_tiles()
+        self.handheld.shutdown()
         QApplication.instance().removeEventFilter(self)
         try:
             T.changed.disconnect(self.retheme)

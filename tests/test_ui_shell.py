@@ -220,6 +220,8 @@ def test_function_keys_switch_screens_and_f9_toggles_theme(active, app, settings
         key(win, k)
         assert win.current() == i and win.tabs.current == i
     assert not theme.T.night
+    key(win, Qt.Key_F10)
+    assert win.current() == 8 and win.tabs.current == 8
     key(win, Qt.Key_F9)
     assert theme.T.night and settings.value("theme") == "night"
     assert win.status.theme_btn.text() == "NIGHT"
