@@ -194,6 +194,27 @@ against the simulators and the host builds of the firmware cores.
   (`sim/testmap`, `make testmap` rebuilds it), with layout, 3:1 contrast
   checks for the map's graphics, and the render budget.
 - Fonts: the © sign added to the text fonts.
+- Map upload over the USB-C cable (two-way build): four new link commands
+  (`MAPUP_OPEN`, `MAPUP_WRITE`, `MAPUP_STATUS`, `MAPUP_COMMIT`, capability
+  bit 16, SERIAL.md "Map upload") put files into the card's `MAP/` folder:
+  names `MAP/` plus an 8.3 name only (no path tricks, refused in the
+  `--gps-p1` build), a CRC32 on every chunk and on the whole file, a status
+  query for resuming, and a commit that reads the temporary file back from
+  the card, checks length and CRC32 and only then renames it over the real
+  file. The Map screen's files are closed for the length of an upload
+  (`MAP BEING UPDATED`) and reopened after the last commit, an abort, or 10 s
+  of silence (the upload then waits, resumable). `hondalog-handheld put-map
+  DIR` (progress bar, resume, verification) and `tools/cyd_debug.py PORT
+  --put-map DIR` (Python and pyserial only, a progress line every 5 %) send
+  `README.TXT`, `MAP.DAT` and `MAP.IDX`; `cydsim` keeps the files in its
+  `--sd` folder. About 40-55 kB/s expected on the cable (5-7 minutes for the
+  17 MB map; not yet measured on the board). Host C tests cover chunking,
+  resume, bad chunk and whole-file CRCs, refused names and the
+  temporary-file-then-rename sequence.
+- The firmware runs its code and read-only data from PSRAM
+  (`CONFIG_SPIRAM_XIP_FROM_PSRAM`, ESP-IDF's advice for RGB panels with
+  frame buffers in PSRAM): a flash write such as an NVS commit no longer
+  stops the LCD interrupt's reads of the frames.
 
 ### Tuning (Track C)
 

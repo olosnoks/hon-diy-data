@@ -396,6 +396,40 @@ it from OpenStreetMap extracts, once; the handheld never goes online.
        MAP.IDX   MAP.DAT   README.TXT
    ```
 
+#### Copying the map over the USB cable
+
+With the card in the handheld (the normal build, GPS on GPIO18), the map goes
+over the USB-C cable without taking the card out. It needs no hondalog
+install on the machine the cable is plugged into, only Python 3 and pyserial:
+
+```sh
+python cyd_debug.py COM17 --put-map path\to\MAP          # Windows
+python tools/cyd_debug.py /dev/ttyUSB0 --put-map ~/maps/MAP   # Linux
+hondalog-handheld put-map ~/maps/MAP                       # with hondalog installed
+```
+
+`path\to\MAP` is the folder `map-build` wrote (or the card folder that holds
+it). It sends `README.TXT`, `MAP.DAT` and `MAP.IDX` into the card's `MAP/`,
+one file at a time, with a progress line every 5 %. Each file arrives under a
+temporary name and replaces the old one only after the handheld has read it
+back from the card and the length and CRC32 are right; a damaged chunk is sent
+again, and a file that does not check out leaves the old one alone.
+
+**Time.** The cable is stop-and-wait, about 40-55 kB/s at 921600 baud
+(estimated; not yet measured on the board): the 17 MB map of 100 miles around
+Jackson takes **5-7 minutes**, plus 10-15 s for the handheld to read each big
+file back. A 12-mile test map (1.4 MB) takes under a minute.
+
+**If it stops** (cable pulled, laptop asleep, the program closed), run the
+same command again: it asks the handheld what it has and goes on from the last
+byte, even after a long pause, as long as the handheld stays powered. The
+Map screen shows `MAP BEING UPDATED` while files are coming in (the handheld
+closes its map files for the length of the upload), and goes back to the old
+map if nothing arrives for 10 s. If an upload stops after `MAP.DAT` and before
+`MAP.IDX` is in, the screen says the two files differ: just send the folder
+again. The GPS-on-P1 build cannot take files over the cable; copy the folder to
+the card as above.
+
 `hondalog-handheld info /media/you/CARD` reads the map back and checks every
 tile. Rebuild when you want fresher roads: Geofabrik updates the extracts
 daily. The format is in
