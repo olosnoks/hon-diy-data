@@ -742,6 +742,7 @@ class DriveReader:
                 if not spec.mapped or cid in view.data:
                     continue
                 view.specs[cid] = spec
+                view.names[cid] = (name, scale)
                 view.t[cid] = np.asarray(series.t, dtype=float) - origin
                 view.data[cid] = np.asarray(series.v, dtype=float) * scale
             for mt, text in log.markers:
@@ -750,8 +751,10 @@ class DriveReader:
             if BLACKBOX_STREAM in log.streams and log.meta.get("blackbox_clock_rtt_us") is not None:
                 # both sources were stamped on one clock; half the sync round trip is the bound
                 view.align_residual_ms = float(log.meta["blackbox_clock_rtt_us"]) / 2000.0
-            view.replay = ReplaySession(log)        # type: ignore[attr-defined]
-            view.origin = origin                    # type: ignore[attr-defined]
+            # W4's replay session on the same log: the Replay screen draws its
+            # envelopes and reads its cursors (ui/replaymodel.py maps ids and times)
+            view.replay = ReplaySession(log)
+            view.origin = origin
         return view
 
     def _read_bbx(self, path: Path) -> ad.LogView:

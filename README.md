@@ -253,10 +253,21 @@ been verified on the car yet.
 **Replay (F4).** O opens the drive picker: every drive, its stall captures
 under it, black box captures (`.bbx`), a search box over names, notes and
 markers, and "Import file" for an old `.csv` or a MegaLogViewer
-`.msl`/`.mlg`. With nothing open it follows live data. Stacked lanes with one cursor: click or drag, arrows step 0.1 s
-(Shift 1 s), `[` and `]` jump between events, P plays, `+` and `-` zoom, D
-drops a second cursor for a time difference. For a stall capture the right
-side lists what left its normal range first.
+`.msl`/`.mlg`. With nothing open it follows live data. Stacked lanes with one
+cursor: click or drag, arrows step 0.1 s (Shift 1 s), `[` and `]` jump between
+events (markers, triggers, alarms and, for a stall, each signal that fell), P
+plays. `+` and `-` zoom around the cursor and the mouse wheel around the
+pointer; Ctrl+arrows, Shift+wheel or a drag with the right button pan; `0`
+shows the whole drive. However long the drive, a lane is drawn as one min/max
+pair per pixel column, so an hour of 1 kHz black box data scrolls like a
+minute and a dropout one sample long still shows. D drops a second cursor (B)
+where the first is, Shift+click moves it: the header then shows the time
+between the two and every lane how much it changed. C lays a second drive or
+capture over the first in grey ("Compare"): two stalls are lined up on the
+stall, anything else on the first sample; C again (or A) picks what to line
+them up on (first sample, first marker, the stall, RPM rising through 400),
+`,` and `.` slide it by 0.1 s (`<` `>` by 1 s), Shift+C removes it. For a
+stall capture the right side lists what left its normal range first.
 
 **Raw tools (F5).** S sweeps all 256 bytes and keeps going. Yellow = changed
 in the last sweep, underlined = changed earlier, dashed = in the address

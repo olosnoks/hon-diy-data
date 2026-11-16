@@ -184,6 +184,13 @@ class LogView:
     trigger_t: float | None = None              # stall time, None for plain logs
     align_residual_ms: float | None = None      # ECU vs black-box alignment
     live: bool = False
+    #: ``hondalog.analysis.ReplaySession`` on the log this view was read from
+    #: (None: the Replay screen builds one from the arrays above), with
+    #: ``origin`` = the log time of this view's zero and ``names`` = view id
+    #: -> (log channel name, scale) where the two differ
+    replay: object = None
+    origin: float = 0.0
+    names: dict = field(default_factory=dict)
 
     def span(self) -> tuple[float, float]:
         lo = min((float(t[0]) for t in self.t.values() if len(t)), default=0.0)

@@ -427,7 +427,16 @@ Replay
 | [ / ] | Previous / next event (marks, losses, stall) |
 | P | Play / pause |
 | + / - | Zoom the time axis around the cursor |
+| 0 | The whole drive |
+| Ctrl+Left / Ctrl+Right | Pan a quarter of the window |
+| Wheel / Shift+wheel / right drag | Zoom around the pointer / pan / pan |
 | Click or drag in the plot | Move the cursor |
+| D / Shift+click | Second cursor (B) at the cursor / where clicked; readouts show A minus B |
+| C | Compare: lay a second drive over this one (again: what to line up on) |
+| A | Next alignment (first sample, first marker, stall, RPM through 400) |
+| , . / < > | Slide the second drive 0.1 s / 1 s |
+| Shift+C | Remove the second drive |
+| O / L | Open the drive picker / back to live |
 
 Raw tools
 | Key | Action |

@@ -62,8 +62,6 @@ definition)`, `tables.editor`.
 
 What is not bound yet:
 
-- `ReplaySession` rides on `LogView.replay`, but the Replay screen still
-  draws from the `LogView` arrays with its own decimation and cursor code.
 - `mapper.rank_against()` (the correlation finder on the sweep history) has
   no button.
 - The Tune screen reads its table list once at start: a ROM is opened with
@@ -178,6 +176,26 @@ what it returns. "Delete…" (or Del) asks, then calls `delete(row.ref)`:
 being recorded is refused, the freed pages go through the incremental
 vacuum). A row with `DriveRow.keep` asks a second time and passes
 `allow_keep=True`. "Keep" calls `set_keep`.
+
+**Replay and `ReplaySession`.** A `LogView` from the database carries W4's
+`ReplaySession` on the same log (`view.replay`), the log time of the view's
+zero (`view.origin`) and, per view id, the log's channel name and scale
+(`view.names`: the black box tach is `bb_rpm_tach / 30`). `ui/replaymodel.py`
+(`ReplayModel`, no Qt) is the layer between the two vocabularies; the Replay
+screen draws and reads only through it:
+
+| the screen | `ReplayModel` | `ReplaySession` |
+|---|---|---|
+| lane traces, one min/max pair per pixel column | `trace(id, columns)` | `trace` (`envelope` / `LodPyramid`) |
+| the window: zoom, pan, whole drive | `zoom`, `pan`, `set_window`, `show_all`, `reveal` | `zoom`, `set_view` |
+| cursors A and B, lane readouts and deltas | `set_cursor(t, "a"/"b")`, `readouts(ids, full=False)` | `set_cursor`, `readouts` |
+| `[` `]`, the Jump segment | `jump(±1)`, `events()`, `add_event` (order-of-loss rows) | `jump_event`, `event_list`, `add_event` |
+| Compare: a second drive in grey | `set_overlay(view, align)`, `align_overlay`, `nudge_overlay`, `overlay_trace` | `set_overlay`, `align_overlay`, `shift_overlay`, `overlay_trace` |
+
+A view without a log (the demo capture, a `.bbx` file) gets a session built
+from its arrays (`replaymodel.session_from_view`), so there is one code path.
+The live lanes (no file open) still read the bus history. The arrays in the
+`LogView` remain what `order_of_loss` and the lane scaling use.
 
 `LogView` holds per-channel time and value arrays (`t[id]`, `data[id]`), so
 1 kHz black-box channels and 10 Hz ECU channels sit in one view at their own

@@ -35,6 +35,9 @@ class ReplaySession:
         self.cursor_a: float = log.t0
         self.cursor_b: float | None = None
         self.overlay: Comparison | None = None
+        #: events the viewer worked out itself (the order-of-loss rows of a
+        #: stall): listed and jumped to together with the log's own
+        self.bookmarks: list[Event] = []
         self._pyramids: dict[tuple[int, str], LodPyramid] = {}
 
     # -- view --
@@ -89,6 +92,23 @@ class ReplaySession:
         except ValueError:
             return self.overlay.align("start")
 
+    def align_overlay(self, align: str = "start", **options: Any) -> float:
+        """Line the overlay up on another moment. Returns the offset; raises
+        ValueError (and changes nothing) if a log has no such moment."""
+        if self.overlay is None:
+            return 0.0
+        offset = self.overlay.align(align, **options)
+        self._pyramids = {k: v for k, v in self._pyramids.items() if k[0] == 0}
+        return offset
+
+    def shift_overlay(self, seconds: float) -> float:
+        """Slide the overlay by hand. Returns the new offset."""
+        if self.overlay is None:
+            return 0.0
+        self.overlay.offset += seconds
+        self._pyramids = {k: v for k, v in self._pyramids.items() if k[0] == 0}
+        return self.overlay.offset
+
     # -- cursors --
 
     def set_cursor(self, t: float, which: str = "a") -> None:
@@ -122,12 +142,14 @@ class ReplaySession:
         self.set_cursor(target, which)
         return target
 
-    def readouts(self, names: Sequence[str] | None = None) -> list[Readout]:
-        """One row per channel: value at cursor A, and A-to-B statistics if B is set."""
+    def readouts(self, names: Sequence[str] | None = None, full: bool = True) -> list[Readout]:
+        """One row per channel: value at cursor A, and A-to-B statistics if B
+        is set (``full=False``: only the values at A and B and their
+        difference, see ``cursors.span_stats``)."""
         rows = []
         for name in names if names is not None else self.log.channels:
             series = self.log.series(name)
-            stats = (cursors.span_stats(series, self.cursor_a, self.cursor_b)
+            stats = (cursors.span_stats(series, self.cursor_a, self.cursor_b, full)
                      if self.cursor_b is not None else None)
             rows.append(Readout(name, series.units, cursors.value_at(series, self.cursor_a), stats))
         return rows
@@ -138,9 +160,23 @@ class ReplaySession:
 
     # -- events --
 
+    def add_event(self, t: float, kind: str, text: str = "") -> Event:
+        """Add a bookmark: a moment that is not in the log but is worth
+        jumping to. It appears in ``event_list`` and ``jump_event``."""
+        event = Event(float(t), kind, text)
+        self.bookmarks.append(event)
+        return event
+
+    def clear_events(self, kind: str | None = None) -> None:
+        """Forget the bookmarks (of one kind, or all)."""
+        self.bookmarks = [e for e in self.bookmarks if kind is not None and e.kind != kind]
+
     def event_list(self, *kinds: str) -> list[Event]:
-        """Markers, triggers and alarms in time order, for the jump list."""
-        return self.log.events_of(*(kinds or ("marker", "trigger", "alarm")))
+        """Markers, triggers and alarms in time order, for the jump list,
+        with the bookmarks among them. ``kinds`` narrows both."""
+        events = self.log.events_of(*(kinds or ("marker", "trigger", "alarm")))
+        events = events + [e for e in self.bookmarks if not kinds or e.kind in kinds]
+        return sorted(events, key=lambda e: e.t)
 
     def jump_event(self, direction: int, *kinds: str) -> float | None:
         """Move cursor A to the next or previous event. None if there is none."""

@@ -48,10 +48,19 @@ def value_at(series: Series, t: float, how: str = "hold") -> float:
     return float(series.v[i])
 
 
-def span_stats(series: Series, ta: float, tb: float) -> SpanStats:
-    """Statistics of one channel between two cursor times (in either order)."""
+def span_stats(series: Series, ta: float, tb: float, full: bool = True) -> SpanStats:
+    """Statistics of one channel between two cursor times (in either order).
+
+    ``full=False`` gives only the two values, their difference and the rate
+    (min, max and mean are NaN, n is 0): two lookups, whatever lies between.
+    A readout that follows a dragged cursor over an hour of 1 kHz data wants
+    that; a table of statistics asks for the rest once the cursor rests."""
     lo, hi = min(ta, tb), max(ta, tb)
     a, b = value_at(series, ta), value_at(series, tb)
+    if not full:
+        span = tb - ta
+        return SpanStats(series.name, series.units, a, b, b - a, NAN, NAN, NAN, 0,
+                         (b - a) / span if span else NAN)
     i0 = int(np.searchsorted(series.t, lo, side="left"))
     i1 = int(np.searchsorted(series.t, hi, side="right"))
     v = series.v[i0:i1]
