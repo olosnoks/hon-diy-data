@@ -65,9 +65,17 @@ class Car:
 
     def __init__(self, fault: str | None = None, fault_at: float = 20.0, seed: int = 1,
                  key_on_at: float = 0.3, crank_at: float = 1.2, start_at: float = 2.0,
-                 rev_every: float = 7.0, restart_after: float | None = None):
+                 rev_every: float = 7.0, restart_after: float | None = None, sub: int = SUB):
         if fault not in (None, "none", *FAULTS):
             raise ValueError(f"unknown fault {fault!r}; choose from {FAULTS}")
+        if sub not in (1, SUB):
+            raise ValueError(f"sub must be 1 or {SUB}")
+        #: ADC readings generated per millisecond. ``SUB`` is what the box
+        #: samples (min/max inside each record, 200 us glitches). 1 is the
+        #: cheap model for a simulator that only feeds a screen: one reading
+        #: per millisecond, so a record's min and max equal its mean. The
+        #: rails, the pulses and every fault behave the same at 1 kHz.
+        self.sub = sub
         self.rng = random.Random(seed)
         self.fault_plan = None if fault in (None, "none") else (fault, fault_at)
         self.key_on_at, self.crank_at, self.start_at = key_on_at, crank_at, start_at
@@ -195,8 +203,21 @@ class Car:
                 vbat - 120.0 if self.key else 0.0, vbat + 150.0 if rpm > 500 else vbat)
         alpha = (1.0, 0.63, 0.18 if not pump_on else 0.63, 0.5, 1.0)   # per 200 us step
         sub = []
+        if self.sub == 1:
+            # one reading at the end of the millisecond: the five 200 us filter
+            # steps in closed form, and uniform noise of the same spread (12 mV rms)
+            lvls, rnd, row = self._lvl, self.rng.random, []
+            glitch = bool(self._glitches) and any(a <= t < b for a, b in self._glitches)
+            for ch in range(5):
+                w = 0.0 if glitch and ch == F.A_ECUB else want[ch]
+                a = alpha[ch]
+                lvl = w if a >= 1.0 else w + (lvls[ch] - w) * (1.0 - a) ** SUB
+                lvls[ch] = lvl
+                v = lvl + (rnd() - 0.5) * 41.57
+                row.append(0 if v < 0 else int(v))
+            sub.append(row)
         g = self.rng.gauss
-        for k in range(SUB):
+        for k in range(SUB if self.sub != 1 else 0):
             ts = t - 0.001 + (k + 1) * 0.0002
             row = []
             for ch in range(5):
@@ -348,17 +369,20 @@ class CoreModel:
             self.trackers[ch].feed(te, level, min_us)
             self._last_edge[ch] = te
             self._edges.append((te, ch, level))
-        cols = list(zip(*tick.sub))
-        mean = tuple(sum(c) // len(c) for c in cols)
-        lo = tuple(min(c) for c in cols)
-        hi = tuple(max(c) for c in cols)
+        if len(tick.sub) == 1:
+            mean = lo = hi = tuple(tick.sub[0])
+        else:
+            cols = list(zip(*tick.sub))
+            mean = tuple([sum(c) // len(c) for c in cols])
+            lo = tuple([min(c) for c in cols])
+            hi = tuple([max(c) for c in cols])
         tach, ign, inj = self.trackers
         rpm_tach = tach.rpm(t_us, v["tach_ppr"], timeout_us)
         rpm_ign = ign.rpm(t_us, v["ign_ppr"], timeout_us)
         pw = min(inj.pw_us, 65535)
         duty = inj.duty200(t_us, 2 * timeout_us)
-        age = tuple(AGE_MAX_MS if le is None else min(AGE_MAX_MS, max(0, t_us - le) // 1000)
-                    for le in self._last_edge)
+        age = tuple([AGE_MAX_MS if le is None else min(AGE_MAX_MS, max(0, t_us - le) // 1000)
+                     for le in self._last_edge])
         fired = self.trig.step(TrigInput(t_us, mean, lo, hi, rpm_tach, rpm_ign, pw, duty, age,
                                          tick.button))
         dig = ((F.DIG_TACH if tach.level else 0) | (F.DIG_IGN if ign.level else 0)
@@ -369,8 +393,8 @@ class CoreModel:
             self.add_event(f.t_us, f.code, f.value, f.src, f.action)
         if self._capture is not None:
             dig |= F.DIG_CAPTURING
-        rec = (mean, tuple(min(255, x // 100) for x in lo[:4]),
-               tuple(min(255, (x + 99) // 100) for x in hi[:4]), rpm_tach, rpm_ign, pw, duty, dig, 0)
+        rec = (mean, tuple([min(255, x // 100) for x in lo[:4]]),
+               tuple([min(255, (x + 99) // 100) for x in hi[:4]]), rpm_tach, rpm_ign, pw, duty, dig, 0)
         i = self.n_rec % self._cap
         self._ring[i] = rec
         self._ring_t[i] = t_us
@@ -431,6 +455,7 @@ class SimDevice:
         self._n = 0                         # ticks done
         self._live_period_ms = 1000 // self.core.cfg["live_hz"]
         self._last_live = 0
+        self._tx_ready = threading.Event()  # set when there is something to take
         self.connected = True               # False: the cable is "unplugged"
 
     # -- time --
@@ -465,6 +490,7 @@ class SimDevice:
         if self.connected:
             self._tx += F.frame_encode(ftype, payload, self._seq)
             self._seq = (self._seq + 1) & 0xFF
+            self._tx_ready.set()
 
     def _text(self, text: str) -> None:
         for i in range(0, len(text), 240):
@@ -474,7 +500,17 @@ class SimDevice:
         with self._lock:
             out = bytes(self._tx)
             self._tx.clear()
+            self._tx_ready.clear()
             return out
+
+    def wait_tx(self, timeout: float) -> None:
+        """Sleep until the box has something to send, but no longer than
+        ``timeout`` and no longer than until its next live frame is due. A
+        reply to a request written from another thread ends the wait at once."""
+        with self._lock:
+            period = self._live_period_ms
+            due = (self._last_live + period - self._n) / (1000.0 * self.drift) if period else timeout
+        self._tx_ready.wait(max(0.001, min(timeout, due)))
 
     def _state(self) -> int:
         c = self.core
@@ -600,9 +636,12 @@ class SimPort:
         while True:
             self.device.advance(self._clock() - self._t0)
             data = self.device.take_tx()
-            if data or self._clock() >= end:
+            now = self._clock()
+            if data or now >= end:
                 return data
-            time.sleep(0.002)
+            # like a blocking read on the real port: wake when a frame is due,
+            # not every 2 ms (which cost more than the model itself)
+            self.device.wait_tx(end - now)
 
 
 HELP = "keys: m main relay  i igniter  f fuel pump  k key off  b battery dip  r restart  space button  q quit"

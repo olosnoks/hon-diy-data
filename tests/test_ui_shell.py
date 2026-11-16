@@ -128,6 +128,36 @@ def test_tile_repaints_only_when_something_visible_changed(shell, app):
         Tile.paintEvent = original
 
 
+def test_a_50_hz_tile_redraws_its_value_ten_times_a_second(app):
+    """The black box publishes at 50 Hz. Its tiles redraw the value at 10 Hz;
+    a channel that arrives slower than the frame timer is drawn at once."""
+    from hondalog.ui.bus import ChannelBus, ChannelSpec
+    bus = ChannelBus()
+    fast = bus.register(ChannelSpec("fpv", "FP feed", "V", 2, 0, 16, source="BB"))
+    slow = bus.register(ChannelSpec("ect", "Coolant", "°C", 0, -40, 140))
+    tiles = {"fpv": Tile(fast), "ect": Tile(slow)}
+    for tile in tiles.values():
+        tile.resize(163, 142)
+    shown = {"fpv": [], "ect": []}
+    t, frame = 0.0, 0
+    while t < 2.0:                          # 60 frames; fpv gets a new value every 20 ms
+        while fast.t < t:
+            bus.publish({"fpv": 12.0 + 0.01 * fast.gen}, t=fast.t + 0.02 if fast.gen else 0.0)
+        if frame % 6 == 0:                  # ect: 5 Hz
+            bus.publish({"ect": 80.0 + frame}, t=t)
+        for cid, tile in tiles.items():
+            before = tile._text
+            tile.sync(t)
+            if tile._text != before:
+                shown[cid].append(t)
+        t += 1 / 30
+        frame += 1
+    assert 17 <= len(shown["fpv"]) <= 22                    # about 10 Hz, not 30
+    assert len(shown["ect"]) == 10                          # every one of its updates, the frame it came
+    assert tiles["fpv"]._text == fast.spec.format(fast.value) or abs(
+        float(tiles["fpv"]._text) - fast.value) < 0.06      # never more than 0.1 s behind
+
+
 def test_function_keys_switch_screens_and_f9_toggles_theme(active, app, settings):
     win = active
     for i, k in enumerate((Qt.Key_F1, Qt.Key_F2, Qt.Key_F3, Qt.Key_F4, Qt.Key_F5, Qt.Key_F6,

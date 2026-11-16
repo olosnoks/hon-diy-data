@@ -388,7 +388,9 @@ class BlackboxSource:
         if port == BBSIM_PREFIX:
             # next to a simulated ECU: a simulated box in a car that is already running
             from ..blackbox import Car, SimDevice, SimPort
-            target = SimPort(SimDevice(Car(None, key_on_at=0.0, crank_at=0.02, start_at=0.1)))
+            # one ADC reading per millisecond instead of five: this box only feeds
+            # the screen, and the full model cost more CPU than the UI next to it
+            target = SimPort(SimDevice(Car(None, key_on_at=0.0, crank_at=0.02, start_at=0.1, sub=1)))
         try:
             self.reader = ecu.live.open_blackbox(target)
         except Exception as exc:            # a missing box must never stop the ECU link

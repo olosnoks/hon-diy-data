@@ -32,7 +32,9 @@ TMP = Path(tempfile.mkdtemp(prefix="hondalog-bench-"))
 os.environ["XDG_CONFIG_HOME"] = str(TMP / "config")
 os.environ["HONDALOG_DIR"] = str(TMP / "logs")
 
-TARGETS = {"fps_min": 20.0, "fps": 28.5, "cpu_pct": 50.0, "latency_p95": 100.0}
+TARGETS = {"fps_min": 20.0, "fps": 28.5, "cpu_pct": 50.0, "latency_p95": 100.0,
+           # the screen that is up all day, with the simulated black box running
+           "sensors_cpu_pct": 20.0}
 SCENARIOS = ("sensors", "drive", "map3d", "map3d-orbit", "replay-live", "replay-play",
              "rawtools-sweep", "tune", "alarms", "sensors-again")
 
@@ -47,7 +49,7 @@ def main(argv=None) -> int:
     ap.add_argument("--check", action="store_true", help="exit 1 if a target is missed")
     ap.add_argument("--no-blackbox", action="store_true",
                     help="leave the simulated black box out: its 1 kHz model runs in this "
-                         "process and costs about 6 %% of a core that the real box does not")
+                         "process and costs about 3 %% of a core that the real box does not")
     args = ap.parse_args(argv)
     if not args.onscreen:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -160,9 +162,11 @@ def main(argv=None) -> int:
             missed.append(f"{name}: slowest 1% of frames at {s['fps_min']} fps")
         if s["cpu_pct"] > TARGETS["cpu_pct"]:
             missed.append(f"{name}: {s['cpu_pct']}% CPU")
+        elif name.startswith("sensors") and s["cpu_pct"] > TARGETS["sensors_cpu_pct"]:
+            missed.append(f"{name}: {s['cpu_pct']}% CPU (all sensors: {TARGETS['sensors_cpu_pct']:g}%)")
         if s["latency_ms"]["p95"] > TARGETS["latency_p95"]:
             missed.append(f"{name}: latency p95 {s['latency_ms']['p95']} ms")
-    print("targets (30 fps, never below 20, under 50% of a core, under 100 ms): "
+    print("targets (30 fps, never below 20, under 50% of a core and 20% on all sensors, under 100 ms): "
           + ("all met" if not missed else "MISSED: " + "; ".join(missed)))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as fh:

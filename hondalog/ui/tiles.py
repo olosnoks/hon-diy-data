@@ -48,6 +48,14 @@ SENSOR = Metrics(24, 8, 6, 13, 16, 44, 40, 7, 14, 10, (3, 8, 4), 30, 18, 12, 30,
 COMPACT = Metrics(24, 8, 6, 13, 16, 44, 40, 7, 14, 10, (3, 8, 4), 22, 0, 12, 30, 5, 36, False)
 DRIVE = Metrics(40, 12, 10, 22, 24, 150, 104, 35, 22, 22, (6, 14, 10), 44, 30, 18, 60, 9, 104, True)
 
+# A channel that updates faster than the frame timer reads it (the black box
+# at 50 Hz) changes its last digit on every frame. Nobody can read that, and
+# eight such tiles were most of the painting on the Sensors screen. Such a
+# tile redraws its value 10 times a second (HANDOFF: tiles at 10 Hz); a
+# channel that arrives slower than FAST_PERIOD is drawn the frame it arrives.
+FAST_PERIOD = 0.04
+FAST_VALUE_DT = 0.095
+
 
 class Tile(QWidget):
     clicked = Signal(str)
@@ -72,6 +80,8 @@ class Tile(QWidget):
 
     def _reset(self) -> None:
         self._gen = self._spark_gen = -1
+        self._value_t = -1e9
+        self._fast = False
         self._spec = None
         self._text = "---"
         self._value_font = None
@@ -120,9 +130,17 @@ class Tile(QWidget):
             self._stale, self._level, self._icon_on = stale, level, icon_on
             self._gen = -1
             dirty = True
-        if st.gen != self._gen:
-            self._gen = st.gen
-            dirty |= self._refresh_value(st, spec, stale)
+        gen = st.gen
+        if gen != self._gen:
+            since = now - self._value_t
+            if self._fast and self._gen >= 0 and 0.0 < since < FAST_VALUE_DT:
+                pass                # a 50 Hz source: this tile caught up 10 times a second
+            else:
+                if self._gen >= 0:
+                    n = gen - self._gen
+                    self._fast = n >= 2 and 0.0 < since < n * FAST_PERIOD
+                self._gen, self._value_t = gen, now
+                dirty |= self._refresh_value(st, spec, stale)
         if spark and st.spark_gen != self._spark_gen:
             self._spark_gen = st.spark_gen
             self._refresh_spark(st, spec)
