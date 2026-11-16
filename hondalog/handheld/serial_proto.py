@@ -45,6 +45,9 @@ STATUS_TEXT = {OK: "ok", IGNORED: "ignored", E_ARG: "bad argument", E_IO: "card 
 LINK_OFF, LINK_CONNECTING, LINK_OK, LINK_ISO_ONLY, LINK_ERROR = range(5)
 LINK_NAMES = {LINK_OFF: "no reply from the ECU", LINK_CONNECTING: "connecting", LINK_OK: "ok",
               LINK_ISO_ONLY: "OBD2 only", LINK_ERROR: "K-line cable not found"}
+# where the handheld's wall clock comes from (STATS time_source)
+TS_NONE, TS_NMEA, TS_PPS, TS_HOST = range(4)
+TS_NAMES = {TS_NONE: "none", TS_NMEA: "GPS sentences", TS_PPS: "GPS PPS", TS_HOST: "set by the laptop"}
 ST_SD_OK, ST_RECORDING, ST_GPS_FIX, ST_TIME, ST_ARMED, ST_CAPTURING, ST_HOST, ST_BUILTIN = (1 << i for i in range(8))
 FI_OPEN, FI_MORE = 1, 2
 FD_EOF, FD_BUSY = 1, 2
@@ -56,6 +59,7 @@ TICK = struct.Struct("<QHHI")                                   # 16
 LINK = struct.Struct("<QBBBB")                                  # 12
 ISO = struct.Struct("<QBBBB")                                   # 12, then len bytes
 STATS = struct.Struct("<Qq6IHBB7I6I")                           # 96
+STATS_EXT = struct.Struct("<B3xI")                              # 8, appended later: time_source, time_err_us
 TIME_RSP = struct.Struct("<qQQ")                                # 24
 ACK = struct.Struct("<BBhI")                                    # 8
 FILE_INFO = struct.Struct("<BBHII")                             # 12
@@ -103,6 +107,11 @@ class Hello:
         return bool(self.flags & 1)
 
     @property
+    def clock_from_pps(self) -> bool:
+        """The handheld's wall clock (unix_us) is held to the GPS pulse: good to tens of microseconds."""
+        return bool(self.flags & 16)
+
+    @property
     def text(self) -> str:
         way = "two-way" if self.two_way else "tx-only"
         return (f"handheld {self.device or '?'} fw {self.fw}, {self.variant_name}, {way}, "
@@ -137,13 +146,29 @@ STATS_FIELDS = ("t_us", "unix_us", "reads", "errors", "timeouts", "checksum_fail
 
 
 def parse_stats(p: bytes) -> dict[str, int] | None:
+    """The STATS fields. A frame from older firmware (96 bytes) has time_source 0 and time_err_us 0, which
+    read as "not told": use the hello's flags for the clock then."""
     if len(p) < STATS.size:
         return None
-    return dict(zip(STATS_FIELDS, STATS.unpack(p[:STATS.size])))
+    out = dict(zip(STATS_FIELDS, STATS.unpack(p[:STATS.size])))
+    ext = STATS_EXT.unpack(p[STATS.size:STATS.size + STATS_EXT.size]) if len(p) >= STATS.size + STATS_EXT.size else (0, 0)
+    out["time_source"], out["time_err_us"] = ext
+    return out
 
 
 def pack_stats(**fields: int) -> bytes:
-    return STATS.pack(*(int(fields.get(name, 0)) for name in STATS_FIELDS))
+    """A STATS payload; the appended time fields only when time_source or time_err_us is given."""
+    body = STATS.pack(*(int(fields.get(name, 0)) for name in STATS_FIELDS))
+    if "time_source" in fields or "time_err_us" in fields:
+        body += STATS_EXT.pack(int(fields.get("time_source", 0)), int(fields.get("time_err_us", 0)))
+    return body
+
+
+def time_text(source: int, err_us: int) -> str:
+    """The Link screen's wording: "PPS ±20µs", "GPS ±1s", "PC", "none"."""
+    if source == TS_PPS:
+        return f"PPS ±{err_us / 1000:g}ms" if err_us >= 1000 else f"PPS ±{err_us}µs"
+    return {TS_NMEA: "GPS ±1s", TS_HOST: "PC"}.get(source, "none")
 
 
 def status_text(status: int) -> str:
@@ -151,4 +176,4 @@ def status_text(status: int) -> str:
 
 
 __all__ = ["Deframer", "cobs_decode", "cobs_encode", "crc16", "frame_encode"] + [n for n in dir() if n.isupper()] + [
-    "Hello", "hash12", "parse_hello", "parse_stats", "pack_stats", "status_text"]
+    "Hello", "hash12", "parse_hello", "parse_stats", "pack_stats", "status_text", "time_text"]

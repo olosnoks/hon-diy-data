@@ -51,6 +51,8 @@ def lib(build_dir: Path):
     L.hhhost_run.argtypes = [C.c_void_p, C.c_int]
     L.hhhost_run_until.argtypes = [C.c_void_p, C.c_double]
     L.hhhost_gps.argtypes = [C.c_void_p, C.c_char_p]
+    L.hhhost_pps_edge.argtypes = [C.c_void_p, C.c_int64]
+    L.hhhost_gps_at.argtypes = [C.c_void_p, C.c_char_p, C.c_int64]
     L.hhhost_set_write_budget.argtypes = [C.c_void_p, C.c_long]
     L.hhhost_set_stale.argtypes = [C.c_void_p, C.c_char_p]
     L.hhhost_time_set.restype = C.c_int64
@@ -188,6 +190,18 @@ class Handheld:
         for ch in body.encode():
             check ^= ch
         self.L.hhhost_gps(self.h, f"${body}*{check:02X}\r\n".encode())
+
+    def pps_edge(self, t_us: int) -> None:
+        """A rising edge of the GPS pulse, device time (esp_timer) in microseconds."""
+        self.L.hhhost_pps_edge(self.h, int(t_us))
+
+    def gps_at(self, sentence: str, t_us: int) -> None:
+        """Like gps(), with the device time the bytes were read at (what the pulse pairing uses)."""
+        body = sentence.strip().lstrip("$").split("*")[0]
+        check = 0
+        for ch in body.encode():
+            check ^= ch
+        self.L.hhhost_gps_at(self.h, f"${body}*{check:02X}\r\n".encode(), int(t_us))
 
     def mark(self) -> None:
         self.L.hhhost_mark(self.h)

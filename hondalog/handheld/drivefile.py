@@ -122,11 +122,12 @@ class DriveFile:
     @property
     def epoch_unix(self) -> float | None:
         """Wall clock (unix seconds, UTC) of file second 0. From the newest
-        GPS time record if there is one (the handheld has no battery clock,
-        so the header only knows the time if a fix came before the drive)."""
+        GPS time record (source 1, or 4 for GPS with the pulse) if there is
+        one (the handheld has no battery clock, so the header only knows the
+        time if a fix came before the drive)."""
         best = None
         for t_us, unix_us, source in self.times:
-            if best is None or (source == 1) >= (best[2] == 1):
+            if best is None or (source in F.TIME_FROM_GPS) >= (best[2] in F.TIME_FROM_GPS):
                 best = (t_us, unix_us, source)
         if best is not None:
             return (best[1] - (best[0] - self.t0_us)) / 1e6
