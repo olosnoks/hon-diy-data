@@ -108,20 +108,34 @@ HELLO (96 bytes):
 | 63 | u8 | link state (as LINK) |
 | 64 | u8, u8 | backend (0 USB KKL cable, 1 UART), link mode (1 = OBD2) |
 | 66 | u8 | channels in the handheld's map |
-| 67 | u8 | flags: 1 built-in map, 2 clock set, 4 clock from GPS, 8 SD card ok |
+| 67 | u8 | flags: 1 built-in map, 2 clock set, 4 clock from GPS, 8 SD card ok, 16 clock held to the GPS pulse (PPS) |
 | 68 | u32 | boot number |
 | 72 | u32 | baud rate |
 | 76 | u64 | `t_us` now |
 | 84 | i64 | wall clock now, unix microseconds (0 = not known) |
 | 92 | u16, u16 | hello interval (ms), largest payload |
 
-STATS (96 bytes): `u64 t_us, i64 unix_us`; the K-line since boot: `u32 reads,
+STATS (104 bytes; the first 96 are the original frame, a reader that stops
+there loses nothing): `u64 t_us, i64 unix_us`; the K-line since boot: `u32 reads,
 errors, timeouts, checksum_failures, retries, reconnects`; `u16 hz_c, u8
 link_state, u8 flags` (1 SD ok, 2 recording, 4 GPS fix, 8 clock set, 16
 stall trigger armed, 32 capturing, 64 laptop heard, 128 built-in map);
 `u32 drive_no, log_bytes, free_mb, markers, stall_count, nmea_good,
 nmea_bad`; this link since boot: `u32 tx_frames, tx_dropped, tx_bytes,
-rx_frames, rx_bad, ring_peak`.
+rx_frames, rx_bad, ring_peak`; then, from byte 96, `u8 time_source, u8[3]
+reserved, u32 time_err_us`.
+
+`time_source` says where `unix_us` comes from: 0 none (`unix_us` is 0), 1 GPS
+sentences only (good to about a second; `time_err_us` is 1000000), 2 the GPS
+pulse (PPS; `time_err_us` is the filter's estimate, normally 5 to 30), 3 set
+by the laptop. In HELLO and STATS `t_us` and `unix_us` are read at the same
+instant (the engine's snapshot), so `unix_us - t_us` is the device clock's
+offset to UTC at that moment, to the accuracy above: with source 2 that is
+what turns every device time in the stream (READ, TICK, EVENT) into a UTC
+time good to tens of microseconds, plus the crystal's drift between two
+STATS frames (a second apart: up to 20 µs). A STATS frame of 96 bytes (older
+firmware) has none of this; use HELLO's flags. The source falls from 2 back
+to 1 ten seconds after the last pulse pair.
 
 ### Laptop -> handheld (two-way firmware only)
 

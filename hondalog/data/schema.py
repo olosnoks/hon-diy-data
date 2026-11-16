@@ -317,11 +317,16 @@ SHARED_VIEWS: dict[str, str] = {
         JOIN drives d ON d.id = c.drive_id
         LEFT JOIN streams st ON st.drive_id = c.drive_id AND st.name = '{GPS_STREAM_NAME}'
         LEFT JOIN samples g ON g.drive_id = c.drive_id AND g.stream_id = st.id AND g.part = 0
-             AND (g.t, g.n) = (SELECT s.t, s.n FROM samples s
-                               WHERE s.drive_id = c.drive_id AND s.stream_id = st.id AND s.part = 0
-                                 AND s.v0 IS NOT NULL
-                                 AND s.t BETWEEN c.t_trigger - {NEAREST_FIX_S} AND c.t_trigger + {NEAREST_FIX_S}
-                               ORDER BY abs(s.t - c.t_trigger) LIMIT 1)""",
+             -- nearest fix by min(abs()), not ORDER BY abs(): SQLite 3.45.0/3.45.1 cannot see the
+             -- outer c in a correlated subquery's ORDER BY ("no such column: c.t_trigger")
+             AND g.t = (SELECT min(s.t) FROM samples s
+                        WHERE s.drive_id = c.drive_id AND s.stream_id = st.id AND s.part = 0 AND s.v0 IS NOT NULL
+                          AND s.t BETWEEN c.t_trigger - {NEAREST_FIX_S} AND c.t_trigger + {NEAREST_FIX_S}
+                          AND abs(s.t - c.t_trigger) = (
+                              SELECT min(abs(s2.t - c.t_trigger)) FROM samples s2
+                              WHERE s2.drive_id = c.drive_id AND s2.stream_id = st.id AND s2.part = 0 AND s2.v0 IS NOT NULL
+                                AND s2.t BETWEEN c.t_trigger - {NEAREST_FIX_S} AND c.t_trigger + {NEAREST_FIX_S}))
+             AND g.n = (SELECT min(s.n) FROM samples s WHERE s.drive_id = c.drive_id AND s.stream_id = st.id AND s.part = 0 AND s.v0 IS NOT NULL AND s.t = g.t)""",
     "drive_summary": """
         SELECT d.id AS drive_id, d.name AS drive, d.status AS status, d.end_reason AS end_reason,
                d.started_iso AS started, d.ended_iso AS ended,

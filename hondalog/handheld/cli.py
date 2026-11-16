@@ -181,8 +181,11 @@ def _status(args: argparse.Namespace) -> int:
         print(f"  link: {'two-way' if h.two_way else 'TX only (the GPS has the receive pin)'}, {h.baud} baud, "
               f"link revision {h.rev}")
         print(f"  ECU link: {P.LINK_NAMES.get(h.link_state, h.link_state)}; ECU id {h.ecu_id.hex(' ') or '-'}")
-        print(f"  clock: {'set' if h.flags & 2 else 'not set'}{' (GPS)' if h.flags & 4 else ''}; "
-              f"SD card: {'ok' if h.flags & 8 else 'none'}")
+        print(f"  clock: {'set' if h.flags & 2 else 'not set'}{' (GPS)' if h.flags & 4 else ''}"
+              f"{' (pulse: PPS)' if h.clock_from_pps else ''}; SD card: {'ok' if h.flags & 8 else 'none'}")
+        if st and st.get("time_source"):
+            print(f"  time: {P.time_text(st['time_source'], st.get('time_err_us', 0))} "
+                  f"({P.TS_NAMES.get(st['time_source'], '?')})")
         if st:
             print(f"  K-line: {st['reads']} reads, {st['errors']} errors, {st['timeouts']} timeouts, "
                   f"{st['hz_c'] / 100:.1f} Hz")

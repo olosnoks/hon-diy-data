@@ -271,7 +271,10 @@ class CydSim:
         flags = ((P.ST_SD_OK if self.sd else 0) | (P.ST_RECORDING if self._drive else 0)
                  | (P.ST_GPS_FIX if self.gps else 0) | (P.ST_TIME if self.unix_us(self.now) else 0)
                  | (P.ST_ARMED if self._armed else 0) | (P.ST_HOST if self.host_attached() else 0))
+        # the clock's source, as the firmware says it: sentences (about a second) with a GPS, else the laptop's, else none
+        source = P.TS_NMEA if self.gps else P.TS_HOST if self.time_set is not None else P.TS_NONE
         self._send(P.SF_STATS, P.pack_stats(
+            time_source=source, time_err_us=1_000_000 if source == P.TS_NMEA else 0,
             t_us=_us(self.now), unix_us=self.unix_us(self.now), reads=self.reads, errors=self.errors,
             hz_c=int(self.hz * 100), link_state=P.LINK_OK if self._up else P.LINK_OFF, flags=flags,
             drive_no=self._drive.file_no if self._drive else 0,

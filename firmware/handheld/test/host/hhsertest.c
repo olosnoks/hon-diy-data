@@ -118,7 +118,7 @@ TEST(test_framing)
 {
     uint8_t in[700], enc[720], dec[720], out[HH_SER_FRAME_MAX];
     CHECK(hh_crc16((const uint8_t *)"123456789", 9) == 0x29B1);
-    CHECK(sizeof(hh_ser_hello_t) == 96 && sizeof(hh_ser_stats_t) == 96 && sizeof(hh_ser_ack_t) == 8);
+    CHECK(sizeof(hh_ser_hello_t) == 96 && sizeof(hh_ser_stats_t) == 104 && sizeof(hh_ser_ack_t) == 8);
     CHECK(sizeof(hh_tap_read_t) == 12 && sizeof(hh_tap_tick_t) == 16 && sizeof(hh_tap_link_t) == 12 && sizeof(hh_tap_iso_t) == 12);
     CHECK(sizeof(hh_ser_time_rsp_t) == 24 && sizeof(hh_ser_file_info_t) == 12 && sizeof(hh_ser_file_data_t) == 16);
     CHECK(sizeof(hh_ser_list_t) == 8 && sizeof(hh_ser_read_file_t) == 12 && sizeof(hh_ser_put_begin_t) == 12);
@@ -991,6 +991,62 @@ TEST(test_no_card_ops)
     hhhost_free(h);
 }
 
+/* ---- the clock on the link: hello and stats carry the time source ---------------------------- */
+
+static void nmea_line(char *out, size_t cap, const char *body)
+{
+    uint8_t sum = 0;
+    for (const char *c = body; *c; c++) sum ^= (uint8_t)*c;
+    snprintf(out, cap, "$%s*%02X\r\n", body, sum);
+}
+
+TEST(test_time_source_on_the_link)
+{
+    hhsim_reset();
+    hhhost_t *h = hhhost_new(fresh_dir(), NULL, 0, NULL, hhsim_callbacks(), 1, 0);
+    hh_serial_t *s = hhhost_serial(h, 0, 0);
+    hh_core_t *core = hhhost_core(h);
+    (void)s;
+    rx_reset();
+    run(h, 3.0);
+    hh_ser_stats_t st;
+    hh_ser_hello_t hello;
+    run(h, 4.0);
+    memcpy(&st, last(HH_SF_STATS)->p, sizeof(st));
+    CHECK(last(HH_SF_STATS)->len == sizeof(st) && st.time_source == HH_TS_NONE && st.unix_us == 0 && st.time_err_us == 0);
+
+    /* 2026-11-15 12:35:19 UTC + k, the pulse at the start of each second of device time 5 + k */
+    const int64_t u0 = 1794746119LL;
+    for (int k = 0; k < 14; k++) {
+        char gga[128], rmc[128], body[128];
+        double t = 5.0 + k;
+        int sec = (int)((u0 + k) % 60);
+        run(h, t);
+        hh_core_pps_edge(core, (int64_t)(t * 1e6));
+        snprintf(body, sizeof(body), "GPGGA,1235%02d,3217.100,N,09007.200,W,1,08,0.9,95.4,M,-29.0,M,,", sec);
+        nmea_line(gga, sizeof(gga), body);
+        snprintf(body, sizeof(body), "GPRMC,1235%02d,A,3217.100,N,09007.200,W,022.4,084.4,151126,003.1,W", sec);
+        nmea_line(rmc, sizeof(rmc), body);
+        run(h, t + 0.12);
+        hh_core_gps_bytes_at(core, (const uint8_t *)gga, strlen(gga), (int64_t)((t + 0.12) * 1e6));
+        run(h, t + 0.65);
+        hh_core_gps_bytes_at(core, (const uint8_t *)rmc, strlen(rmc), (int64_t)((t + 0.65) * 1e6));
+    }
+    run(h, 20.5);
+    memcpy(&st, last(HH_SF_STATS)->p, sizeof(st));
+    memcpy(&hello, last(HH_SF_HELLO)->p, sizeof(hello));
+    CHECK(st.time_source == HH_TS_PPS && st.time_err_us >= 1 && st.time_err_us < 40 && (st.flags & HH_SER_ST_TIME));
+    CHECK((hello.flags & 2) && (hello.flags & 4) && (hello.flags & 16));
+    /* the pair (t_us, unix_us) is one instant: unix_us - t_us is the offset, whenever in the second it was taken */
+    int64_t off = st.unix_us - (int64_t)st.t_us;
+    CHECK(llabs(off - (u0 * 1000000LL - 5000000LL)) < 60);
+    CHECK(llabs((int64_t)hello.unix_us - (int64_t)hello.t_us - (u0 * 1000000LL - 5000000LL)) < 60);
+
+    /* the old reader's view of the same frame: the first 96 bytes are as they were */
+    CHECK(offsetof(hh_ser_stats_t, time_source) == 96 && offsetof(hh_ser_stats_t, ring_peak) == 92);
+    hhhost_free(h);
+}
+
 int main(void)
 {
     const char *base = getenv("TMPDIR");
@@ -1004,6 +1060,7 @@ int main(void)
     RUN(test_commands);
     RUN(test_map_upload);
     RUN(test_no_card_ops);
+    RUN(test_time_source_on_the_link);
     printf("%d checks, %d failed (files left in %s)\n", checks, failures, TMP);
     return failures ? 1 : 0;
 }

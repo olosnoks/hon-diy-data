@@ -158,8 +158,10 @@ static void push_hello(hh_serial_t *s)
         hh_snapshot_t snap;
         hh_core_snapshot(s->core, &snap);
         h.unix_us = snap.unix_us;
+        if (snap.unix_us) h.t_us = (uint64_t)snap.time_t_us;    /* the pair is for one instant */
     }
-    h.flags = (uint8_t)((info.builtin_map ? 1 : 0) | (h.unix_us ? 2 : 0) | (info.time_valid ? 4 : 0) | (info.sd_ok ? 8 : 0));
+    h.flags = (uint8_t)((info.builtin_map ? 1 : 0) | (h.unix_us ? 2 : 0) | (info.time_valid ? 4 : 0) | (info.sd_ok ? 8 : 0)
+                        | (info.time_source == HH_TS_PPS ? 16 : 0));
     h.hello_ms = (uint16_t)(HH_SER_HELLO_S * 1000);
     h.max_payload = HH_SER_MAX_PAYLOAD;
     hh_serial_push(s, HH_SF_HELLO, &h, sizeof(h), NULL, 0);
@@ -173,8 +175,11 @@ static void push_stats(hh_serial_t *s)
     memset(&st, 0, sizeof(st));
     hh_core_snapshot(s->core, &snap);
     const hh_link_stats_t *ls = hh_core_link_stats(s->core);
-    st.t_us = us(now(s));
+    /* (t_us, unix_us) is one instant: the laptop pairs them to carry the pulse's accuracy over to the stream's device times */
+    st.t_us = snap.unix_us ? (uint64_t)snap.time_t_us : us(now(s));
     st.unix_us = snap.unix_us;
+    st.time_source = snap.time_source;
+    st.time_err_us = snap.time_err_us;
     st.reads = snap.link.reads; st.errors = snap.link.errors;
     st.timeouts = ls->timeouts; st.checksum_failures = ls->checksum_failures;
     st.retries = ls->retries; st.reconnects = ls->reconnects;

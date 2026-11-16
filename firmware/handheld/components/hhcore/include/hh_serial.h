@@ -76,7 +76,7 @@ typedef struct HH_PACKED {
     uint8_t  link_state;            /* HH_LINK_* */
     uint8_t  backend, link_mode;    /* as in a drive file's header */
     uint8_t  n_ch;
-    uint8_t  flags;                 /* 1 built-in map, 2 clock set, 4 clock from GPS, 8 card ok */
+    uint8_t  flags;                 /* 1 built-in map, 2 clock set, 4 clock from GPS, 8 card ok, 16 clock from the GPS pulse (PPS) */
     uint32_t boot_no, baud;
     uint64_t t_us;                  /* device time now */
     int64_t  unix_us;               /* wall clock now, 0 = not known */
@@ -100,7 +100,10 @@ typedef struct HH_PACKED {
     uint8_t  link_state, flags;     /* HH_LINK_*, HH_SER_ST_* */
     uint32_t drive_no, log_bytes, free_mb, markers, stall_count, nmea_good, nmea_bad;
     uint32_t tx_frames, tx_dropped, tx_bytes, rx_frames, rx_bad, ring_peak;     /* this link, since boot */
-} hh_ser_stats_t;                   /* 96 bytes */
+    /* appended after the first revision: a reader that knows only the first 96 bytes ignores these */
+    uint8_t  time_source, rsv[3];   /* HH_TS_*: 0 none, 1 GPS sentences, 2 GPS pulse (PPS), 3 laptop */
+    uint32_t time_err_us;           /* estimate of unix_us's error, 0 = unknown (1000000 for sentences only) */
+} hh_ser_stats_t;                   /* 104 bytes (96 + 8) */
 
 typedef struct HH_PACKED { int64_t host_tx_us; uint64_t dev_rx_us, dev_tx_us; } hh_ser_time_rsp_t;     /* 24 */
 typedef struct HH_PACKED { uint8_t cmd, seq; int16_t status; uint32_t value; } hh_ser_ack_t;           /* 8 */

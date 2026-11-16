@@ -87,6 +87,9 @@ struct hh_core {
     hh_gps_t gps;
     double gps_at;                      /* clock time of the last RMC, < 0 = never */
     uint8_t time_valid;
+    hh_pps_t pps;                       /* the pulse clock (hh_pps.c) */
+    uint8_t ts_seen;                    /* the time source as of the last look: HH_TS_* */
+    int64_t ts_log_at;                  /* device us: write the next TIME record for PPS then */
     uint32_t markers, dropped, dropped_logged;
     hh_snapshot_t snap;
 
@@ -186,13 +189,72 @@ static void log_event(hh_core_t *c, double t, uint8_t code, uint8_t src, uint16_
     q_push(c, Q_SYNC, NULL, 0);         /* events are rare and are what the drive is kept for */
 }
 
-static void log_time(hh_core_t *c, double t, int64_t unix_us, uint8_t source)
+static void log_time_rec(hh_core_t *c, uint64_t t_us, int64_t unix_us, uint8_t source, uint32_t err_us, int32_t drift_ppb)
 {
     hh_rec_time_t r;
     if (!c->drive_open && !c->cap_open) return;
     memset(&r, 0, sizeof(r));
-    r.t_us = us(t); r.unix_us = unix_us; r.source = source;
+    r.t_us = t_us; r.unix_us = unix_us; r.source = source;
+    r.err_us = (uint16_t)(err_us > 65535 ? 65535 : err_us);
+    r.drift_ppb = drift_ppb;
     put_block(c, HH_B_TIME, 1, r.t_us, &r, sizeof(r));
+}
+
+static void log_time(hh_core_t *c, double t, int64_t unix_us, uint8_t source)
+{
+    log_time_rec(c, us(t), unix_us, source, 0, 0);
+}
+
+/* ---- the clock: pulse, sentences, or nothing (lock held) ---------------------- */
+
+static int64_t sys_time(hh_core_t *c) { return c->plat.get_time ? c->plat.get_time(c->plat.time_ctx) : 0; }
+
+static uint8_t time_source(hh_core_t *c, int64_t t_us)
+{
+    if (hh_pps_active(&c->pps, t_us)) return HH_TS_PPS;
+    if (c->time_valid) return HH_TS_NMEA;
+    return sys_time(c) > 0 ? HH_TS_HOST : HH_TS_NONE;
+}
+
+/* The wall clock at device time t_us (which is now): the pulse model while it holds, else the system clock. */
+static int64_t wall_us(hh_core_t *c, int64_t t_us)
+{
+    return hh_pps_active(&c->pps, t_us) ? hh_pps_unix_us(&c->pps, t_us) : sys_time(c);
+}
+
+static void log_time_pps(hh_core_t *c, int64_t t_us)
+{
+    log_time_rec(c, (uint64_t)t_us, hh_pps_unix_us(&c->pps, t_us), HH_TIME_PPS, hh_pps_err_us(&c->pps, t_us),
+                 (int32_t)llround(c->pps.drift * 1e9));
+}
+
+/* Look at the source. A TIME record when it becomes PPS, once a minute while it is (so a reader has a fresh
+ * anchor against the crystal's drift), and when it falls back to the sentences' time. */
+static void time_track(hh_core_t *c, int64_t t_us)
+{
+    uint8_t src = time_source(c, t_us), was = c->ts_seen;
+    c->ts_seen = src;
+    if (src == HH_TS_PPS) {
+        if (was != src || t_us >= c->ts_log_at) {
+            log_time_pps(c, t_us);
+            c->ts_log_at = t_us + 60000000;
+        }
+    } else if (was == HH_TS_PPS) {
+        log_time_rec(c, (uint64_t)t_us, sys_time(c), src == HH_TS_NMEA ? HH_TIME_GPS : HH_TIME_CLOCK, 0, 0);
+    }
+}
+
+/* A pulse and the time of the second it started: feed the filter, and put the system clock right once it holds. */
+static void pps_pair(hh_core_t *c, int64_t t_rx_us, int64_t utc_s)
+{
+    int r = hh_pps_time(&c->pps, t_rx_us, utc_s);
+    int64_t tn = us(now(c));
+    if ((r == HH_PPS_PAIR || r == HH_PPS_RELOCK) && c->pps.locked) {
+        int64_t model = hh_pps_unix_us(&c->pps, tn), have = sys_time(c), d = have - model;
+        if (c->plat.set_time && (!have || d > 2000 || d < -2000)) c->plat.set_time(c->plat.time_ctx, model);
+        c->time_valid = 1;
+    }
+    time_track(c, tn);
 }
 
 /* A read: always into the pre-trigger ring, and into the drive if one is open. */
@@ -265,7 +327,7 @@ static void fill_header(hh_core_t *c, hh_file_hdr_t *h, uint8_t kind, uint32_t n
     h->link_mode = c->iso_mode;
     h->nonce = nonce;
     h->t0_us = us(t);
-    int64_t wall = c->plat.get_time ? c->plat.get_time(c->plat.time_ctx) : 0;
+    int64_t wall = wall_us(c, (int64_t)us(now(c)));
     if (wall > 0) {
         h->unix_us_at_t0 = wall - (int64_t)(us(now(c)) - h->t0_us);
         h->flags |= HH_HF_TIME_VALID | (c->time_valid ? HH_HF_TIME_GPS : 0);
@@ -294,8 +356,9 @@ static void put_preamble(hh_core_t *c, double t)
         n += (size_t)w;
     }
     if (n) put_block(c, HH_B_NAMES, (uint16_t)c->alarms.n, us(t), text, (uint32_t)n);
-    int64_t wall = c->plat.get_time ? c->plat.get_time(c->plat.time_ctx) : 0;
-    if (wall > 0) log_time(c, now(c), wall, c->time_valid ? 1 : 2);
+    int64_t tn = (int64_t)us(now(c)), wall = wall_us(c, tn);
+    if (hh_pps_active(&c->pps, tn)) { log_time_pps(c, tn); c->ts_log_at = tn + 60000000; }
+    else if (wall > 0) log_time(c, now(c), wall, c->time_valid ? HH_TIME_GPS : HH_TIME_CLOCK);
 }
 
 static void drive_begin(hh_core_t *c, double t)
@@ -919,17 +982,44 @@ void hh_core_step(hh_core_t *c)
 
 /* ---- other tasks ----------------------------------------------------------------------- */
 
+void hh_core_pps_edge(hh_core_t *c, int64_t t_us)
+{
+    lock(c);
+    hh_pps_edge(&c->pps, t_us);
+    time_track(c, (int64_t)us(now(c)));
+    unlock(c);
+}
+
 void hh_core_gps_bytes(hh_core_t *c, const uint8_t *data, size_t len)
 {
+    hh_core_gps_bytes_at(c, data, len, (int64_t)us(now(c)));
+}
+
+void hh_core_gps_bytes_at(hh_core_t *c, const uint8_t *data, size_t len, int64_t t_rx_us)
+{
     for (size_t i = 0; i < len; i++) {
-        if (!hh_nmea_feed(&c->nmea, (char)data[i])) continue;
+        int got = hh_nmea_feed(&c->nmea, (char)data[i]);
+        if (!got) continue;
         double t = now(c);
         lock(c);
+        if (got == 2) {                 /* GGA: the first sentence after the pulse. Its date is the RMC's. */
+            int64_t last = c->gps.utc;
+            if (last > 1577836800) {
+                int64_t at = last / 86400 * 86400 + c->nmea.gga_tod;
+                if (at - last > 43200) at -= 86400;
+                else if (last - at > 43200) at += 86400;
+                pps_pair(c, t_rx_us, at);
+            }
+            unlock(c);
+            continue;
+        }
         c->gps = c->nmea.fix;
         c->gps.t_us = us(t);
         c->gps_at = t;
         tap(c, HH_TAP_GPS, &c->gps, sizeof(c->gps), NULL, 0);
-        if (c->gps.fix && c->gps.utc > 1577836800u) {       /* a date after 2020: the receiver knows the time */
+        if (c->gps.fix && c->gps.utc > 1577836800u) pps_pair(c, t_rx_us, c->gps.utc);
+        if (c->gps.fix && c->gps.utc > 1577836800u && !hh_pps_active(&c->pps, (int64_t)us(t))) {
+            /* a date after 2020: the receiver knows the time (to the second; the pulse, when there, does better) */
             int64_t unix_us = (int64_t)c->gps.utc * 1000000;
             int64_t have = c->plat.get_time ? c->plat.get_time(c->plat.time_ctx) : 0;
             int64_t off = have - unix_us;
@@ -1027,9 +1117,16 @@ void hh_core_snapshot(hh_core_t *c, hh_snapshot_t *out)
     s->log.free_mb = c->free_mb;
     s->map_ok = !c->plat.builtin_map;
     s->time_valid = c->time_valid;
+    {
+        int64_t tn = (int64_t)us(t);
+        s->time_source = time_source(c, tn);
+        s->time_err_us = s->time_source == HH_TS_PPS ? hh_pps_err_us(&c->pps, tn) : s->time_source == HH_TS_NMEA ? 1000000u : 0;
+        s->unix_us = wall_us(c, tn);
+        s->time_t_us = tn;
+        time_track(c, tn);
+    }
     s->standby = (uint8_t)(!c->drive_open && c->down_since >= 0 && t - c->down_since >= c->cfg.drive_gap_s);
     s->markers = c->markers;
-    s->unix_us = c->plat.get_time ? c->plat.get_time(c->plat.time_ctx) : 0;
     *out = *s;
     unlock(c);
 }
@@ -1059,9 +1156,28 @@ void hh_core_info(hh_core_t *c, hh_core_info_t *out)
     out->link_mode = c->iso_mode;
     out->builtin_map = c->plat.builtin_map;
     out->time_valid = c->time_valid;
+    out->time_source = time_source(c, (int64_t)us(now(c)));
     out->sd_ok = (uint8_t)(c->sd_ok && !c->sd_err);
     out->n_ch = (uint8_t)c->n_ch;
     out->boot_no = c->plat.boot_no;
+    unlock(c);
+}
+
+void hh_core_pps_info(hh_core_t *c, hh_pps_info_t *out)
+{
+    int64_t tn = (int64_t)us(now(c));
+    memset(out, 0, sizeof(*out));
+    lock(c);
+    out->source = time_source(c, tn);
+    out->locked = c->pps.locked;
+    out->err_us = c->pps.n_ok ? hh_pps_err_us(&c->pps, tn) : 0;
+    out->offset_us = c->pps.n_ok ? hh_pps_unix_us(&c->pps, tn) - tn : 0;
+    out->drift_ppm = c->pps.drift * 1e6;
+    out->jitter_us = hh_pps_jitter_us(&c->pps);
+    out->resid_us = c->pps.resid_us;
+    out->edges = c->pps.edges; out->glitches = c->pps.glitches; out->missed = c->pps.missed;
+    out->pairs = c->pps.pairs; out->stale = c->pps.stale; out->outliers = c->pps.outliers;
+    out->relocks = c->pps.relocks;
     unlock(c);
 }
 
@@ -1240,6 +1356,7 @@ hh_core_t *hh_core_init(void *mem, const hh_map_t *map, const hh_config_t *cfg, 
     c->state = ST_CONNECTING;
     c->probe_wait = PROBE_MIN_S; c->reopen_wait = REOPEN_MIN_S;
     c->last_emit = -1; c->gps_at = -1;
+    hh_pps_init(&c->pps);
     c->down_since = now(c);
     c->next_replan = REPLAN_EVERY;
     c->snap.link.state = HH_LINK_CONNECTING;

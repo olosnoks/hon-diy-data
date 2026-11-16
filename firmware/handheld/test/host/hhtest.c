@@ -653,7 +653,9 @@ TEST(test_nmea)
     const char *rmc = "$GPRMC,123519,A,3217.100,N,09007.200,W,022.4,084.4,151126,003.1,W*7F\r\n";
     int got = 0;
     for (const char *p = gga; *p; p++) got += hh_nmea_feed(&g, *p);
-    CHECK(got == 0 && g.fix.sats == 8 && g.fix.hdop_c == 90);
+    CHECK(got == 2 && g.fix.sats == 8 && g.fix.hdop_c == 90);      /* a GGA with a fix and a time says so (2) */
+    CHECK(g.gga_tod == 12 * 3600 + 35 * 60 + 19);
+    got = 0;
     for (const char *p = rmc; *p; p++) got += hh_nmea_feed(&g, *p);
     CHECK(got == 1 && g.fix.fix == 1);
     CHECK(NEAR(g.fix.lat_e7 / 1e7, 32 + 17.1 / 60, 1e-6) && NEAR(g.fix.lon_e7 / 1e7, -(90 + 7.2 / 60), 1e-6));

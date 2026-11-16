@@ -454,6 +454,8 @@ class CydPoller(threading.Thread):
             parts.append(("SD rec #%d" % d.get("drive_no", 0)) if flags & P.ST_RECORDING
                          else "SD ok" if flags & P.ST_SD_OK else "no SD")
             parts.append(f"K-line {d.get('timeouts', 0)} t/o {d.get('checksum_failures', 0)} cks")
+            if d.get("time_source"):            # older firmware does not say: nothing is shown rather than a guess
+                parts.append("TIME " + P.time_text(d["time_source"], d.get("time_err_us", 0)))
         parts.append("MAP MISMATCH #" + h.map_hash if self.map_mismatch else "map #" + h.map_hash)
         return " · ".join(parts)
 
