@@ -99,6 +99,9 @@ against the simulators and the host builds of the firmware cores.
 
 ### The app
 
+- Fixed a crash at start on Debian trixie (`QListView.update() takes exactly one
+  argument`): repainting every child after a theme or unit change now calls
+  `QWidget.update(w)`, since Debian's PySide6 binds item views' `update(index)`.
 - A new UI designed at 1366x768 for the ThinkPad T430, replacing the 0.1.0
   window: Sensors, Drive, Map 3D, Replay, Raw tools, Tune, Alarms and Map
   on F1 to F8, Daylight and Night themes (F9), every action on a key, state

@@ -140,7 +140,7 @@ class Shell(QMainWindow):
         for screen in self.screens:
             screen.retheme()
         for widget in self.findChildren(QWidget):
-            widget.update()
+            QWidget.update(widget)      # not widget.update(): item views override it with update(index) on Debian's PySide6
         self.update()
 
     def resizeEvent(self, event) -> None:
@@ -338,7 +338,7 @@ class Shell(QMainWindow):
         U.save(self.settings)
         self.map.units_changed()
         for widget in self.findChildren(QWidget):
-            widget.update()
+            QWidget.update(widget)      # not widget.update(): item views override it with update(index) on Debian's PySide6
         self.screens[self.current()].refresh(self.session.bus.now())
         chosen = U.as_dict()
         self.say("Units: " + ", ".join(chosen[f] for f, _, _ in QUANTITIES[:4]))
