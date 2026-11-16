@@ -7,6 +7,19 @@
         every drive on the card into the database (skips what is already in)
     hondalog-handheld info FILE...
         what is in a drive file, a capture file or a HANDHELD.MAP
+
+Over the handheld's USB-C cable (firmware/handheld/SERIAL.md; PORT is
+``cyd:`` = found by itself, or ``cyd:/dev/ttyUSB0``):
+
+    hondalog-handheld status [--port PORT]
+        who is there: firmware, variant, map, the link's counters
+    hondalog-handheld sync [--port PORT] [--db FILE] [--end-drive]
+        copy the card's drives to the laptop and import them (resumable)
+    hondalog-handheld push-map [--port PORT] [--map TOML] [--cfg FILE]
+        send HANDHELD.MAP (and HANDHELD.CFG); used from the next power-up
+    hondalog-handheld set-time [--port PORT]
+        set the handheld's clock from this computer's (when it has no GPS time)
+    hondalog-handheld command mark|ack-alarm|dtc|drive-stop|drive-start [--port PORT]
 """
 
 from __future__ import annotations
@@ -110,6 +123,133 @@ def _info(args: argparse.Namespace) -> int:
     return code
 
 
+# ---- over the serial link ----------------------------------------------------
+
+def _client(args: argparse.Namespace):
+    from .serial_link import PREFIX, CydClient
+    port = args.port if args.port.startswith(PREFIX) else PREFIX + args.port
+    cyd = CydClient(port)
+    hello = cyd.open()
+    print(hello.text)
+    return cyd
+
+
+def _status(args: argparse.Namespace) -> int:
+    from . import serial_proto as P
+    cyd = _client(args)
+    try:
+        cyd._frames(1.2)                    # a STATS frame comes once a second
+        h, st = cyd.hello, cyd.stats
+        assert h is not None
+        print(f"  link: {'two-way' if h.two_way else 'TX only (the GPS has the receive pin)'}, {h.baud} baud, "
+              f"link revision {h.rev}")
+        print(f"  ECU link: {P.LINK_NAMES.get(h.link_state, h.link_state)}; ECU id {h.ecu_id.hex(' ') or '-'}")
+        print(f"  clock: {'set' if h.flags & 2 else 'not set'}{' (GPS)' if h.flags & 4 else ''}; "
+              f"SD card: {'ok' if h.flags & 8 else 'none'}")
+        if st:
+            print(f"  K-line: {st['reads']} reads, {st['errors']} errors, {st['timeouts']} timeouts, "
+                  f"{st['hz_c'] / 100:.1f} Hz")
+            print(f"  this link: {st['tx_frames']} frames sent, {st['tx_dropped']} dropped, "
+                  f"{st['rx_frames']} commands heard, {st['rx_bad']} damaged")
+        print(f"  frames damaged on the way here: {cyd.damaged}")
+    finally:
+        cyd.close()
+    return 0
+
+
+def _sync(args: argparse.Namespace) -> int:
+    from .sync import sync
+
+    last = [""]
+
+    def progress(name: str, done: int, total: int) -> None:
+        if sys.stdout.isatty():
+            print(f"\r  {name}  {done}/{total} bytes", end="", flush=True)
+            last[0] = name
+    cyd = _client(args)
+    try:
+        report = sync(database=args.db, mirror=args.mirror, captures=not args.no_captures,
+                      end_drive=args.end_drive, do_import=not args.no_import, progress=progress, client=cyd)
+    finally:
+        cyd.close()
+    if last[0]:
+        print()
+    print(f"{report.mirror}: {len(report.fetched)} file(s) copied ({report.bytes} bytes), "
+          f"{len(report.present)} already here")
+    for name in report.open:
+        print(f"  {name}: still being written, not copied (--end-drive ends it first)")
+    for res in report.imported:
+        print(res)
+    return 1 if any(r.status == "failed" for r in report.imported) else 0
+
+
+def _push_map(args: argparse.Namespace) -> int:
+    from . import serial_proto as P
+    from .mapfile import build_map
+    amap = _load_map(args)
+    data = build_map(amap)
+    cyd = _client(args)
+    try:
+        cyd.push(P.F_MAP, data)
+        print(f"HANDHELD.MAP: map #{amap.version_hash} sent ({len(data)} bytes); the handheld uses it from its "
+              "next power-up")
+        if args.cfg:
+            skipped = cyd.push(P.F_CFG, Path(args.cfg).read_bytes())
+            print("HANDHELD.CFG sent" + (f"; the handheld will skip {skipped} line(s) it does not know"
+                                         if skipped else ""))
+    finally:
+        cyd.close()
+    return 0
+
+
+def _set_time(args: argparse.Namespace) -> int:
+    cyd = _client(args)
+    try:
+        taken = cyd.set_time()
+    finally:
+        cyd.close()
+    print("clock set" if taken else "not set: the handheld's GPS has already set its clock")
+    return 0
+
+
+def _command(args: argparse.Namespace) -> int:
+    import time as _time
+
+    from . import format as F
+    from . import serial_proto as P
+    from .serial_link import parse_event
+    cyd = _client(args)
+    try:
+        if args.what == "mark":
+            cyd.mark()
+        elif args.what == "ack-alarm":
+            cyd.ack_alarm()
+        elif args.what in ("drive-stop", "drive-start"):
+            cyd.drive(args.what == "drive-start")
+        elif args.what == "dtc":
+            cyd.request_dtc()
+            print("reading trouble codes (live data pauses for up to 10 s) ...")
+            end = _time.monotonic() + 15.0
+            while _time.monotonic() < end:
+                for ftype, _seq, payload in cyd._frames(0.1):
+                    ev = parse_event(payload) if ftype == P.SF_EVENT else None
+                    if ev is None:
+                        continue
+                    if ev[1] == F.EV_DTC:
+                        print(f"  {F.dtc_text(int(ev[4]))}")
+                        if ev[2] + 1 >= ev[3]:
+                            return 0
+                    elif ev[1] == F.EV_DTC_NONE:
+                        print("  no stored trouble codes")
+                        return 0
+            print("no answer: the ECU may not speak OBD2 (pre-1996 Hondas do not)")
+            return 1
+        print(f"{args.what}: ok")
+    finally:
+        cyd.close()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hondalog-handheld", description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -140,12 +280,49 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--events", type=int, default=20)
     p.set_defaults(fn=_info)
 
+    port_help = "the handheld: cyd: (found by itself), cyd:/dev/ttyUSB0, cyd:/dev/ttyUSB0@460800"
+    p = sub.add_parser("status", help="ask the handheld who it is, over its USB-C cable")
+    p.add_argument("--port", default="cyd:", help=port_help)
+    p.set_defaults(fn=_status)
+
+    p = sub.add_parser("sync", help="copy the handheld's drives over its USB-C cable and import them")
+    p.add_argument("--port", default="cyd:", help=port_help)
+    p.add_argument("--db", help="database file or its folder (default: ~/hondalog/hondalog.db)")
+    p.add_argument("--mirror", help="where the copied files go (default: ~/hondalog/handheld/<device>)")
+    p.add_argument("--end-drive", dest="end_drive", action="store_true",
+                   help="end the drive being recorded first, so it is copied too")
+    p.add_argument("--no-captures", dest="no_captures", action="store_true", help="drives only")
+    p.add_argument("--no-import", dest="no_import", action="store_true", help="copy only")
+    p.set_defaults(fn=_sync)
+
+    p = sub.add_parser("push-map", help="send your address map (and HANDHELD.CFG) to the handheld")
+    p.add_argument("--port", default="cyd:", help=port_help)
+    p.add_argument("--map", help="address map TOML (default: your map)")
+    p.add_argument("--variant")
+    p.add_argument("--cfg", help="also send this file as HANDHELD.CFG")
+    p.set_defaults(fn=_push_map)
+
+    p = sub.add_parser("set-time", help="set the handheld's clock from this computer's")
+    p.add_argument("--port", default="cyd:", help=port_help)
+    p.set_defaults(fn=_set_time)
+
+    p = sub.add_parser("command", help="press a button on the handheld from here")
+    p.add_argument("what", choices=("mark", "ack-alarm", "dtc", "drive-stop", "drive-start"))
+    p.add_argument("--port", default="cyd:", help=port_help)
+    p.set_defaults(fn=_command)
+
     args = parser.parse_args(argv)
     try:
         return int(args.fn(args))
     except addressmap.MapError as exc:
         print(f"hondalog-handheld: {exc}", file=sys.stderr)
         return 1
+    except Exception as exc:
+        from .serial_link import CydError
+        if isinstance(exc, (CydError, OSError)):
+            print(f"hondalog-handheld: {exc}", file=sys.stderr)
+            return 1
+        raise
 
 
 if __name__ == "__main__":
