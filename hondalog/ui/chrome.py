@@ -13,7 +13,7 @@ from .controls import Button
 from .theme import T
 
 TABS = (("F1", "Sensors"), ("F2", "Drive"), ("F3", "Map 3D"), ("F4", "Replay"),
-        ("F5", "Raw tools"), ("F6", "Tune"), ("F7", "Alarms"))
+        ("F5", "Raw tools"), ("F6", "Tune"), ("F7", "Alarms"), ("F8", "Map"))
 
 
 def _mmss(seconds: float) -> str:
@@ -304,7 +304,7 @@ def paint_banner(p: QPainter, r: QRectF, title: str, cause: str, owner=None) -> 
 class AlarmStrip(QWidget):
     """Bottom 32 px: the worst active alarm and warning, or 'No active alarms'."""
 
-    HINTS = "Space mark · F1–F7 screens · F9 theme · Esc acknowledge"
+    HINTS = "Space mark · F1–F8 screens · F9 theme · Esc acknowledge"
 
     def __init__(self, parent=None):
         super().__init__(parent)

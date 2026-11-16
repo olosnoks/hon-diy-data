@@ -62,7 +62,7 @@ def test_wired_implementations_satisfy_the_protocols():
     assert isinstance(session.tables, wired.RomTableModel) and isinstance(session.tables, ad.TableModel)
     demo = build_session(demo=True)                 # --demo keeps the simulated car
     assert isinstance(demo.ecu, be.DemoSource) and isinstance(demo.tables, be.DemoTableModel)
-    assert demo.tables.writable and not demo.extra_sources
+    assert demo.tables.writable and [type(s) for s in demo.extra_sources] == [be.DemoGps]   # its GPS
 
 
 def test_specs_take_limits_from_the_maps_alarm_rules_and_fan_tiles_follow_the_map(tmp_path):

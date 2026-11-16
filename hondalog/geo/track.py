@@ -177,12 +177,13 @@ class Track:
 
     # ---- level of detail ----
 
-    def lod(self, zoom: int, px: float = 1.0) -> np.ndarray:
-        """Indices of the fixes to draw at ``zoom``: a fix is kept when it is in
-        another ``px``-sized pixel cell than the fix before it, so a parked
-        car is one point and an hour of driving is about as many points as
-        the line is pixels long. Both ends of every break are kept."""
-        key = int(zoom) * 16 + int(round(px * 4))
+    def lod(self, zoom: int, px: float = 1.5) -> np.ndarray:
+        """Indices of the fixes to draw at ``zoom``: a fix is kept when it is at
+        least ``px`` screen pixels from the last fix kept (radial distance), so
+        a parked car is one point, GPS jitter smaller than a pixel is gone, and
+        an hour of driving is about as many points as the line is pixels long
+        divided by ``px``. Both ends of every gap are kept, and the last fix."""
+        key = int(zoom) * 64 + int(round(px * 8))
         hit = self._lod.get(key)
         if hit is not None:
             return hit
@@ -190,16 +191,30 @@ class Track:
         if n <= 2:
             out = np.arange(n)
         else:
-            scale = proj.world_px(zoom) / px
-            gx = np.floor(self.x * scale).astype(np.int64)
-            gy = np.floor(self.y * scale).astype(np.int64)
-            keep = np.empty(n, dtype=bool)
-            keep[0] = True
-            keep[1:] = (gx[1:] != gx[:-1]) | (gy[1:] != gy[:-1])
-            keep |= self.breaks
-            keep[:-1] |= self.breaks[1:]            # the last fix before a gap
-            keep[-1] = True
-            out = np.flatnonzero(keep)
+            scale = proj.world_px(zoom)
+            # first a cheap pass: drop fixes in the same pixel cell as the one before
+            gx = np.floor(self.x * scale / px).astype(np.int64)
+            gy = np.floor(self.y * scale / px).astype(np.int64)
+            must = self.breaks.copy()
+            must[:-1] |= self.breaks[1:]            # the last fix before a gap
+            must[-1] = True
+            cand = np.empty(n, dtype=bool)
+            cand[0] = True
+            cand[1:] = (gx[1:] != gx[:-1]) | (gy[1:] != gy[:-1])
+            idx = np.flatnonzero(cand | must)
+            # then the radial pass on what is left
+            xs = (self.x[idx] * scale).tolist()
+            ys = (self.y[idx] * scale).tolist()
+            forced = must[idx].tolist()
+            tol2 = px * px
+            keep = [0]
+            lx, ly = xs[0], ys[0]
+            for k in range(1, len(idx)):
+                x, y = xs[k], ys[k]
+                if forced[k] or (x - lx) * (x - lx) + (y - ly) * (y - ly) >= tol2:
+                    keep.append(k)
+                    lx, ly = x, y
+            out = idx[np.array(keep, dtype=np.intp)]
         self._lod[key] = out
         return out
 

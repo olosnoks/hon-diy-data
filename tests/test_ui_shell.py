@@ -216,7 +216,7 @@ def test_a_tile_repainted_band_by_band_equals_one_painted_whole(app, kind):
 def test_function_keys_switch_screens_and_f9_toggles_theme(active, app, settings):
     win = active
     for i, k in enumerate((Qt.Key_F1, Qt.Key_F2, Qt.Key_F3, Qt.Key_F4, Qt.Key_F5, Qt.Key_F6,
-                           Qt.Key_F7)):
+                           Qt.Key_F7, Qt.Key_F8)):
         key(win, k)
         assert win.current() == i and win.tabs.current == i
     assert not theme.T.night

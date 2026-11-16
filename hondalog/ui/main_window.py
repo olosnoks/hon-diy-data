@@ -1,4 +1,4 @@
-"""The shell: status bar, tab bar, seven screens, alarm strip, the keyboard
+"""The shell: status bar, tab bar, eight screens, alarm strip, the keyboard
 map (HANDOFF section 7) and the one frame timer everything paints from."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication, QEvent, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPalette
 from PySide6.QtWidgets import (QApplication, QInputDialog, QLineEdit, QMainWindow, QMenu,
-                               QStackedWidget, QVBoxLayout, QWidget)
+                               QMessageBox, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
 from . import adapters as ad
@@ -17,6 +17,7 @@ from .chrome import AlarmStrip, StallBanner, StatusBar, TabBar
 from .perf import Perf
 from .screens.alarms import AlarmsScreen
 from .screens.drive import DriveScreen
+from .screens.gpsmap import MapScreen
 from .screens.map3d import Map3DScreen
 from .screens.rawtools import RawScreen
 from .screens.replay import ReplayScreen
@@ -27,7 +28,7 @@ from .units import PRESETS, QUANTITIES, U
 
 ICON = Path(__file__).parent.parent / "data" / "hondalog.svg"
 FRAME_MS = 33                   # about 30 fps
-SENSORS, DRIVE, MAP3D, REPLAY, RAW, TUNE, ALARMS = range(7)
+SENSORS, DRIVE, MAP3D, REPLAY, RAW, TUNE, ALARMS, MAP = range(8)
 
 
 def apply_palette(app) -> None:
@@ -83,8 +84,9 @@ class Shell(QMainWindow):
         self.raw = RawScreen(session)
         self.tune = TuneScreen(session, self.settings)
         self.alarms = AlarmsScreen(session)
+        self.map = MapScreen(session, self.replay, self.settings)
         self.screens = [self.sensors, self.drive, self.map3d, self.replay, self.raw,
-                        self.tune, self.alarms]
+                        self.tune, self.alarms, self.map]
         for screen in self.screens:
             self.stack.addWidget(screen)
 
@@ -98,6 +100,7 @@ class Shell(QMainWindow):
         self.sensors.menuRequested.connect(self.tile_menu)
         self.drive.markRequested.connect(self.mark)
         self.drive.menuRequested.connect(self.drive_menu)
+        self.map.openRequested.connect(self.open_capture)
         T.changed.connect(self.retheme)
 
         self.perf: Perf | None = Perf() if profile else None
@@ -163,6 +166,14 @@ class Shell(QMainWindow):
         if ok:
             self.show_screen(REPLAY)
         return ok
+
+    def open_capture(self, ref) -> None:
+        """A pin of the Map screen's All stalls view: that capture in Replay
+        (None: Replay already has it, as in the demo)."""
+        if ref is None:
+            self.show_screen(REPLAY)
+        elif not self.open_in_replay(ref):
+            self.say(f"Cannot open {getattr(ref, 'name', ref)}")
 
     def open_stall(self) -> None:
         cap = self.session.banner
@@ -244,7 +255,77 @@ class Shell(QMainWindow):
         units.addSeparator()
         note = units.addAction("Logs and exports stay in the address map's units")
         note.setEnabled(False)
+        self.tiles_menu(menu.addMenu("Map tiles"))
         return menu
+
+    def tiles_menu(self, menu: QMenu) -> QMenu:
+        """Settings > Map tiles: downloads on or off, the server, the cache."""
+        from ..geo import tiles as gt
+        from .screens.gpsmap import tile_settings
+        cfg = tile_settings(self.settings)
+        source = gt.source_for(cfg["url"], cfg["attribution"])
+        online = QAction("Download map tiles (off: only what is cached)", menu, checkable=True)
+        online.setChecked(cfg["online"])
+        online.toggled.connect(lambda on: self._set_tiles(online=on))
+        menu.addAction(online)
+        menu.addSeparator()
+        menu.addAction(f"Server: {source.url}").setEnabled(False)
+        if source.attribution:
+            menu.addAction(f"Shown on the map: {source.attribution}").setEnabled(False)
+        menu.addAction("Tile server…", self.ask_tile_server)
+        if cfg["url"]:
+            menu.addAction("Back to OpenStreetMap", lambda: self._set_tiles(url="", attribution=""))
+        menu.addSeparator()
+        tiles = self.map.tiles
+        size = tiles.cache.size_bytes() / 1e6 if tiles is not None else 0.0
+        menu.addAction(f"Cache: {size:.0f} of {cfg['cap_mb']:.0f} MB in {gt.cache_root()}").setEnabled(False)
+        menu.addAction("Clear the tile cache…", self.clear_tile_cache)
+        return menu
+
+    def _set_tiles(self, **items) -> None:
+        for key, value in items.items():
+            name = {"url": "map/tile_url", "attribution": "map/tile_attribution", "online": "map/online"}[key]
+            self.settings.setValue(name, ("true" if value else "false") if key == "online" else value)
+        self.map.configure_tiles()
+        cfg = items.get("online")
+        if cfg is not None:
+            self.say("Map tiles: downloading what the map shows" if cfg else "Map tiles: cached only")
+        elif "url" in items:
+            self.say(f"Map tiles from {items['url'] or 'OpenStreetMap'}")
+
+    def ask_tile_server(self) -> None:
+        from ..geo import tiles as gt
+        from .screens.gpsmap import tile_settings
+        cfg = tile_settings(self.settings)
+        url, ok = QInputDialog.getText(self, "hondalog", "Tile URL with {z} {x} {y} (empty: OpenStreetMap):",
+                                       text=cfg["url"] or gt.OSM_URL)
+        if not ok:
+            return
+        url = url.strip()
+        if url == gt.OSM_URL:
+            url = ""
+        if url and not gt.TileSource(url).valid:
+            self.say("A tile URL needs {z}, {x} and {y} and http(s) or file")
+            return
+        attribution = ""
+        if url:
+            current = cfg["attribution"] or ""
+            attribution, ok = QInputDialog.getText(self, "hondalog", "Attribution the server's terms ask for "
+                                                   "(shown on the map):", text=current or gt.OSM_ATTRIBUTION)
+            if not ok:
+                return
+        self._set_tiles(url=url, attribution=attribution.strip())
+
+    def clear_tile_cache(self) -> None:
+        tiles = self.map.tiles
+        if tiles is None:
+            return
+        if QApplication.platformName() not in ("offscreen", "minimal") and QMessageBox.question(
+                self, "hondalog", f"Delete the cached map tiles in {tiles.cache.dir}?") != QMessageBox.Yes:
+            return
+        tiles.clear_cache()
+        self.map.canvas._layout()
+        self.say("Tile cache cleared")
 
     def set_units(self, field: str = "", unit: str = "", preset: str = "") -> None:
         """Pick display units (one quantity, or a preset) and remember them."""
@@ -253,6 +334,7 @@ class Shell(QMainWindow):
         else:
             U.set_unit(field, unit)
         U.save(self.settings)
+        self.map.units_changed()
         for widget in self.findChildren(QWidget):
             widget.update()
         self.screens[self.current()].refresh(self.session.bus.now())
@@ -399,7 +481,7 @@ class Shell(QMainWindow):
     def handle_key(self, event) -> bool:
         key, mods = event.key(), event.modifiers()
         typing = isinstance(QApplication.focusWidget(), QLineEdit)
-        if Qt.Key_F1 <= key <= Qt.Key_F7:
+        if Qt.Key_F1 <= key <= Qt.Key_F8:
             self.show_screen(key - Qt.Key_F1)
             return True
         if key == Qt.Key_F9:
@@ -431,6 +513,7 @@ class Shell(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.timer.stop()
+        self.map.close_tiles()
         QApplication.instance().removeEventFilter(self)
         try:
             T.changed.disconnect(self.retheme)
