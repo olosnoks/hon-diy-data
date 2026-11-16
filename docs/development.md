@@ -99,8 +99,13 @@ The end-to-end run against `hondalog-sim` on a real pseudo-terminal:
    and math channels, and a stall capture (RPM to 0) that plain `sqlite3`
    can see.
 2. The same with the ECU going silent (a power cut).
-3. The window, offscreen at 1366x768, against a second simulator run: a
-   mark, a memory sweep, the stall banner, the capture in Replay.
+3. The handheld's serial stream (`hondalog-cydsim` on a pty): a drive with
+   its stall and GPS, the `gps_track` and `stall_locations` views, GPX /
+   KML / GeoJSON read back, then `hondalog-handheld sync`.
+4. The window, offscreen at 1366x768, against a second simulator run: a
+   mark, a memory sweep, the stall banner, the capture in Replay, the Map
+   screen (the capture, All stalls, a pin into Replay, a click on the track
+   moving the cursor).
 
 It also **rewrites `docs/screenshots/sim-*.png`**. Check `git status`
 afterwards and commit or restore them.
@@ -115,14 +120,15 @@ python3 tools/bench_ui.py --onscreen --seconds 20                  # on the real
 
 Runs the real app against `sim:` and measures, per screen: frame rate,
 frame time, CPU as a share of one core, and latency from the last serial
-byte to the painted pixel.
+byte to the painted pixel. The Map scenarios use a one-hour drive with a
+GPS fix every 0.1 s and the fixture tiles cached on disk.
 
 | Option | Does |
 |---|---|
 | `--seconds N` | Per scenario (default 8) |
 | `--onscreen` | Use the real display |
 | `--theme daylight` or `night` | |
-| `--only NAME ...` | Just these scenarios: `sensors`, `drive`, `map3d`, `map3d-orbit`, `replay-live`, `replay-play`, `rawtools-sweep`, `tune`, `alarms`, `sensors-again` |
+| `--only NAME ...` | Just these scenarios: `sensors`, `drive`, `map3d`, `map3d-orbit`, `replay-live`, `replay-play`, `rawtools-sweep`, `tune`, `alarms`, `map-pan`, `map-play`, `sensors-again` |
 | `--json FILE` | Also write the results as JSON |
 | `--check` | Exit 1 if a target is missed |
 | `--no-blackbox` | Leave the simulated black box out |
@@ -140,9 +146,10 @@ QT_QPA_PLATFORM=offscreen python3 tools/screenshots.py                # 2D fallb
 
 Saves every screen in both themes at exactly 1366x768 to
 `docs/screenshots/`, then three states the plain screens do not show
-(`replay-compare`, `rawtools-rank`, `tune-rom`). It uses the demo data
-frozen at one moment, so the pictures repeat exactly and can be compared
-with `docs/mockups/`. Run it after changing how a screen looks, under
+(`replay-compare`, `rawtools-rank`, `tune-rom`), and the Map screen
+(`map-*`) on four drives around Pearl, MS with fixture tiles. It uses the
+demo data frozen at one moment, so the pictures repeat exactly and can be
+compared with `docs/mockups/`. Run it after changing how a screen looks, under
 `xvfb-run` so that Map 3D and Tune are drawn in 3D, and commit the result.
 
 ### Others
@@ -153,6 +160,7 @@ with `docs/mockups/`. Run it after changing how a screen looks, under
 | `python3 bench/bench_data.py` | Database write, open and histogram timings, and size per hour. `--hours N` |
 | `python3 bench/bench_layout.py` | The comparison of storage layouts quoted in the architecture page |
 | `python3 -m hondalog.bench.expr_bench` | CPU cost of math channels and alarms against the budget. `--json` |
+| `tools/fixture_tiles.py` | Stand-in map tiles of the Pearl test loop, drawn on demand behind a `.invalid` URL, for the screenshots, the bench and the tests: none of them asks a real tile server for anything. Every tool and the test suite also set `HONDALOG_TILES=offline` |
 | `tools/mockup-render/shoot.py` | Photographs the design mockup pages (`*.dc.html`, made by `docs/design/mockup-src/build.py`) at 1366x768 into PNGs like those in `docs/mockups/`. Needs Playwright and Chrome; reads `pages/` and writes `out/` in the folder it runs from |
 
 ## mypy scope

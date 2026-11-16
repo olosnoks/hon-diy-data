@@ -394,7 +394,7 @@ class TileFetcher:
             self._stop = True
             self._cv.notify_all()
         for th in self._threads:
-            th.join(timeout=TIMEOUT_S + 1)
+            th.join(timeout=1.0)              # daemon threads: a request in flight is left to time out
 
     # ---- workers ----
 
