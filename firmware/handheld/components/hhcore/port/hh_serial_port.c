@@ -37,6 +37,10 @@
 #define UART_TX_BUF     4096
 #define UART_RX_BUF     16384   /* an HL upload has three 2.7 KB lines in flight, and the card can stall a write for 100 ms: 9 KB at 921600 baud */
 
+
+/* esp_timer time of the last byte from the laptop (0 = never): the sleep check stays awake while it talks */
+volatile int64_t hh_serial_last_rx_us;
+
 static const char *TAG = "hhserial";
 
 static hh_serial_t ser;
@@ -102,6 +106,7 @@ static void rx_task(void *arg)
             int m = uart_read_bytes(ser_port, buf + 1, more, 0);
             if (m > 0) n += m;
         }
+        hh_serial_last_rx_us = esp_timer_get_time();
         hh_serial_rx(&ser, buf, (size_t)n);
         hh_serial_tick(&ser);
     }

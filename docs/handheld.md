@@ -643,7 +643,9 @@ standard OBD2 (ISO 9141-2) instead and logs PIDs. The link then reads
 When a drive has ended (the ECU silent for `drive_gap_s`, 120 s) and a
 further `sleep_after_s` (300 s) has passed, the handheld closes its files,
 turns the screen off and goes into deep sleep. So by default it sleeps
-about seven minutes after key-off.
+about seven minutes after key-off. It does not sleep while the laptop is
+talking to it over the USB-C cable (a map upload, `cyd_debug.py`, the app):
+the link has to be quiet for 2 minutes first.
 
 Asleep, it wakes every `sleep_probe_s` (20 s), asks the ECU for about
 5 seconds without lighting the screen, and goes back to sleep if nothing

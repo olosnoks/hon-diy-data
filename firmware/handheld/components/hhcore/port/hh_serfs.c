@@ -21,6 +21,7 @@
  * is called: hh_serial does that (map_hold).
  */
 #include <ctype.h>
+#include <errno.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +30,13 @@
 #include <unistd.h>
 
 #include "hh_serial.h"
+
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#define SERFS_WARN(...) ESP_LOGW("serfs", __VA_ARGS__)
+#else
+#define SERFS_WARN(...) ((void)0)
+#endif
 
 #define TMP_NAME "HANDHELD.TMP"
 #define MAP_TMP  "MAP/" HH_SER_MAPUP_TMP
@@ -256,8 +264,19 @@ static int fs_mapup_write(void *ctx, uint32_t offset, const uint8_t *data, uint1
     hh_serfs_t *fs = ctx;
     if (!fs->mup) return HH_SER_E_STATE;
     /* flushed: "received" in the ack means it has been handed to the card, which is what a resume counts on */
-    if (fseek(fs->mup, (long)offset, SEEK_SET) != 0 || fwrite(data, 1, len, fs->mup) != len || fflush(fs->mup) != 0) {
-        mup_drop(fs);
+    errno = 0;
+    int step = 0;
+    if (fseek(fs->mup, (long)offset, SEEK_SET) != 0) step = 1;
+    else if (fwrite(data, 1, len, fs->mup) != len) step = 2;
+    else if (fflush(fs->mup) != 0) step = 3;
+    if (step) {
+        /* keep MAP/UPLOAD.TMP: close it so the next MAPUP_OPEN with keep = bytes held resumes instead of
+           starting the whole file again (a single bad write used to throw away megabytes) */
+        SERFS_WARN("map upload: %s failed at offset %u len %u, errno %d (%s); temp file kept for resume",
+                   step == 1 ? "seek" : step == 2 ? "write" : "flush", (unsigned)offset, (unsigned)len, errno,
+                   strerror(errno));
+        fclose(fs->mup);
+        fs->mup = NULL;
         return HH_SER_E_IO;
     }
     return HH_SER_OK;
