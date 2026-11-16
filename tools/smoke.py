@@ -5,6 +5,9 @@ Part 1 (no GUI): LiveSession (poller -> pipeline -> recorder) on the sim pty:
                  a drive in the database with raw bytes, math channels, and a
                  stall capture (RPM to 0) that plain sqlite3 can see.
 Part 1b:         the same with the ECU going silent (power cut).
+Part 1c:         the handheld's USB serial stream (hondalog-cydsim on a pty,
+                 port "cyd:"): a recorded drive with the handheld's stall, then
+                 "hondalog-handheld sync" pulling its SD drives into the database.
 Part 2 (offscreen GUI): main window at 1366x768 against a second sim run,
         marker, memory sweep, stall banner, replay; saves screenshots to
         docs/screenshots/sim-*.png.
@@ -146,6 +149,43 @@ def headless_power_cut():
           f"hondalog-log rm removed {event.path.drive}; {len(left)} drive(s) left")
 
 
+def headless_cyd():
+    print("Part 1c: the handheld (CYD) over its USB serial port, hondalog-cydsim on a pty")
+    amap = addressmap.load_user_map()
+    link, sd = str(TMP / "cyd-pty"), TMP / "cyd-sd"
+    proc = subprocess.Popen([sys.executable, "-m", "hondalog.handheld.cydsim", "--link", link, "--sd", str(sd),
+                             "--map", str(addressmap.user_map_path()), "--stall-after", "6", "--restart-after", "0"],
+                            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True)
+    print("  cydsim:", proc.stdout.readline().strip())
+    live = LiveSession(amap)
+    try:
+        poller = live.connect("cyd:" + link)
+        check(poller.ready.wait(5) and poller.hello is not None and poller.hello.two_way,
+              f"hello: {poller.hello.text if poller.hello else '(none)'}")
+        check(not poller.map_mismatch, f"the handheld runs this map (#{amap.version_hash})")
+        rec = live.start_recording()
+        end = time.monotonic() + 30
+        while rec.events.empty() and time.monotonic() < end:
+            time.sleep(0.1)
+        check(not rec.events.empty(), "stall capture saved from the handheld's stream")
+        check(poller.lost == 0 and poller._deframer.bad == 0, f"link: {poller.link_text()}")
+    finally:
+        live.close()
+    with open_log(rec.path) as native:
+        check(native.meta.get("source") == "cyd" and "gps" in native.streams,
+              f"drive {rec.path.name}: source cyd, {len(native.streams)} streams with GPS")
+    from hondalog.handheld import cli
+    try:
+        code = cli.main(["sync", "--port", "cyd:" + link, "--end-drive"])
+    finally:
+        proc.terminate()
+        proc.wait()
+    conn = sqlite3.connect(rec.path.db)
+    n = conn.execute("SELECT count(*) FROM drives WHERE meta LIKE '%\"source\": \"handheld\"%'").fetchone()[0]
+    conn.close()
+    check(code == 0 and n >= 1, f"hondalog-handheld sync: {n} drive(s) from the handheld's SD card")
+
+
 def gui(docs: Path):
     print("Part 2: offscreen GUI at 1366x768")
     from hondalog import ui  # noqa: F401
@@ -253,5 +293,6 @@ if __name__ == "__main__":
     print(f"screenshots go to {docs}")
     headless()
     headless_power_cut()
+    headless_cyd()
     gui(docs)
     print(f"ALL OK  (scratch files in {TMP})")
