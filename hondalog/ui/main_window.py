@@ -272,7 +272,8 @@ class Shell(QMainWindow):
         self.say(problem or f"First contact on {port.strip()} …")
 
     def ask_port(self) -> None:
-        port, ok = QInputDialog.getText(self, "hondalog", "Serial port (e.g. /dev/ttyUSB0):",
+        port, ok = QInputDialog.getText(self, "hondalog", "Serial port (e.g. /dev/ttyUSB0, or the handheld: "
+                                        "cyd:/dev/ttyUSB1):",
                                         text=str(self.settings.value("port/last", "")))
         if ok and port.strip():
             self.connect_port(port.strip())
@@ -356,6 +357,9 @@ class Shell(QMainWindow):
             link = getattr(s.ecu, "link_text", lambda: "")()
             self.tabs.set_info(f"{s.port or 'no port'} · map {s.map_name()} · {n} ch "
                                f"· {unverified} unverified" + (f" · {link}" if link else ""))
+            notice = getattr(s.ecu, "take_notice", lambda: "")()
+            if notice:
+                self.say(notice)
             report = getattr(s.ecu, "first_contact_report", None)
             if report is not None and not getattr(self, "_fc_seen", True):
                 self._fc_seen = True

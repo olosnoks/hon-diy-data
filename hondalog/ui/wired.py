@@ -5,7 +5,9 @@ built against. This module is what ``build_session()`` wires for real use:
 
     LinkSource      ECU: hondalog.live.LiveSession over the W1 poller
                     (per-read publishing, per-channel rates, link counters,
-                    expert unlock, first contact, verified marks in the map)
+                    expert unlock, first contact, verified marks in the map),
+                    or over the handheld's USB serial stream ("CYD (serial)",
+                    ``cyd:`` ports: hondalog.handheld.serial_link)
     MathSource      W3 math channels as the "MATH" source
     BlackboxSource  W2 BlackboxReader on the poller's time axis
     PipelineAlarms  W3 alarm engine (plus plain limits for the black box rails)
@@ -23,6 +25,7 @@ No widgets in here. See docs/ui-adapters.md.
 from __future__ import annotations
 
 import collections
+import os
 import threading
 import time
 from datetime import datetime
@@ -44,6 +47,7 @@ from ..data.library import Library
 from ..live import BLACKBOX_STREAM, LiveSession
 from ..logger import LINK, log_dir
 from ..mapping import correlate, mapedit
+from ..handheld import serial_link as cyd
 from ..mapping.verify import FAIL, PASS, PLAUSIBLE, VerificationSession, scripts_for
 from ..transport import CommandBlocked
 from . import adapters as ad
@@ -96,6 +100,7 @@ class LinkSource(be.PollerSource):
         self.first_contact_report = None
         self._fc_thread: threading.Thread | None = None
         self._fc_progress = ""
+        self._notice_said = ""
 
     # -- specs --
 
@@ -126,6 +131,30 @@ class LinkSource(be.PollerSource):
         return out
 
     # -- Connectable --
+
+    def ports(self):
+        """The K-line cables and simulators, then the handheld on its USB-C
+        port ("CYD (serial)": the CH340, /dev/hondalog-cyd or hondalog-cydsim)."""
+        handhelds = cyd.list_ports()
+        theirs = {os.path.realpath(name[len(cyd.PREFIX):]) for name, _ in handhelds}
+        out = [(dev, label) for dev, label in super().ports() if os.path.realpath(dev) not in theirs]
+        out += handhelds
+        out.append((cyd.PREFIX + "sim", "CYD (serial)  cyd:sim  (built-in handheld simulator, two-way)"))
+        out.append((cyd.PREFIX + "sim:p1", "CYD (serial)  cyd:sim:p1  (built-in handheld simulator, GPS on P1, TX only)"))
+        return out
+
+    @property
+    def is_cyd(self) -> bool:
+        return cyd.is_cyd_port(self.port or "")
+
+    def take_notice(self) -> str:
+        """A message for the status line, once: the handheld's map is not this one, ..."""
+        p = self.poller
+        text = getattr(p, "warning", "") if p is not None else ""
+        if not text or text == self._notice_said:
+            return ""
+        self._notice_said = text
+        return "Handheld: " + text
 
     def reload_map(self) -> None:
         """Read the map file again (after an edit or a verified mark)."""
@@ -195,6 +224,8 @@ class LinkSource(be.PollerSource):
     def link_text(self) -> str:
         """One line of link health for the info bar."""
         p = self.poller
+        if p is not None and getattr(p, "source", "") == "cyd":
+            return p.link_text()            # the handheld's link: frames, losses, its SD, the map
         if p is None or p.state != pl.OK:
             return ""
         rates = p.class_rates()
@@ -285,6 +316,10 @@ class LinkSource(be.PollerSource):
 
     def status(self) -> ad.SourceStatus:
         st = super().status()
+        if cyd.is_sim_port(self.port or ""):
+            st.simulated = True
+        if self.is_cyd and st.state == ad.CONNECTING:
+            st.detail = "waiting for the handheld"
         if st.state == ad.OK:
             st.queue = len(self.live.frames)
             self.live.frames.clear()        # nobody drains them here: the bus is the UI's queue
