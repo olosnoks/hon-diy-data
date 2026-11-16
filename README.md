@@ -584,9 +584,19 @@ named `bb_...`.
 **Build and flash** (needs internet for the first build):
 
 ```sh
-pip install platformio
-cd firmware/blackbox && pio run -t upload
+scripts/build-firmware.sh blackbox                        # host tests, then the build
+scripts/build-firmware.sh blackbox --flash /dev/ttyACM0   # ... and flash it
 ```
+
+The script installs PlatformIO into `~/.hondalog-pio` the first time. If
+ESP-IDF 5.3 is already on the machine, name the script that sets it up and
+PlatformIO is left out: `HH_IDF_ENV=~/esp/esp-idf/export.sh
+scripts/build-firmware.sh blackbox` (it runs `. $HH_IDF_ENV && idf.py -B build
+build` in `firmware/blackbox`). For the handheld it also runs the PC simulator
+checks (`make -C firmware/handheld/sim lvgl test`, needs `libpng-dev`, which
+the script installs) when that folder is in the checkout. Logs go to
+`build-logs/`. By hand: `pip install platformio; cd firmware/blackbox && pio
+run -t upload`.
 
 **Other commands:** `hondalog-bb list`, `config [--set key=value] [--save]`,
 `selftest`, `csv FILE`, `cal RAIL --low METER SHOWN --high METER SHOWN`.
