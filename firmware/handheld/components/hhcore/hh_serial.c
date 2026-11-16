@@ -77,9 +77,9 @@ void hh_serial_init(hh_serial_t *s, const hh_clock_t *clk, uint8_t *mem, uint32_
     hh_ring_init(&s->ring, mem, mem ? size : 0);
     s->variant = variant;
 #ifdef HH_SERIAL_TX_ONLY
-    caps &= (uint16_t)~(HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT);
+    caps &= (uint16_t)~(HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP);
 #endif
-    if (!(caps & HH_SER_CAP_RX)) caps &= (uint16_t)~(HH_SER_CAP_FILES | HH_SER_CAP_PUT);
+    if (!(caps & HH_SER_CAP_RX)) caps &= (uint16_t)~(HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP);
     s->caps = caps;
     s->baud = baud;
     s->last_rx = -1;
@@ -142,7 +142,7 @@ static void push_hello(hh_serial_t *s)
     h.rev = HH_SER_REV;
     h.variant = s->variant;
     h.caps = s->caps;
-    if (!info.sd_ok) h.caps &= (uint16_t)~(HH_SER_CAP_FILES | HH_SER_CAP_PUT);
+    if (!info.sd_ok) h.caps &= (uint16_t)~(HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP);
     strncpy(h.fw, HH_FW_VERSION, sizeof(h.fw) - 1);
     memcpy(h.device, info.device, sizeof(h.device));
     memcpy(h.map_hash, info.map_hash, sizeof(h.map_hash));
@@ -316,6 +316,144 @@ static void cmd_put(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *p,
     }
 }
 
+/* ---- MAP/ uploads ---------------------------------------------------------------- */
+
+/* "MAP/" and an 8.3 name: 1-8 of A-Z 0-9 _ - ~ $, optionally a dot and 0-3 of the same. No other
+ * folder, no "..", no lower case, no spaces. The temporary file's own name is not one to upload. */
+static int mapup_name_ok(const char *name, size_t len)
+{
+    if (len < 5 || len > HH_SER_MAPUP_NAME_MAX || memcmp(name, "MAP/", 4) != 0) return 0;
+    const char *f = name + 4;
+    size_t n = len - 4, base = 0, ext = 0;
+    int dot = 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = f[i];
+        if (c == '.') {
+            if (dot || base == 0) return 0;
+            dot = 1;
+        } else if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '~' || c == '$') {
+            if (dot) ext++; else base++;
+        } else {
+            return 0;
+        }
+    }
+    if (base == 0 || base > 8 || ext > 3) return 0;
+    return !(len == 4 + sizeof(HH_SER_MAPUP_TMP) - 1 && memcmp(f, HH_SER_MAPUP_TMP, sizeof(HH_SER_MAPUP_TMP) - 1) == 0);
+}
+
+/* The upload is over (or abandoned): the temporary file goes, and the map reader has its files. */
+static void mapup_release(hh_serial_t *s)
+{
+    if (s->mapup_active) { if (s->fs.mapup_abort) s->fs.mapup_abort(s->fs.ctx); s->mapup_active = 0; }
+    if (s->mapup_held) { s->mapup_held = 0; if (s->map_hold) s->map_hold(0); }
+}
+
+/* Quiet for a while: the map reader may have its files back (the old ones are whole until a commit);
+ * the temporary file stays where it is. */
+static void mapup_pause(hh_serial_t *s)
+{
+    if (!s->mapup_held) return;
+    if (s->fs.mapup_pause) s->fs.mapup_pause(s->fs.ctx);
+    s->mapup_held = 0;
+    if (s->map_hold) s->map_hold(0);
+}
+
+/* An upload that exists but is paused takes the folder again: 0, or a status for the ACK. */
+static int mapup_take(hh_serial_t *s)
+{
+    if (s->mapup_held) return HH_SER_OK;
+    if (s->map_hold && s->map_hold(1) != 0) return HH_SER_E_BUSY;     /* the reader is still drawing: try again */
+    s->mapup_held = 1;
+    if (s->mapup_active) {
+        int rc = s->fs.mapup_open(s->fs.ctx, s->mapup_name, s->mapup_size, s->mapup_got);
+        if (rc != HH_SER_OK) { mapup_release(s); return rc; }       /* the temporary file is gone: start the file again */
+    }
+    return HH_SER_OK;
+}
+
+static void cmd_mapup(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *p, size_t len)
+{
+    if (!s->fs.mapup_open || !s->fs.mapup_write || !s->fs.mapup_commit || !(s->caps & HH_SER_CAP_MAPUP)) {
+        ack(s, type, seq, HH_SER_E_UNSUPPORTED, 0);
+        return;
+    }
+    s->mapup_t = now(s);
+    if (type == HH_SC_MAPUP_OPEN) {
+        hh_ser_mapup_open_t o;
+        int rc;
+        if (len < sizeof(o)) { ack(s, type, seq, HH_SER_E_ARG, 0); return; }
+        memcpy(&o, p, sizeof(o));
+        const char *name = (const char *)p + sizeof(o);
+        if (len != sizeof(o) + o.name_len || !mapup_name_ok(name, o.name_len)
+            || o.size == 0 || o.size > HH_SER_MAPUP_SIZE_MAX) { ack(s, type, seq, HH_SER_E_REFUSED, 0); return; }
+        if (s->mapup_active && s->mapup_size == o.size && s->mapup_crc == o.crc32
+            && strlen(s->mapup_name) == o.name_len && memcmp(s->mapup_name, name, o.name_len) == 0) {
+            rc = mapup_take(s);                             /* the same file again: carry on where it stopped */
+            ack(s, type, seq, rc, rc == HH_SER_OK ? s->mapup_got : 0);
+            return;
+        }
+        if (s->mapup_active) { if (s->fs.mapup_abort) s->fs.mapup_abort(s->fs.ctx); s->mapup_active = 0; }
+        if (!s->mapup_held && (rc = mapup_take(s)) != HH_SER_OK) { ack(s, type, seq, rc, 0); return; }
+        rc = s->fs.mapup_open(s->fs.ctx, name, o.size, 0);
+        if (rc != HH_SER_OK) { ack(s, type, seq, rc, 0); return; }
+        memcpy(s->mapup_name, name, o.name_len);
+        s->mapup_name[o.name_len] = 0;
+        s->mapup_size = o.size; s->mapup_crc = o.crc32; s->mapup_got = 0; s->mapup_active = 1;
+        ack(s, type, seq, HH_SER_OK, 0);
+    } else if (type == HH_SC_MAPUP_WRITE) {
+        hh_ser_mapup_write_t w;
+        if (len < sizeof(w) + 1) { ack(s, type, seq, HH_SER_E_ARG, 0); return; }
+        if (!s->mapup_active) { ack(s, type, seq, HH_SER_E_STATE, 0); return; }
+        memcpy(&w, p, sizeof(w));
+        const uint8_t *data = p + sizeof(w);
+        uint32_t n = (uint32_t)(len - sizeof(w));
+        if (hh_crc32(0, data, n) != w.crc32) { ack(s, type, seq, HH_SER_E_CRC, s->mapup_got); return; }
+        if ((uint64_t)w.offset + n <= s->mapup_got) { ack(s, type, seq, HH_SER_OK, s->mapup_got); return; }   /* sent twice */
+        if (w.offset != s->mapup_got) { ack(s, type, seq, HH_SER_E_OFFSET, s->mapup_got); return; }
+        if ((uint64_t)w.offset + n > s->mapup_size) { ack(s, type, seq, HH_SER_E_ARG, s->mapup_got); return; }
+        int rc = mapup_take(s);
+        if (rc != HH_SER_OK) { ack(s, type, seq, rc == HH_SER_E_BUSY ? rc : HH_SER_E_STATE, 0); return; }
+        rc = s->fs.mapup_write(s->fs.ctx, w.offset, data, (uint16_t)n);
+        if (rc != HH_SER_OK) {
+            if (s->fs.mapup_abort) s->fs.mapup_abort(s->fs.ctx);
+            s->mapup_active = 0;
+            ack(s, type, seq, rc, 0);
+            return;
+        }
+        s->mapup_got += n;
+        ack(s, type, seq, HH_SER_OK, s->mapup_got);
+    } else if (type == HH_SC_MAPUP_STATUS) {
+        hh_ser_mapup_info_t i;
+        memset(&i, 0, sizeof(i));
+        if (s->mapup_active) {
+            i.state = s->mapup_held ? HH_SER_MU_OPEN : HH_SER_MU_PAUSED;
+            i.got = s->mapup_got; i.size = s->mapup_size; i.crc32 = s->mapup_crc;
+            memcpy(i.name, s->mapup_name, sizeof(i.name));
+        }
+        hh_serial_push(s, HH_SF_MAPUP, &i, sizeof(i), NULL, 0);
+        ack(s, type, seq, s->mapup_active ? HH_SER_OK : HH_SER_E_STATE, s->mapup_active ? s->mapup_got : 0);
+    } else {
+        hh_ser_mapup_commit_t c;
+        memset(&c, 0, sizeof(c));
+        memcpy(&c, p, len < sizeof(c) ? len : sizeof(c));
+        if (c.flags & HH_SER_MAPUP_ABORT) { mapup_release(s); ack(s, type, seq, HH_SER_OK, 0); return; }
+        if (!s->mapup_active) { ack(s, type, seq, HH_SER_E_STATE, 0); return; }
+        if (s->mapup_got != s->mapup_size) { ack(s, type, seq, HH_SER_E_STATE, s->mapup_got); return; }
+        int rc = mapup_take(s);             /* the rename must not meet an open file: the reader is held off first */
+        if (rc != HH_SER_OK) { ack(s, type, seq, rc == HH_SER_E_BUSY ? rc : HH_SER_E_STATE, 0); return; }
+        rc = s->fs.mapup_commit(s->fs.ctx, s->mapup_name, s->mapup_size, s->mapup_crc);
+        s->mapup_active = 0;                /* done, or removed: either way there is nothing to resume */
+        if (c.flags & HH_SER_MAPUP_FINAL) mapup_release(s);
+        s->mapup_t = now(s);
+        ack(s, type, seq, rc, rc == HH_SER_OK ? s->mapup_size : 0);
+    }
+}
+
+void hh_serial_tick(hh_serial_t *s)
+{
+    if (s->mapup_held && now(s) - s->mapup_t > HH_SER_MAPUP_IDLE_S) mapup_pause(s);
+}
+
 static void dispatch(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *p, size_t len)
 {
     hh_core_t *c = s->core;
@@ -360,6 +498,9 @@ static void dispatch(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *p
     case HH_SC_LIST_FILES: cmd_list(s, seq, p, len); break;
     case HH_SC_READ_FILE: cmd_read(s, seq, p, len); break;
     case HH_SC_PUT_BEGIN: case HH_SC_PUT_DATA: case HH_SC_PUT_END: cmd_put(s, type, seq, p, len); break;
+    case HH_SC_MAPUP_OPEN: case HH_SC_MAPUP_WRITE: case HH_SC_MAPUP_STATUS: case HH_SC_MAPUP_COMMIT:
+        cmd_mapup(s, type, seq, p, len);
+        break;
     default:
         ack(s, type, seq, HH_SER_E_UNSUPPORTED, 0);
         break;

@@ -45,6 +45,7 @@ void ui_port_cpu(int *core0, int *core1);
 void ui_port_map_kick(void);                    /* there is work for mapsvc_work() */
 void ui_port_map_lock(void);                    /* guards the hand-off; never held for long */
 void ui_port_map_unlock(void);
+void ui_port_map_wait(int ms);                  /* sleep a little (the caller is not the map worker) */
 void *ui_port_map_alloc(size_t n);              /* canvases and the tile cache: PSRAM on the board */
 void ui_port_map_free(void *p);
 const char *ui_port_map_dir(void);              /* the MAP folder: "/sd/MAP" */

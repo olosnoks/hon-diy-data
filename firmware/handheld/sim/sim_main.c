@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <dirent.h>
+#include <unistd.h>
 
 #include "lvgl.h"
 #include "hh_data.h"
@@ -53,6 +55,7 @@ void ui_port_map_kick(void)
 }
 void ui_port_map_lock(void) {}
 void ui_port_map_unlock(void) {}
+void ui_port_map_wait(int ms) { (void)ms; }       /* the worker runs in place: nothing to wait for */
 void *ui_port_map_alloc(size_t n) { return malloc(n); }
 void ui_port_map_free(void *p) { free(p); }
 const char *ui_port_map_dir(void) { return map_dir; }
@@ -471,6 +474,26 @@ static int body_pixels(uint32_t hex)
     return n;
 }
 
+#define RETRY_MS_SIM 5000       /* ui_map.c's RETRY_MS */
+
+/* how many of this process's open files are the map's MAP.IDX / MAP.DAT */
+static int open_map_files(void)
+{
+    int n = 0;
+    DIR *d = opendir("/proc/self/fd");
+    struct dirent *e;
+    while (d && (e = readdir(d)) != NULL) {
+        char link[300], target[512];
+        snprintf(link, sizeof(link), "/proc/self/fd/%s", e->d_name);
+        ssize_t len = readlink(link, target, sizeof(target) - 1);
+        if (len <= 0) continue;
+        target[len] = 0;
+        n += strstr(target, "/testmap/MAP/MAP.IDX") != NULL || strstr(target, "/testmap/MAP/MAP.DAT") != NULL;
+    }
+    if (d) closedir(d);
+    return n;
+}
+
 static bool has_label(const ui_map_info_t *mi, const char *text)
 {
     for (int i = 0; i < mi->n_labels; i++) if (strstr(mi->labels[i], text)) return true;
@@ -589,6 +612,25 @@ static void test_map(void)
     CHECK(find_text(lv_screen_active(), "hondalog-handheld map-build"), "the message gives the map-build command");
     map_dir = keep;
     mapsvc_reopen();
+
+    /* a MAP/ upload over the USB cable has the folder: the files are closed (a rename needs that), the screen says
+     * why, and the map comes back when the upload lets go */
+    start_map(false, HH_SCENE_DRIVE, HH_ROUTE_STATE_ST, 1500, 2000);
+    ui_map_info(&mi);
+    CHECK(mi.status == MAPSVC_OK && open_map_files() == 2, "before an upload: a map, MAP.IDX and MAP.DAT open (%d)", open_map_files());
+    CHECK(mapsvc_hold(1) == 0, "hold: the worker lets go");
+    CHECK(open_map_files() == 0, "hold: no map file is open (%d)", open_map_files());
+    run(30000);                                      /* the car moves on: the next picture is drawn without the files */
+    ui_map_info(&mi);
+    CHECK(mi.status == MAPSVC_UPDATING && mi.message && strstr(mi.message_title, "UPDATED"), "the screen says the map is being updated (status %d, %s)",
+          mi.status, mi.message_title);
+    CHECK(open_map_files() == 0, "held through a redraw: still closed (%d)", open_map_files());
+    CHECK(mapsvc_hold(1) == 0, "asking again is fine");
+    mapsvc_hold(0);
+    run(RETRY_MS_SIM + 2000);
+    ui_map_info(&mi);
+    CHECK(mi.status == MAPSVC_OK && !mi.message && open_map_files() == 2, "after the upload: the map is back (status %d, %d files open)",
+          mi.status, open_map_files());
 }
 
 /* ---- render budget ------------------------------------------------------------ */

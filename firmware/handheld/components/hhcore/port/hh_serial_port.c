@@ -89,7 +89,7 @@ static void rx_task(void *arg)
     (void)arg;
     for (;;) {
         int n = uart_read_bytes(ser_port, buf, 1, pdMS_TO_TICKS(100));
-        if (n <= 0) continue;
+        if (n <= 0) { hh_serial_tick(&ser); continue; }     /* quiet: drop an upload that has gone silent */
         size_t more = 0;
         if (uart_get_buffered_data_len(ser_port, &more) == ESP_OK && more) {
             if (more > sizeof(buf) - 1) more = sizeof(buf) - 1;
@@ -97,6 +97,7 @@ static void rx_task(void *arg)
             if (m > 0) n += m;
         }
         hh_serial_rx(&ser, buf, (size_t)n);
+        hh_serial_tick(&ser);
     }
 }
 #endif
@@ -129,7 +130,7 @@ int hh_serial_port_start(hh_core_t *core, const hh_config_t *cfg, int sd_ok)
     hh_serial_init(&ser, &clk, mem, size, HH_SER_VARIANT_GPS_P1, HH_SER_CAP_LOG, (uint32_t)cfg->serial_baud);
 #else
     hh_serial_init(&ser, &clk, mem, size, HH_SER_VARIANT_DEFAULT,
-                   HH_SER_CAP_RX | HH_SER_CAP_LOG | (sd_ok ? HH_SER_CAP_FILES | HH_SER_CAP_PUT : 0),
+                   HH_SER_CAP_RX | HH_SER_CAP_LOG | (sd_ok ? HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP : 0),
                    (uint32_t)cfg->serial_baud);
     if (sd_ok) hh_serfs_init(&serfs, "/sd", core, &ser.fs);
 #endif
@@ -151,6 +152,8 @@ int hh_serial_port_start(hh_core_t *core, const hh_config_t *cfg, int sd_ok)
              HH_SERIAL_TX_ONLY ? "tx-only (GPS on P1)" : "two-way");
     return 0;
 }
+
+void hh_serial_port_set_map_hold(int (*hold)(int on)) { ser.map_hold = hold; }
 
 void hh_serial_port_status(uint8_t *mode, uint8_t *host, uint32_t *frames, uint32_t *dropped)
 {

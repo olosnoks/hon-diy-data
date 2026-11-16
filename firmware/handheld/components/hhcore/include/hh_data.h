@@ -74,6 +74,9 @@ void hh_snapshot(hh_snapshot_t *out);   /* lock-protected copy, cheap, safe at 3
 void hh_mark(void);                     /* button long-press: marker */
 void hh_ack_alarm(void);
 void hh_core_start(void);               /* starts link, gps, logger tasks */
+/* The map reader's side of a MAP/ upload over the USB-C link: hold(1) closes MAP/MAP.IDX and MAP/MAP.DAT and keeps
+ * the reader off the folder (returns 0 when they are closed), hold(0) lets it open them again. Call after hh_core_start. */
+void hh_serial_port_set_map_hold(int (*hold)(int on));
 int  hh_display_rotation(void);         /* 0 or 180, from HANDHELD.CFG `rotate`; valid after hh_core_start */
 
 /* ---- added ---- */

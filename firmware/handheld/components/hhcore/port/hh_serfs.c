@@ -11,6 +11,14 @@
  * place of the old file, which is kept as HANDHELD.MBK / HANDHELD.CBK. The
  * handheld reads both files once, at start: the new one is used from the
  * next power-up.
+ *
+ * Files into MAP/ (the offline map) go to MAP/UPLOAD.TMP. Once the whole
+ * temporary file has been read back from the card and its length and CRC32
+ * are right, it is renamed over the real file (the old one is moved aside
+ * first when the card will not rename over it, and put back if that fails).
+ * Nothing else in MAP/ is touched, and a file that fails the check leaves
+ * the old one as it was. The map reader must have let go of MAP/ before this
+ * is called: hh_serial does that (map_hold).
  */
 #include <ctype.h>
 #include <dirent.h>
@@ -23,6 +31,8 @@
 #include "hh_serial.h"
 
 #define TMP_NAME "HANDHELD.TMP"
+#define MAP_TMP  "MAP/" HH_SER_MAPUP_TMP
+#define MAP_OLD  "MAP/UPLOAD.OLD"
 
 static void path_of(const hh_serfs_t *fs, uint8_t kind, uint32_t no, char *out, size_t cap)
 {
@@ -210,6 +220,98 @@ static int fs_put_end(void *ctx, uint8_t kind, uint32_t size, uint32_t crc, uint
     return HH_SER_OK;
 }
 
+/* ---- MAP/ uploads ------------------------------------------------------------------ */
+
+static void mup_drop(hh_serfs_t *fs)
+{
+    char tmp[280];
+    if (fs->mup) { fclose(fs->mup); fs->mup = NULL; }
+    snprintf(tmp, sizeof(tmp), "%s/" MAP_TMP, fs->root);
+    remove(tmp);
+}
+
+static int fs_mapup_open(void *ctx, const char *name, uint32_t size, uint32_t keep)
+{
+    hh_serfs_t *fs = ctx;
+    char path[280];
+    (void)name; (void)size;
+    snprintf(path, sizeof(path), "%s/" MAP_TMP, fs->root);
+    if (keep) {                         /* carry on with the file that is there */
+        if (fs->mup) { fclose(fs->mup); fs->mup = NULL; }
+        FILE *f = fopen(path, "r+b");
+        if (f && (fseek(f, 0, SEEK_END) != 0 || ftell(f) < (long)keep)) { fclose(f); f = NULL; }
+        fs->mup = f;
+        return f ? HH_SER_OK : HH_SER_E_IO;
+    }
+    mup_drop(fs);
+    snprintf(path, sizeof(path), "%s/MAP", fs->root);
+    mkdir(path, 0777);                  /* exists: fine */
+    snprintf(path, sizeof(path), "%s/" MAP_TMP, fs->root);
+    fs->mup = fopen(path, "wb");
+    return fs->mup ? HH_SER_OK : HH_SER_E_IO;
+}
+
+static int fs_mapup_write(void *ctx, uint32_t offset, const uint8_t *data, uint16_t len)
+{
+    hh_serfs_t *fs = ctx;
+    if (!fs->mup) return HH_SER_E_STATE;
+    /* flushed: "received" in the ack means it has been handed to the card, which is what a resume counts on */
+    if (fseek(fs->mup, (long)offset, SEEK_SET) != 0 || fwrite(data, 1, len, fs->mup) != len || fflush(fs->mup) != 0) {
+        mup_drop(fs);
+        return HH_SER_E_IO;
+    }
+    return HH_SER_OK;
+}
+
+static void fs_mapup_pause(void *ctx)
+{
+    hh_serfs_t *fs = ctx;
+    if (fs->mup) { fclose(fs->mup); fs->mup = NULL; }
+}
+
+static void fs_mapup_abort(void *ctx) { mup_drop(ctx); }
+
+static int fs_mapup_commit(void *ctx, const char *name, uint32_t size, uint32_t crc)
+{
+    hh_serfs_t *fs = ctx;
+    char tmp[280], final[280], old[280];
+    int bad = fs->mup && fclose(fs->mup) != 0;      /* (no handle when it was paused: the file is there all the same) */
+    fs->mup = NULL;
+    snprintf(tmp, sizeof(tmp), "%s/" MAP_TMP, fs->root);
+    if (bad) { remove(tmp); return HH_SER_E_IO; }
+
+    /* read it back from the card: what counts is what is there */
+    FILE *f = fopen(tmp, "rb");
+    uint8_t small[256];
+    size_t cap = 4096;
+    uint8_t *buf = malloc(cap);
+    if (!buf) { buf = small; cap = sizeof(small); }
+    uint32_t got = 0, sum = 0;
+    size_t n;
+    int rc = HH_SER_OK;
+    if (!f) { if (buf != small) free(buf); remove(tmp); return HH_SER_E_IO; }
+    while ((n = fread(buf, 1, cap, f)) > 0) { sum = hh_crc32(sum, buf, n); got += (uint32_t)n; }
+    if (ferror(f)) rc = HH_SER_E_IO;
+    else if (got != size || sum != crc) rc = HH_SER_E_CRC;
+    fclose(f);
+    if (buf != small) free(buf);
+    if (rc != HH_SER_OK) { remove(tmp); return rc; }
+
+    snprintf(final, sizeof(final), "%s/%s", fs->root, name);
+    if (rename(tmp, final) != 0) {      /* the card will not rename over a file: move the old one aside */
+        snprintf(old, sizeof(old), "%s/" MAP_OLD, fs->root);
+        remove(old);
+        int had = rename(final, old) == 0;
+        if (rename(tmp, final) != 0) {
+            if (had) rename(old, final);
+            remove(tmp);
+            return HH_SER_E_IO;
+        }
+        if (had) remove(old);
+    }
+    return HH_SER_OK;
+}
+
 void hh_serfs_init(hh_serfs_t *fs, const char *root, hh_core_t *core, hh_serial_fs_t *ops)
 {
     memset(fs, 0, sizeof(*fs));
@@ -218,4 +320,6 @@ void hh_serfs_init(hh_serfs_t *fs, const char *root, hh_core_t *core, hh_serial_
     ops->ctx = fs;
     ops->list = fs_list; ops->read = fs_read;
     ops->put_begin = fs_put_begin; ops->put_data = fs_put_data; ops->put_end = fs_put_end;
+    ops->mapup_open = fs_mapup_open; ops->mapup_write = fs_mapup_write;
+    ops->mapup_commit = fs_mapup_commit; ops->mapup_pause = fs_mapup_pause; ops->mapup_abort = fs_mapup_abort;
 }

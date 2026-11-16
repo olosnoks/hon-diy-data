@@ -10,12 +10,13 @@ static const float MPP[HM_MAX_LEVELS] = {4.0f, 10.0f, 25.0f, 60.0f};
 
 #define REOPEN_MS 3000          /* no MAP folder: look again this often (only while asked to draw) */
 #define PREFETCH_MAX 48
+#define HOLD_WAIT_MS 3000       /* mapsvc_hold(1): most it waits for a picture in progress */
 
 static struct {
     bool init;
     /* shared: under ui_port_map_lock() */
     mapsvc_req_t *pending;
-    bool has_pending, drawing, reopen;
+    bool has_pending, drawing, reopen, hold;
     uint32_t seq, pending_seq;
     int shown, ready;                   /* canvas index, -1 = none */
     /* the worker's own */
@@ -24,6 +25,7 @@ static struct {
     uint16_t *canvas[2];
     mapsvc_result_t res[2];
     hm_store_t *store;
+    bool store_open;                    /* store != NULL, readable by other tasks (under the lock) */
     hm_renderer_t *rend;
     int store_err;
     bool tried;
@@ -102,6 +104,25 @@ void mapsvc_reopen(void)
     ui_port_map_unlock();
 }
 
+int mapsvc_hold(int on)
+{
+    mapsvc_init();
+    if (!m.init) return 0;                                 /* no worker, no open files */
+    ui_port_map_lock();
+    m.hold = on != 0;
+    ui_port_map_unlock();
+    ui_port_map_kick();                                    /* the worker closes the files (and later reopens) */
+    if (!on) return 0;
+    for (int waited = 0; waited <= HOLD_WAIT_MS; waited += 10) {
+        ui_port_map_lock();
+        bool closed = !m.drawing && !m.store_open;
+        ui_port_map_unlock();
+        if (closed) return 0;
+        ui_port_map_wait(10);
+    }
+    return -1;
+}
+
 bool mapsvc_busy(void)
 {
     if (!m.init) return false;
@@ -122,14 +143,39 @@ static bool ensure_memory(void)
     return true;
 }
 
+static void set_store(hm_store_t *s)
+{
+    ui_port_map_lock();
+    m.store = s;
+    m.store_open = s != NULL;
+    ui_port_map_unlock();
+}
+
+/* A MAP/ upload has the folder: the worker's files are closed and stay closed. */
+static bool held(void)
+{
+    ui_port_map_lock();
+    bool h = m.hold;
+    ui_port_map_unlock();
+    if (h && m.store) {
+        hm_store_close(m.store);
+        set_store(NULL);
+        m.tried = false;
+        m.n_pre = m.i_pre = 0;
+    }
+    return h;
+}
+
 static void ensure_store(void)
 {
-    if (m.store) return;
+    if (m.store || held()) return;
     int64_t now = ui_port_micros();
     if (m.tried && now - m.t_tried_us < (int64_t)REOPEN_MS * 1000) return;
     m.tried = true;
     m.t_tried_us = now;
-    m.store_err = hm_store_open(&m.store, ui_port_map_dir(), MAPSVC_CACHE_BYTES, &ENV);
+    hm_store_t *s = NULL;
+    m.store_err = hm_store_open(&s, ui_port_map_dir(), MAPSVC_CACHE_BYTES, &ENV);
+    set_store(s);
 }
 
 static void add_pre(void *ctx, int level, int col, int row)
@@ -172,6 +218,7 @@ static bool prefetch_one(void)
 bool mapsvc_work(void)
 {
     if (!m.init) return false;
+    held();                                                /* closes the files when an upload has asked for them */
     ui_port_map_lock();
     if (!m.has_pending || m.ready >= 0) {
         ui_port_map_unlock();
@@ -188,8 +235,8 @@ bool mapsvc_work(void)
     m.reopen = false;
     ui_port_map_unlock();
     if (reopen) {
-        hm_store_close(m.store);
-        m.store = NULL;
+        if (m.store) hm_store_close(m.store);
+        set_store(NULL);
         m.tried = false;
         m.n_pre = m.i_pre = 0;
     }
@@ -233,7 +280,7 @@ bool mapsvc_work(void)
             r->radius_m = h->radius_m; r->lat0 = h->lat0; r->lon0 = h->lon0;
             r->status = MAPSVC_OK;
         } else {
-            r->status = m.store_err == HM_ERR_NOFILE ? MAPSVC_NO_MAP : MAPSVC_BAD_MAP;
+            r->status = held() ? MAPSVC_UPDATING : m.store_err == HM_ERR_NOFILE ? MAPSVC_NO_MAP : MAPSVC_BAD_MAP;
             r->err = m.store_err;
         }
         hm_render(m.rend, m.store, &v, &cv, &r->out);

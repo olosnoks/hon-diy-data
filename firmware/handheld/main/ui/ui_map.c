@@ -486,7 +486,7 @@ static void zoom_chip(int top)
 
 static void show_result(const mapsvc_result_t *r, const hh_snapshot_t *s)
 {
-    if (r->status == MAPSVC_OK || r->status == MAPSVC_NO_MAP || r->status == MAPSVC_BAD_MAP) {
+    if (r->status == MAPSVC_OK || r->status == MAPSVC_NO_MAP || r->status == MAPSVC_BAD_MAP || r->status == MAPSVC_UPDATING) {
         sc.dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
         sc.dsc.header.cf = LV_COLOR_FORMAT_RGB565;
         sc.dsc.header.w = MAPSVC_W;
@@ -519,6 +519,9 @@ static void show_result(const mapsvc_result_t *r, const hh_snapshot_t *s)
             message("NO MAP ON THE SD CARD", "Build one on the laptop and copy its MAP folder to the "
                     "card's root:\n  hondalog-handheld map-build --pbf STATE.osm.pbf\n"
                     "    --center LAT,LON --radius-mi 100 --out SDCARD", UI_SHAPE_SQUARE, TK(fg));
+        } else if (r->status == MAPSVC_UPDATING) {
+            message("MAP BEING UPDATED", "New map files are coming in over the USB cable. The map comes back when "
+                    "they are all in.", UI_SHAPE_SQUARE, TK(fg));
         } else if (r->status == MAPSVC_BAD_MAP) {
             snprintf(text, sizeof(text), "MAP/ on the card: %s. Build it again:\n  hondalog-handheld map-build "
                      "--pbf STATE.osm.pbf\n    --center LAT,LON --radius-mi 100 --out SDCARD", hm_strerror(r->err));
