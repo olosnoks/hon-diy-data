@@ -1,11 +1,11 @@
 # hondalog UI: handoff for the Qt implementer
 
-Design canvas (interactive mockups, 10 artboards at 1366x768):
-https://claude.ai/artifact/UZP8DiarTkdK1RWKmk7vSS
+Design canvas: interactive mockups, 10 artboards at 1366x768. The rendered
+artboards are in [`docs/mockups/`](../mockups/).
 
-Mockup sources (generated): `/home/claude/design/canvas/project/*.dc.html`.
-Generator: `/home/claude/design/build/build.py` + `shared.js`. The simulator,
-tile logic and 3D scene code in `shared.js` are the reference behaviour.
+Mockup generator: [`mockup-src/build.py`](mockup-src/build.py) +
+[`mockup-src/shared.js`](mockup-src/shared.js). The simulator, tile logic and
+3D scene code in `shared.js` are the reference behaviour.
 
 Status of the mockups: the page logic was run in Node against stubs (every
 template value resolves, the three.js r149 scene builds in all 9 mode

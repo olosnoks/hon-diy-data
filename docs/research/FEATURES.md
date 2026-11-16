@@ -1,6 +1,6 @@
 # hondalog feature list
 
-Prioritised feature list for the six implementation workstreams. It is derived from the survey in `competitors.md` and from reading the existing code in `/home/claude/hondalog` (v0.1.0).
+Prioritised feature list for the six implementation workstreams. It is derived from the survey in `competitors.md` and from reading the existing code (v0.1.0).
 
 ## How to read it
 
