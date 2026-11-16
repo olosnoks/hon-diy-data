@@ -23,13 +23,13 @@ from ..data import db
 from ..data.db import DriveRef
 from ..data.model import Column
 from ..data.store import Store
+from ..geo.track import GPS_STREAM, gps_columns
 from ..logger import LINK, LINK_STREAM, column_for
 from ..obd2 import decode_pid
 from . import format as F
 from .drivefile import DriveFile, read_drive_file
 from .mapfile import MAP_NAME, read_map
 
-GPS_STREAM = "gps"
 #: Mode 01 PIDs that are the same quantity as a map channel
 PID_CHANNEL = {0x0C: "rpm", 0x0D: "vss", 0x0B: "map", 0x11: "tps", 0x0E: "ign", 0x14: "o2", 0x06: "stft",
                0x07: "ltft", 0x05: "ect", 0x0F: "iat"}
@@ -308,20 +308,6 @@ def _write_link(drive: Any, df: DriveFile) -> None:
     drive.add_stream(LINK_STREAM, [Column(LINK, "u1", kind="flag", decimals=0)], source="ecu")
     for t_us, up in changes:
         drive.append(LINK_STREAM, df.seconds(t_us), [up])
-
-
-def gps_columns() -> list[Column]:
-    """The "gps" stream's columns: a drive file's fixes, and the live ones over serial."""
-    return [
-        Column("gps_lat", "f8", "°", "Latitude", decimals=6, lo=-90.0, hi=90.0),
-        Column("gps_lon", "f8", "°", "Longitude", decimals=6, lo=-180.0, hi=180.0),
-        Column("gps_speed", "f4", "km/h", "GPS speed", decimals=1, lo=0.0, hi=200.0),
-        Column("gps_heading", "f4", "°", "Heading", decimals=0, lo=0.0, hi=360.0),
-        Column("gps_sats", "u1", "", "Satellites", decimals=0, lo=0.0, hi=16.0),
-        Column("gps_fix", "u1", "", "GPS fix", kind="flag", decimals=0),
-        Column("gps_hdop", "f4", "", "HDOP", decimals=1, lo=0.0, hi=20.0),
-        Column("gps_utc", "f8", "s", "GPS time (unix)", decimals=0),
-    ]
 
 
 def _write_gps(drive: Any, df: DriveFile) -> None:

@@ -17,6 +17,9 @@ import numpy as np
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontDatabase, QPen
 
+from ..ramps import DIV_RAMP, SEQ_RAMP, ramp
+from ..ramps import stops as _stops
+
 FONT_DIR = Path(__file__).parent.parent / "data" / "fonts"
 SANS_FALLBACK = ("Inter", "DejaVu Sans", "Liberation Sans")
 MONO_FALLBACK = ("JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono")
@@ -69,8 +72,7 @@ NIGHT = Tokens(
 THEMES = {"daylight": DAYLIGHT, "night": NIGHT}
 
 LIVE_POINT = "#E6007A"
-SEQ_RAMP = ("#00224E", "#35456C", "#666970", "#948E77", "#C8B866", "#FEE838")
-DIV_RAMP = ("#053061", "#2166AC", "#F7F7F7", "#E08214", "#7F3B08")
+# SEQ_RAMP and DIV_RAMP live in hondalog.ramps (no Qt): the KML export colours a track with them
 
 # Every (text token, ground token) pair the UI draws text with. The test
 # suite asserts each is 7:1 or better in its theme. Add a pair here before
@@ -135,21 +137,8 @@ def contrast(a: str, b: str) -> float:
 
 # ---- colour ramps (numpy, used by the 3D scene, the heat map, the table) ----
 
-def _stops(hexes) -> np.ndarray:
-    return np.array([[int(h[i:i + 2], 16) / 255.0 for i in (1, 3, 5)] for h in hexes],
-                    dtype=np.float32)
-
-
 _SEQ = _stops(SEQ_RAMP)
 _DIV = _stops(DIV_RAMP)
-
-
-def ramp(stops: np.ndarray, t) -> np.ndarray:
-    """Piecewise-linear ramp. t in 0..1 (any shape) -> rgb array (..., 3)."""
-    t = np.clip(np.asarray(t, dtype=np.float32), 0.0, 1.0) * (len(stops) - 1)
-    i = np.minimum(t.astype(np.int32), len(stops) - 2)
-    f = (t - i)[..., None]
-    return stops[i] * (1.0 - f) + stops[i + 1] * f
 
 
 def seq_ramp(t) -> np.ndarray:
