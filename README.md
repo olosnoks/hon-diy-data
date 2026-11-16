@@ -461,9 +461,18 @@ hondalog-log import  old_log.csv          # 0.1.0 CSV, MSL or MLG -> a new drive
 hondalog-log report  stall_20261116_071455   # one-page HTML report
 hondalog-log redecode DRIVE               # decode the raw bytes with your current map -> a new drive
 hondalog-log prune   --days 90 --yes      # delete old drives (those with captures or notes are kept)
+hondalog-log rm      DRIVE_OR_CAPTURE     # delete one by name; asks first (--yes: do not ask)
+hondalog-log keep    DRIVE [--off]        # mark a drive keep: prune skips it, rm asks a second time
 hondalog-log vacuum  [--full]             # give freed space back to the disk, check the file
 hondalog-log sql     "SELECT ..."         # run a query; without one, the sqlite3 shell
 ```
+
+`rm` on a drive removes everything recorded in it, its captures included, and
+gives the space back to the disk (`--full` rewrites the file compactly). On a
+capture it removes only the capture's entry: the drive and its data stay. A
+drive that is being recorded is refused. A drive marked keep asks you to type
+its name (`--force` skips that question; `--yes` alone does not). The drive
+picker in the app (Replay, O) has the same Delete and a Keep button.
 
 DRIVE is a drive name (`drive_2026_11_16_0712`), a capture name
 (`stall_20261116_071455`), `last`, `other.db#drive_...` for a drive in another

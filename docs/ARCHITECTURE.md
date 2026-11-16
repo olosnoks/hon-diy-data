@@ -189,6 +189,7 @@ data.open_log(DriveRef | "db#name" | name | .csv | .msl | .mlg) -> Log
     data.redecode(log, amap) -> data.write_log(log, db) -> a new drive
 data.Library(db)            drives and captures from SQL, search, notes and tags
 data.RetentionPolicy        delete old drives, then incremental vacuum
+data.retention.delete       one drive or one capture by name (hondalog-log rm, the drive picker)
 blackbox.open_event(.bbx) -> the box's 1 kHz capture merged with the drive
                              that was being recorded (found by wall time in
                              `drives`; aligned by epoch_unix, else markers, else RPM)
@@ -216,7 +217,7 @@ one 33 ms timer. Details: `docs/ui-adapters.md`.
 | `hondalog-sim` | `hondalog.sim` | fake ECU on a pty, with faults |
 | `hondalog-firstcontact` | `hondalog.diag.firstcontact` | first time on the car: adapter, echo, protocol, block size, timing, ISO |
 | `hondalog-map` | `hondalog.mapping.__main__` | status, guided verification, address finder, map diff / hash / upgrade |
-| `hondalog-log` | `hondalog.logtool` | record (headless), list, info, export, compare, import, report, redecode, prune, vacuum, sql |
+| `hondalog-log` | `hondalog.logtool` | record (headless), list, info, export, compare, import, report, redecode, prune, rm, keep, vacuum, sql |
 | `hondalog-bb` | `hondalog.blackbox.__main__` | black box: live, list, fetch, info, csv, config, selftest, cal |
 | `hondalog-bbsim` | `hondalog.blackbox.sim` | fake black box on a pty |
 | `hondalog-tune` | `hondalog.tuning.cli` | ROM files: info, list, show, diff, convert, burn-image, burn |

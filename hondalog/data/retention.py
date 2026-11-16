@@ -1,4 +1,4 @@
-"""Keeping the database from filling the disk.
+"""Keeping the database from filling the disk, and deleting by hand.
 
 ``RetentionPolicy.plan`` lists the drives it would delete; ``apply`` deletes
 them and gives the freed pages back to the disk (incremental vacuum; pass
@@ -7,11 +7,18 @@ deleted unless a limit is set. A drive with a capture in it (a stall) is
 kept by default, and so is any drive with ``keep`` set or with notes or
 tags: somebody cared about those. A drive that is being recorded is never
 touched.
+
+``delete`` removes one drive, or one capture, by name: what ``hondalog-log
+rm`` and the drive picker's Delete button call. It refuses a drive that is
+being recorded, and a drive with ``keep`` set unless the caller says the
+user confirmed that too (``allow_keep``); then it releases the pages the
+same way.
 """
 
 from __future__ import annotations
 
 import os
+import sqlite3
 import time
 from dataclasses import dataclass
 
@@ -97,3 +104,82 @@ class RetentionPolicy:
         except OSError:
             pass                            # busy: the pages are free and get reused anyway
         return [ref for ref in doomed if ref.drive in gone]
+
+
+# ---- deleting one drive or capture by hand ----------------------------------
+
+class KeepProtected(ValueError):
+    """The drive has ``keep`` set: delete it only after an extra confirmation."""
+
+
+def lookup(target: DriveRef | str, path: str | os.PathLike | None = None) -> DriveEntry:
+    """The library entry for a drive or capture name (``other.db#name`` and
+    drive ids work too). Raises ValueError if there is none: the text is fit
+    for the user."""
+    where = db.db_path(path)
+    ref = db.parse_ref(target, where)
+    if ref is None:
+        raise ValueError(f"no drive or capture {str(target)!r} in {where}")
+    conn = db.connect(ref.db)
+    try:
+        entries = list_entries(conn, ref.db)
+    finally:
+        conn.close()
+    for entry in entries:
+        if entry.name == ref.name and (entry.kind == "drive") == (not ref.capture):
+            return entry
+    raise ValueError(f"no drive or capture {ref.name!r} in {ref.db}")
+
+
+def describe(entry: DriveEntry) -> str:
+    """One line that says what would go, for a confirmation prompt."""
+    when = entry.started[:19].replace("T", " ")
+    if entry.kind != "drive":
+        return (f"{entry.kind} capture {entry.name} ({when}, {entry.duration:.0f} s of {entry.ref.drive}"
+                + (f": {entry.trigger}" if entry.trigger else "") + "). The drive and its data stay.")
+    length = f"{entry.duration:.0f} s" if entry.duration < 120 else f"{entry.duration / 60:.0f} min"
+    parts = [f"{entry.rows} rows", f"about {entry.size / 1e6:.1f} MB"]
+    if entry.captures:
+        parts.append(f"{entry.captures} capture{'s' if entry.captures != 1 else ''} "
+                     f"({entry.stalls} stall{'s' if entry.stalls != 1 else ''})")
+    if entry.notes:
+        parts.append(f"notes: {entry.notes[:60]}")
+    if entry.tags:
+        parts.append("tags: " + " ".join(entry.tags))
+    return f"drive {entry.name} ({when}, {length}; {', '.join(parts)})"
+
+
+def delete(target: DriveRef | str | DriveEntry, path: str | os.PathLike | None = None, *,
+           allow_keep: bool = False, full_vacuum: bool = False) -> DriveEntry:
+    """Delete one drive (with everything recorded in it, its captures
+    included) or one capture (only its entry). Returns what was removed.
+
+    Raises ``KeepProtected`` for a drive with ``keep`` set unless
+    ``allow_keep``; ValueError for a name that is not there or a drive that
+    is being recorded; OSError if the database cannot be written.
+    """
+    entry = target if isinstance(target, DriveEntry) else lookup(target, path)
+    ref = entry.ref
+    conn = db.connect(ref.db, write=True)
+    try:
+        if entry.kind != "drive":
+            if not db.delete_captures(conn, [ref.capture]):
+                raise ValueError(f"no capture {ref.capture!r} in {ref.db}")
+            return entry
+        row = conn.execute("SELECT status, keep FROM drives WHERE name=?", (ref.drive,)).fetchone()
+        if row is None:
+            raise ValueError(f"no drive {ref.drive!r} in {ref.db}")
+        if row[0] == "recording":       # connect() has already retired drives whose recorder died
+            raise ValueError(f"{ref.drive} is being recorded: stop the recording first")
+        if row[1] and not allow_keep:
+            raise KeepProtected(f"{ref.drive} is marked keep")
+        db.delete_drives(conn, [ref.drive])
+    except sqlite3.OperationalError as exc:
+        raise OSError(f"{ref.db}: {exc}") from None
+    finally:
+        conn.close()
+    try:
+        db.vacuum(ref.db, full=full_vacuum)
+    except OSError:
+        pass                            # busy: the pages are free and get reused anyway
+    return entry

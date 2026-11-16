@@ -9,6 +9,8 @@
     hondalog-log report  DRIVE [-o OUT.html]     one-page capture report
     hondalog-log redecode DRIVE [--map TOML]     decode the raw bytes again -> a new drive
     hondalog-log prune   --days N --mb N [--yes] delete old drives
+    hondalog-log rm      NAME... [--yes]         delete one drive or one capture by name
+    hondalog-log keep    DRIVE [--off]           mark a drive keep: prune skips it, rm asks twice
     hondalog-log vacuum  [--full]                give freed space back to the disk
     hondalog-log sql     [QUERY]                 run SQL (no query: the sqlite3 shell)
 
@@ -36,6 +38,7 @@ from .data import db, open_log, write_log
 from .data.library import Library
 from .data.reader import Log
 from .data.redecode import redecode
+from .data import retention
 from .data.retention import RetentionPolicy
 from .export import FORMATS, export_log
 
@@ -198,7 +201,7 @@ def _list(args: argparse.Namespace) -> int:
     for entry in library.search(args.query or ""):
         indent = "" if entry.kind == "drive" else "  "
         flag = "" if entry.status in ("complete", "imported") or entry.kind != "drive" else f"[{entry.status}] "
-        extra = flag + (entry.trigger or entry.notes)
+        extra = flag + ("[keep] " if entry.keep and entry.kind == "drive" else "") + (entry.trigger or entry.notes)
         print(f"{indent + entry.name:<32} {entry.started[:19]:<19} {entry.duration:8.1f} s  "
               f"{entry.rows:>8} rows  {len(entry.markers):>3} marks  {extra}")
     return 0
@@ -218,6 +221,55 @@ def _prune(args: argparse.Namespace) -> int:
         policy.apply(target)
     elif doomed:
         print("dry run; add --yes to delete")
+    return 0
+
+
+def _ask(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        print()
+        return ""
+
+
+def _rm(args: argparse.Namespace) -> int:
+    """Delete drives or captures by name: a question for each (``--yes``
+    answers it), and a second one for a drive that is marked keep (its name
+    has to be typed; ``--force`` answers that)."""
+    status = 0
+    for name in args.names:
+        try:
+            entry = retention.lookup(name, args.db)
+        except ValueError as exc:
+            print(f"hondalog-log: {exc}", file=sys.stderr)
+            status = 2
+            continue
+        what = retention.describe(entry)
+        if not args.yes and _ask(f"Delete {what}? [y/N] ").lower() not in ("y", "yes"):
+            print(f"kept {entry.name}")
+            status = status or 1
+            continue
+        keep = entry.kind == "drive" and entry.keep
+        if keep and not args.force and _ask(
+                f"{entry.name} is marked keep. Type its name to delete it anyway: ") != entry.name:
+            print(f"kept {entry.name} (marked keep" + ("; add --force to delete it without the question)"
+                                                       if args.yes else ")"))
+            status = status or 1
+            continue
+        try:
+            retention.delete(entry, allow_keep=keep, full_vacuum=args.full)
+        except ValueError as exc:
+            print(f"hondalog-log: {exc}", file=sys.stderr)
+            status = 2
+            continue
+        print(f"deleted {what}" if args.yes else f"deleted {entry.name}")
+    return status
+
+
+def _keep(args: argparse.Namespace) -> int:
+    entry = retention.lookup(args.drive, args.db)
+    Library(entry.ref.db).set_notes(entry.ref.drive_ref, keep=not args.off)
+    print(f"{entry.ref.drive}: {'no longer marked keep' if args.off else 'marked keep'}")
     return 0
 
 
@@ -320,6 +372,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--full", action="store_true", help="rewrite the file compactly afterwards")
     p.add_argument("--yes", action="store_true")
     p.set_defaults(fn=_prune)
+
+    p = sub.add_parser("rm", help="delete one drive (and all its data) or one capture, by name")
+    p.add_argument("names", nargs="+", metavar="NAME", help="drive or capture name (see 'list')")
+    p.add_argument("--yes", "-y", action="store_true", help="do not ask")
+    p.add_argument("--force", action="store_true", help="also delete a drive that is marked keep without asking")
+    p.add_argument("--full", action="store_true", help="rewrite the file compactly afterwards")
+    p.set_defaults(fn=_rm)
+
+    p = sub.add_parser("keep", help="mark a drive keep (prune never deletes it; rm asks twice)")
+    p.add_argument("drive")
+    p.add_argument("--off", action="store_true", help="remove the mark")
+    p.set_defaults(fn=_keep)
 
     p = sub.add_parser("vacuum", help="give freed space back to the disk and check the file")
     p.add_argument("--full", action="store_true", help="rewrite the whole file (not while recording)")

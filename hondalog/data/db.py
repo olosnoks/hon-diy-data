@@ -518,6 +518,29 @@ def delete_drives(conn: sqlite3.Connection, names: Iterable[str]) -> list[str]:
     return removed
 
 
+def delete_captures(conn: sqlite3.Connection, names: Iterable[str]) -> list[str]:
+    """Remove captures by name. A capture is a time range of its drive: the
+    drive and every row in it stay, only the entry (and the drive's stall and
+    capture counts) goes."""
+    removed = []
+    for name in names:
+        row = conn.execute("SELECT id, drive_id, kind FROM captures WHERE name=?", (name,)).fetchone()
+        if row is None:
+            continue
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute("DELETE FROM captures WHERE id=?", (int(row[0]),))
+            conn.execute("UPDATE drives SET capture_count = max(0, capture_count - 1), "
+                         "stall_count = max(0, stall_count - ?) WHERE id=?",
+                         (1 if row[2] == "stall" else 0, int(row[1])))
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        removed.append(name)
+    return removed
+
+
 def file_size(path: str | os.PathLike) -> int:
     """Bytes on disk: the database plus its write-ahead log."""
     total = 0

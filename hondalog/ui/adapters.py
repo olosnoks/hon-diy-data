@@ -225,6 +225,8 @@ class DriveRow:
     stalls: int = 0
     notes: str = ""
     text: str = ""              # what a search looks through
+    keep: bool = False          # the drive is marked keep: deleting it asks twice
+    captures: int = 0           # captures inside a drive (deleted with it)
 
 
 @runtime_checkable
@@ -246,6 +248,15 @@ class LogReader(Protocol):
     def import_file(self, path):
         """Read a CSV / MSL / MLG file into the database as a new drive.
         Returns what ``read`` takes to open it."""
+
+    def delete(self, ref, allow_keep: bool = False) -> str:
+        """Delete a drive with everything recorded in it, or one capture
+        (only its entry; the drive stays). ``ref`` is a ``DriveRow.ref``.
+        Returns a line for the user. Raises ValueError with a message when it
+        cannot be done; a drive marked keep goes only with ``allow_keep``."""
+
+    def set_keep(self, ref, keep: bool) -> None:
+        """Mark a drive keep (or not): retention leaves it alone and deleting it asks twice."""
 
 
 # ---- observed map (Map 3D) --------------------------------------------------

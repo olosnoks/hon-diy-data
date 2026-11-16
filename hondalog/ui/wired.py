@@ -816,7 +816,8 @@ class DriveReader:
             for e in mine:
                 text = " ".join([e.name, e.kind, e.status, e.notes, e.trigger, *e.tags, *e.markers]).lower()
                 rows.append(ad.DriveRow(e.ref, e.name, e.kind, e.started[:19].replace("T", " "), e.duration,
-                                        e.status, e.stalls, e.trigger if e.kind != "drive" else e.notes, text))
+                                        e.status, e.stalls, e.trigger if e.kind != "drive" else e.notes, text,
+                                        keep=e.keep, captures=e.captures))
         for mtime, path in sorted(self._bbx(), reverse=True):
             stamp = datetime.fromtimestamp(mtime).isoformat(" ", "seconds")
             rows.append(ad.DriveRow(path, path.name, "file", stamp, text=path.name.lower()))
@@ -831,6 +832,32 @@ class DriveReader:
             if log.ref is not None:
                 return log.ref              # already a drive (another database): open it there
             return write_log(log, self.database, {"imported_from": str(path)})
+
+
+    def delete(self, ref, allow_keep: bool = False) -> str:
+        """One drive (all of it) or one capture (its entry), through the same
+        code as ``hondalog-log rm``: refused while it is being recorded, a
+        keep drive only with ``allow_keep``, freed pages vacuumed."""
+        from ..data import retention
+        if not isinstance(ref, DriveRef):
+            raise ValueError(f"{getattr(ref, 'name', ref)} is a file, not a drive: delete it in the file manager")
+        before = self.database.stat().st_size if self.database.exists() else 0
+        try:
+            entry = retention.delete(ref, allow_keep=allow_keep)
+        except OSError as exc:
+            raise ValueError(f"could not delete {ref.name}: {exc}") from None
+        if entry.kind != "drive":
+            return f"Deleted capture {entry.name}; {ref.drive} is untouched"
+        freed = max(0, before - (self.database.stat().st_size if self.database.exists() else 0))
+        return f"Deleted {entry.name}" + (f", {freed / 1e6:.1f} MB freed" if freed else "")
+
+    def set_keep(self, ref, keep: bool) -> None:
+        if not isinstance(ref, DriveRef):
+            raise ValueError("only a drive can be marked keep")
+        try:
+            Library(ref.db).set_notes(ref.drive_ref, keep=keep)
+        except OSError as exc:
+            raise ValueError(str(exc)) from None
 
 
 # ---- observed map -----------------------------------------------------------

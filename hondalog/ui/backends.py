@@ -580,6 +580,12 @@ class CsvLogReader:
     def import_file(self, path):
         return Path(path)                   # the demo has no database: the file is opened as it is
 
+    def delete(self, ref, allow_keep: bool = False) -> str:
+        raise ValueError("the demo has no database: there is nothing to delete")
+
+    def set_keep(self, ref, keep: bool) -> None:
+        raise ValueError("the demo has no database")
+
 
 def order_of_loss(view: ad.LogView, pre_s: float = 30.0, hold_s: float = 0.2) -> ad.Forensics:
     """For each channel, the first time it leaves its normal band in the pre_s

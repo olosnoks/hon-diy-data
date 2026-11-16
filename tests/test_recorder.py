@@ -404,6 +404,100 @@ def test_retention_policy(tmp_path):
     assert conn.execute("SELECT count(*) FROM captures").fetchone()[0] == 0
 
 
+def test_delete_one_drive_or_one_capture(amap, tmp_path):
+    from hondalog.data import retention
+    path = tmp_path / "hondalog.db"
+    big = aged(path, 9, rows=20_000)
+    stall = aged(path, 8, capture=True)
+    flagged = aged(path, 7, keep=True)
+    capture = next(e for e in Library(path).refresh() if e.kind == "stall")
+    assert retention.lookup("last", path).name == flagged.name
+    assert capture.ref.drive == stall.name and "The drive and its data stay" in retention.describe(capture)
+    assert "20000 rows" in retention.describe(retention.lookup(big.name, path))
+
+    # a capture is only an entry: the drive keeps every row, its counts follow
+    assert retention.delete(capture.name, path).name == capture.name
+    conn = sqlite3.connect(path)
+    assert conn.execute("SELECT count(*) FROM captures").fetchone()[0] == 0
+    assert conn.execute("SELECT stall_count, capture_count FROM drives WHERE name=?",
+                        (stall.name,)).fetchone() == (0, 0)
+    assert open_log(stall).rows == 50
+    with pytest.raises(ValueError, match="no drive or capture"):
+        retention.delete(capture.name, path)
+
+    # a drive goes with everything in it, and the file shrinks (incremental vacuum)
+    before = db.file_size(path)
+    assert retention.delete(big, path).name == big.name and not big.exists()
+    assert db.file_size(path) < before - 0.5e6
+    assert conn.execute("PRAGMA freelist_count").fetchone()[0] == 0
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert big.name not in {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='view'")}
+
+    # keep: only when the caller says the user confirmed that as well
+    with pytest.raises(retention.KeepProtected, match="marked keep"):
+        retention.delete(flagged.name, path)
+    assert flagged.exists()
+    assert retention.delete(flagged.name, path, allow_keep=True).keep and not flagged.exists()
+
+    # the drive being recorded is refused, with or without keep
+    rec = recorder(amap, tmp_path)
+    run(rec, 0, 1)
+    rec.flush()
+    with pytest.raises(ValueError, match="being recorded"):
+        retention.delete(rec.path, allow_keep=True)
+    rec.stop()
+    assert retention.delete(rec.path).name == rec.path.name
+    assert [e.name for e in Library(path).refresh()] == [stall.name]
+
+
+def test_cli_rm_asks_and_keep_asks_twice(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HONDALOG_DIR", str(tmp_path))
+    path = tmp_path / "hondalog.db"
+    plain, stall, flagged = aged(path, 9), aged(path, 8, capture=True), aged(path, 7)
+    capture = next(e.name for e in Library(path).refresh() if e.kind == "stall")
+    answers: list[str] = []
+    asked: list[str] = []
+
+    def fake_input(prompt):
+        asked.append(prompt)
+        if not answers:
+            raise EOFError
+        return answers.pop(0)
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    assert logtool.main(["keep", flagged.name]) == 0 and "marked keep" in capsys.readouterr().out
+    assert logtool.main(["list"]) == 0 and "[keep]" in capsys.readouterr().out
+
+    answers[:] = ["n"]
+    assert logtool.main(["rm", plain.name]) == 1 and plain.exists()
+    assert asked[-1].startswith(f"Delete drive {plain.name} (") and asked[-1].endswith("[y/N] ")
+    assert f"kept {plain.name}" in capsys.readouterr().out
+    assert logtool.main(["rm", plain.name]) == 1 and plain.exists()            # no answer (EOF) is a no
+    answers[:] = ["y"]
+    assert logtool.main(["rm", plain.name]) == 0 and not plain.exists()
+    assert f"deleted {plain.name}" in capsys.readouterr().out
+
+    answers[:] = ["yes"]
+    assert logtool.main(["rm", capture]) == 0 and stall.exists()
+    assert "The drive and its data stay" in asked[-1]
+    assert not [e for e in Library(path).refresh() if e.kind == "stall"]
+
+    # keep: a second question, answered by typing the name; --yes alone is not enough
+    asked.clear()
+    answers[:] = ["y", "y"]
+    assert logtool.main(["rm", flagged.name]) == 1 and flagged.exists()
+    assert len(asked) == 2 and "marked keep" in asked[1] and "Type its name" in asked[1]
+    assert logtool.main(["rm", "--yes", flagged.name]) == 1 and flagged.exists()
+    assert "--force" in capsys.readouterr().out
+    answers[:] = [flagged.name]
+    assert logtool.main(["rm", "--yes", flagged.name]) == 0 and not flagged.exists()
+    assert logtool.main(["keep", stall.name]) == 0 and logtool.main(["keep", stall.name, "--off"]) == 0
+    assert logtool.main(["keep", stall.name]) == 0
+    assert logtool.main(["rm", "--yes", "--force", stall.name, "drive_nope"]) == 2     # one gone, one unknown
+    assert not stall.exists() and "no drive or capture 'drive_nope'" in capsys.readouterr().err
+    assert Library(path).refresh() == []
+
+
 def test_retention_leaves_a_running_drive_alone(amap, tmp_path):
     old = aged(tmp_path / "hondalog.db", 5000)
     rec = recorder(amap, tmp_path)

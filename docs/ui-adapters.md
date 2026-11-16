@@ -159,6 +159,8 @@ def analyze(self, view) -> Forensics  # order of loss, "held up", reading, banne
 def recent(self, stalls_only=False) -> Sequence          # newest first
 def drives(self) -> Sequence[DriveRow]                   # the drive picker's list
 def import_file(self, path)                              # CSV / MSL / MLG -> a new drive
+def delete(self, ref, allow_keep=False) -> str           # a drive (all of it) or a capture (its entry)
+def set_keep(self, ref, keep) -> None                    # mark a drive keep
 ```
 
 There are no log files to browse any more: recordings are drives in
@@ -171,7 +173,11 @@ have `.name` (`drive_2026_11_16_0712`, `stall_20261116_071455`).
 Replay's Open button shows `ui/drivepicker.DrivePicker`: `drives()` as a
 list (each drive followed by its captures, then `.bbx` files), a search box
 over `DriveRow.text`, and "Import file", which calls `import_file` and opens
-what it returns.
+what it returns. "Delete…" (or Del) asks, then calls `delete(row.ref)`:
+`hondalog.data.retention.delete`, the code behind `hondalog-log rm` (a drive
+being recorded is refused, the freed pages go through the incremental
+vacuum). A row with `DriveRow.keep` asks a second time and passes
+`allow_keep=True`. "Keep" calls `set_keep`.
 
 `LogView` holds per-channel time and value arrays (`t[id]`, `data[id]`), so
 1 kHz black-box channels and 10 Hz ECU channels sit in one view at their own
