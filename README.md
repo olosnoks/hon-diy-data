@@ -392,8 +392,17 @@ a marker and `"capture"` saves a capture around it, like a stall.
 Trigger rules (`hondalog/triggers/`) use the same expressions, including
 the ones with history: `when = "rate(rpm) < -1500 and rpm > 300"`.
 
-Temperatures are in °C, pressure in kPa, speed in km/h in the map and in logs.
-`hondalog/units.py` converts for display (°F, psi, inHg, mph, AFR).
+**Units.** Temperatures are in °C, pressure in kPa, speed in km/h in the map,
+in the database and in every export, whatever the screen shows. The screen
+converts for display: the default is US units (mph, °F, gal/h), with MAP and
+baro left in kPa because that is what Honda tables and tuning guides use.
+Click the ECU chip, then Settings > Units, to pick a preset (US, Metric) or
+one quantity at a time (speed, temperature, pressure in kPa / psi / inHg /
+bar, AFR or lambda, fuel flow, distance). The choice is remembered. It applies
+to the tiles, the Drive view, the Replay readouts, alarm texts and the limits
+table; volts, %, ms and rpm have nothing to convert. The axes of Map 3D and
+Tune are the tables' own breakpoints and stay in kPa. A marker that an alarm
+drops into the log is written in the map's units.
 
 ## Troubleshooting
 

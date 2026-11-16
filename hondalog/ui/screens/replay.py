@@ -20,6 +20,7 @@ from .. import adapters as ad
 from .. import paint
 from ..controls import Button, Card, Segment, TextCard
 from ..theme import T
+from ..units import U
 
 LABEL_W = 150
 GROUPS = (
@@ -159,11 +160,12 @@ class LaneBlock(QWidget):
                 lane.curve.setData([], [])
                 lane.twin.setData([], [])
                 if spec is not None:
-                    lane.label = f"{spec.label.upper()} {spec.units}".strip()
+                    lane.label = f"{spec.label.upper()} {U.spec(spec).units}".strip()
                 continue
             v = view.data[lane.cid]
             lane.flag = spec.is_flag
-            units = "" if spec.units.lower() == spec.label.lower() else spec.units
+            units = U.spec(spec).units          # the lane is drawn to its own scale: only the label and
+            units = "" if units.lower() == spec.label.lower() else units    # the readout are converted
             lane.label = f"{spec.label.upper()} {units}".strip()
             if spec.is_flag:
                 lo, hi = 0.0, 1.0
@@ -208,7 +210,7 @@ class LaneBlock(QWidget):
             if view is None or not lane.has_data:
                 lane.value = "---"
                 continue
-            lane.value = view.specs[lane.cid].format(view.value_at(lane.cid, self.cursor))
+            lane.value = U.text(view.specs[lane.cid], view.value_at(lane.cid, self.cursor))
 
     # ---- cursor / zoom ----
 

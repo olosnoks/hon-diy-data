@@ -23,6 +23,7 @@ from .screens.replay import ReplayScreen
 from .screens.sensors import SensorsScreen
 from .screens.tune import TuneScreen
 from .theme import T
+from .units import PRESETS, QUANTITIES, U
 
 ICON = Path(__file__).parent.parent / "data" / "hondalog.svg"
 FRAME_MS = 33                   # about 30 fps
@@ -56,6 +57,7 @@ class Shell(QMainWindow):
         if ICON.exists():
             self.setWindowIcon(QIcon(str(ICON)))
         T.set(str(self.settings.value("theme", "daylight")))
+        U.load(self.settings)               # display units; nothing behind the UI changes
         session.auto_record = self.settings.value("record/auto", "true") == "true"
         session.start()
 
@@ -216,9 +218,46 @@ class Shell(QMainWindow):
         menu.addAction(auto)
         menu.addAction("Start / stop recording\tCtrl+R", self.toggle_recording)
         menu.addSeparator()
+        self.settings_menu(menu.addMenu("Settings"))
         menu.addAction("Edit address map", self.edit_map)
         menu.addAction("Open log folder", self.open_logs)
         menu.exec(pos)
+
+    def settings_menu(self, menu: QMenu) -> QMenu:
+        """Settings > Units: the two presets, then each quantity on its own."""
+        units = menu.addMenu("Units")
+        current, preset = U.as_dict(), U.preset_name()
+        labels = {"US": "US: mph, °F, gal/h (MAP stays kPa)", "Metric": "Metric: km/h, °C, L/h"}
+        for name in PRESETS:
+            action = QAction(labels.get(name, name), units, checkable=True)
+            action.setChecked(name == preset)
+            action.triggered.connect(lambda _=False, n=name: self.set_units(preset=n))
+            units.addAction(action)
+        units.addSeparator()
+        for field, title, base in QUANTITIES:
+            sub = units.addMenu(f"{title}: {current[field]}")
+            for unit in U.choices(base):
+                action = QAction(unit, sub, checkable=True)
+                action.setChecked(unit == current[field])
+                action.triggered.connect(lambda _=False, f=field, u=unit: self.set_units(f, u))
+                sub.addAction(action)
+        units.addSeparator()
+        note = units.addAction("Logs and exports stay in the address map's units")
+        note.setEnabled(False)
+        return menu
+
+    def set_units(self, field: str = "", unit: str = "", preset: str = "") -> None:
+        """Pick display units (one quantity, or a preset) and remember them."""
+        if preset:
+            U.preset(preset)
+        else:
+            U.set_unit(field, unit)
+        U.save(self.settings)
+        for widget in self.findChildren(QWidget):
+            widget.update()
+        self.screens[self.current()].refresh(self.session.bus.now())
+        chosen = U.as_dict()
+        self.say("Units: " + ", ".join(chosen[f] for f, _, _ in QUANTITIES[:4]))
 
     def first_contact(self) -> None:
         """W1's first-contact sequence on the last port, in the background.
@@ -274,7 +313,7 @@ class Shell(QMainWindow):
                            lambda: self.say(self.session.ecu.set_verified(
                                channel_id, not spec.verified)))
         menu.addSeparator()
-        limits = [f"{name} {value:g} {spec.units}" for name, value in (
+        limits = [f"{name} {U.limit(spec, value)}" for name, value in (
             ("warn below", spec.warn_lo), ("warn above", spec.warn_hi),
             ("alarm below", spec.alarm_lo), ("alarm above", spec.alarm_hi)) if value is not None]
         for text in limits or ["No limits set"]:

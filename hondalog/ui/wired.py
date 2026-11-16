@@ -49,6 +49,7 @@ from ..transport import CommandBlocked
 from . import adapters as ad
 from . import backends as be
 from .bus import ChannelBus, ChannelSpec
+from .units import U
 
 # ---- names ------------------------------------------------------------------
 
@@ -467,11 +468,13 @@ class PipelineAlarms:
         spec = state.spec if state is not None else None
         rule = next((r for r in self.engine.rules if r.name == ev.name), None)
         label = (spec.label if spec is not None else (rule.label if rule else ev.name)).upper()
-        value = (f"{spec.format(ev.value)} {spec.units}".strip()
-                 if spec is not None and ev.value is not None else "")
+        value = U.with_unit(spec, ev.value) if spec is not None and ev.value is not None else ""
+        tail = " (unverified channel)" if ev.unverified else ""
+        # the rule's own words carry the map's units ("Coolant 110 °C"): the
+        # screen gets them converted, the log keeps them as they are
         return ad.AlarmEvent(ev.channel or ev.name, spec.source if spec is not None else "ECU",
                              label, "alarm" if ev.severity == CRITICAL else "warn", value,
-                             ev.message + (" (unverified channel)" if ev.unverified else ""), now)
+                             U.convert_text(ev.message) + tail, now, log_text=ev.message + tail)
 
     def evaluate(self, bus: ChannelBus, now: float):
         started = []
@@ -529,7 +532,14 @@ class PipelineAlarms:
     def limits(self):
         rows = []
         for rule in self.engine.rules:
-            def lim(lo, hi, rule=rule):
+            ch = self.ecu.amap.channel(rule.channel) if rule.channel else None
+            base = ChannelSpec(rule.channel or rule.name, units=ch.units if ch is not None else "")
+            scale, offset = U.scale(base)
+            unit = f" {U.spec(base).units}" if scale != 1.0 or offset else ""
+
+            def lim(lo, hi, rule=rule, scale=scale, offset=offset):
+                lo = None if lo is None else round(lo * scale + offset, 2)
+                hi = None if hi is None else round(hi * scale + offset, 2)
                 parts = [f"<{lo:g}" if lo is not None else "", f">{hi:g}" if hi is not None else ""]
                 if rule.rate_low is not None or rule.rate_high is not None:
                     parts.append("rate")
@@ -538,7 +548,7 @@ class PipelineAlarms:
                 return " ".join(x for x in parts if x).replace("-", "−") or "—"
             text = lim(rule.low, rule.high)
             critical = rule.severity == CRITICAL
-            rows.append(ad.LimitRow(rule.label[:1].upper() + rule.label[1:],
+            rows.append(ad.LimitRow(rule.label[:1].upper() + rule.label[1:] + unit,
                                     "—" if critical else text, text if critical else "—"))
         return rows + list(self._extra.limits())
 

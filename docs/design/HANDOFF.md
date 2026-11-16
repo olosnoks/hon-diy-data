@@ -451,7 +451,9 @@ Tune
 
 ## 8. Things to confirm with the owner
 - Units. The mockups keep the app defaults (km/h, degrees C, kPa). The
-  address map already allows mph and degrees F per channel.
+  address map already allows mph and degrees F per channel. Settled: the
+  owner's default is US (mph, degrees F), MAP stays in kPa, volts as they
+  are; Settings > Units changes it (`hondalog/ui/units.py`, display only).
 - Alarm limits shown are placeholders (coolant warn 100 / alarm 108 C,
   battery warn below 12.8 / alarm below 11.5 V, black-box rails alarm below
   11 V, trims warn at 12 to 15 %).

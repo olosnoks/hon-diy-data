@@ -63,6 +63,17 @@ def convert(value: float | None, unit: str, to: str) -> float | None:
     return base * scale + offset
 
 
+def factors(unit: str, to: str) -> tuple[float, float]:
+    """(scale, offset) with  value in ``to`` = value in ``unit`` * scale + offset."""
+    src, dst = canonical(unit), canonical(to)
+    if src is None or dst is None or _QUANTITY[src] != _QUANTITY[dst]:
+        raise ValueError(f"cannot convert {unit!r} to {to!r}")
+    table = _TABLE[_QUANTITY[src]]
+    (s0, o0), (s1, o1) = table[src], table[dst]
+    scale = s1 / s0
+    return scale, o1 - o0 * scale
+
+
 def convert_span(span: float, unit: str, to: str) -> float:
     """Convert a difference (5 °C wide = 9 °F wide): scale only, no offset."""
     src, dst = canonical(unit), canonical(to)

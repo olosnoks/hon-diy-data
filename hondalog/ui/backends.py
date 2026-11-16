@@ -32,6 +32,7 @@ from ..protocol import ProtocolError
 from ..transport import BUILTIN_SIM, SIM_SYMLINK, list_ports, make_transport
 from . import adapters as ad
 from .bus import ChannelBus, ChannelSpec
+from .units import U
 
 # ---- display details the 0.1.0 address map does not carry -------------------
 
@@ -397,17 +398,21 @@ class LimitAlarms:
         self.revision = 0
 
     @staticmethod
-    def _check(spec: ChannelSpec, v: float):
+    def _check(spec: ChannelSpec, v: float, shown: bool = True):
+        """(level, text). ``shown``: the limit in the display unit; False: in
+        the channel's own unit (what goes into the log)."""
+        def text(word: str, bound: float) -> str:
+            return f"{word} {U.limit(spec, bound)}" if shown else f"{word} {bound:g} {spec.units}".strip()
         if spec.alarm_lo is not None and v < spec.alarm_lo:
-            return "alarm", f"below {spec.alarm_lo:g} {spec.units}".strip()
+            return "alarm", text("below", spec.alarm_lo)
         if spec.alarm_hi is not None and v > spec.alarm_hi:
             if spec.is_flag:
                 return "alarm", "is ON"
-            return "alarm", f"above {spec.alarm_hi:g} {spec.units}".strip()
+            return "alarm", text("above", spec.alarm_hi)
         if spec.warn_lo is not None and v < spec.warn_lo:
-            return "warn", f"below {spec.warn_lo:g} {spec.units}".strip()
+            return "warn", text("below", spec.warn_lo)
         if spec.warn_hi is not None and v > spec.warn_hi:
-            return "warn", f"above {spec.warn_hi:g} {spec.units}".strip()
+            return "warn", text("above", spec.warn_hi)
         return "", ""
 
     def evaluate(self, bus: ChannelBus, now: float):
@@ -439,8 +444,8 @@ class LimitAlarms:
             if level:
                 rec.event = ad.AlarmEvent(
                     spec.id, "BLACK BOX" if spec.source == "BB" else spec.source,
-                    spec.label.upper(), level,
-                    f"{spec.format(state.value)} {spec.units}".strip(), limit, now)
+                    spec.label.upper(), level, U.with_unit(spec, state.value), limit, now,
+                    log_text=self._check(spec, state.value, shown=False)[1])
                 if level == "alarm":
                     started.append(rec.event)
             self.revision += 1
@@ -474,11 +479,15 @@ class LimitAlarms:
             s = state.spec
             if s.is_flag:
                 continue
+            shown = U.spec(s)                   # the limits in the display unit
+
             def lim(lo, hi):
-                parts = [f"<{lo:g}" if lo is not None else "", f">{hi:g}" if hi is not None else ""]
+                parts = [f"<{round(lo, 2):g}" if lo is not None else "",
+                         f">{round(hi, 2):g}" if hi is not None else ""]
                 return " ".join(x for x in parts if x).replace("-", "\u2212")
-            warn, alarm = lim(s.warn_lo, s.warn_hi), lim(s.alarm_lo, s.alarm_hi)
-            rows.append(ad.LimitRow(("BB " if s.source == "BB" else "") + s.label,
+            warn, alarm = lim(shown.warn_lo, shown.warn_hi), lim(shown.alarm_lo, shown.alarm_hi)
+            unit = f" {shown.units}" if shown.units != s.units else ""
+            rows.append(ad.LimitRow(("BB " if s.source == "BB" else "") + s.label + unit,
                                     warn or "—", alarm or "—"))
         return rows
 
@@ -623,13 +632,13 @@ def order_of_loss(view: ad.LogView, pre_s: float = 30.0, hold_s: float = 0.2) ->
         if hit is None:
             held.append(spec.label)
             continue
-        was = spec.format(float(np.median(base)))
+        was = U.text(spec, float(np.median(base)))
         if spec.is_flag:
             what = "dropped to OFF" if v[hit] < 0.5 else "went ON"
         elif v[hit] < lo:
-            what = f"fell below {spec.format(lo)} {spec.units} (was {was})"
+            what = f"fell below {U.with_unit(spec, lo)} (was {was})"
         else:
-            what = f"rose above {spec.format(hi)} {spec.units} (was {was})"
+            what = f"rose above {U.with_unit(spec, hi)} (was {was})"
         rows.append(ad.LossRow(float(rel[hit]), cid, tag, what))
     rows.sort(key=lambda r: r.t)
     out = ad.Forensics(loss=rows + [ad.LossRow(0.0, "", "STALL", "trigger")])

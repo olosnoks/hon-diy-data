@@ -177,7 +177,9 @@ class Session:
         # live path drops it); the plain limit checker gets one from here
         auto_mark = not getattr(self.alarms, "marks_itself", False)
         for alarm in self.alarms.evaluate(bus, now):
-            n = (self.recording.mark(f"ALARM {alarm.source} {alarm.label} {alarm.limit_text}")
+            # the marker goes into the log: in the map's own units, whatever the screen shows
+            n = (self.recording.mark(f"ALARM {alarm.source} {alarm.label} "
+                                     f"{alarm.log_text or alarm.limit_text}")
                  if auto_mark or alarm.source == "BB" else 0)
             events.append(UiEvent("alarm", f"{alarm.source} {alarm.label} {alarm.value_text}"
                                            f" — {alarm.limit_text}"

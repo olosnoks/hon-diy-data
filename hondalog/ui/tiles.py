@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QWidget
 from . import paint
 from .bus import SPARK_N, ChannelState
 from .theme import T
+from .units import U
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,8 @@ class Tile(QWidget):
 
     def _reset(self) -> None:
         self._gen = self._spark_gen = -1
+        self._units_rev = -1
+        self._scale, self._offset = 1.0, 0.0
         self._value_t = -1e9
         self._fast = False
         self._spec = None
@@ -113,12 +116,16 @@ class Tile(QWidget):
             return
         spec = st.spec
         dirty = False
-        if spec is not self._spec:              # first frame, or the map was reloaded
-            self._spec = spec
-            self._fspec = spec if spec.decimals <= self.max_decimals else replace(
-                spec, decimals=self.max_decimals)
+        if spec is not self._spec or U.revision != self._units_rev:
+            # first frame, the map was reloaded, or the display units changed
+            self._spec, self._units_rev = spec, U.revision
+            shown = U.spec(spec)                # the channel in the units the user picked
+            self._scale, self._offset = U.scale(spec)
+            self._fspec = shown if shown.decimals <= self.max_decimals else replace(
+                shown, decimals=self.max_decimals)
             self._label = spec.label.upper()
-            self._units = spec.units
+            self._units = shown.units
+            self._value_font = None
             self._tag = "BLACK BOX" if spec.source == "BB" else spec.source
             self._gen = self._spark_gen = -1
             dirty = True
@@ -149,7 +156,8 @@ class Tile(QWidget):
             self.update()
 
     def _fmt(self, spec, value) -> str:
-        return self._fspec.format(value)
+        """A bus value as text, in the display unit."""
+        return self._fspec.format(value * self._scale + self._offset)
 
     def _refresh_value(self, st, spec, stale: bool) -> bool:
         value = st.value

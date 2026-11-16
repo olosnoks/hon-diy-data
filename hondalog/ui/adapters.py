@@ -85,6 +85,7 @@ class AlarmEvent:
     t_start: float              # bus time
     t_end: float | None = None  # None while active
     acked: bool = False
+    log_text: str = ""          # limit_text in the map's own units, for a marker in the log
 
 
 @dataclass

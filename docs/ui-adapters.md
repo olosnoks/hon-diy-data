@@ -255,6 +255,20 @@ read from the model, so a real P28 table that is not 20 x 10 works without a
 UI change (rows are 24 px: more than 20 RPM rows needs a scroll or a smaller
 row, which is not built).
 
+## Display units
+
+`hondalog/ui/units.py` holds one `U` object (like the theme's `T`). The bus,
+the recorder, the database and the exports stay in the address map's units;
+a widget converts when it draws: `U.spec(spec)` is the channel as shown (unit,
+range, limits, decimals), `U.text(spec, v)` / `U.with_unit(spec, v)` format a
+bus value, `U.limit(spec, v)` a limit, `U.convert_text(text)` an alarm rule's
+own message. `U.revision` bumps on a change; `Tile.sync` compares it. The
+shell loads `units/<quantity>` from QSettings (default: the `US` preset, MAP
+in kPa) and `Shell.settings_menu` is the Settings > Units menu. An
+`AlarmEvent` carries `log_text`, the limit in the map's units, for the marker
+that goes into the log. Before the shell has loaded its settings `U.prefs` is
+None and nothing is converted.
+
 ## Demo mode
 
 `hondalog --demo` wires `DemoSource` (the mockup's simulated car) for both
