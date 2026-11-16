@@ -92,11 +92,19 @@ class TableGrid(QWidget):
             trail = np.round(trail * 8) / 8         # eight steps: repaint only when a bar moves
             if not trail.any():
                 trail = None
-        same = (trail is None and self.trail is None) or (
-            trail is not None and self.trail is not None and np.array_equal(trail, self.trail))
-        if cell != self.live or not same:
-            self.live, self.trail = cell, trail
-            self.update()
+        shape = self.values.shape
+        old = self.trail if self.trail is not None and self.trail.shape == shape else np.zeros(shape)
+        new = trail if trail is not None and trail.shape == shape else np.zeros(shape)
+        moved = old != new
+        for one in (cell, self.live):
+            if cell != self.live and one is not None and one[0] < shape[0] and one[1] < shape[1]:
+                moved[one] = True
+        self.live, self.trail = cell, trail
+        # only the cells whose bar or outline changed are painted again: the
+        # trail fades a step somewhere several times a second, and the whole
+        # table is two hundred numbers
+        for r, c in zip(*np.nonzero(moved)):
+            self.update(self._rect(int(r), int(c)).toAlignedRect())
 
     def cell_w(self) -> float:
         return (self.width() - HEAD_W - 4) / self.values.shape[1]
@@ -117,30 +125,38 @@ class TableGrid(QWidget):
             self.update()
             self.moved.emit()
 
-    def paintEvent(self, _event) -> None:
+    def paintEvent(self, event) -> None:
         p = QPainter(self)
         nr, nc = self.values.shape
-        p.fillRect(self.rect(), T.panel)
+        area = event.rect()
+        p.fillRect(area, T.panel)
         head = T.font(13, 700, mono=True)
-        p.setFont(T.font(12, 700, mono=True))
-        p.setPen(T.fg)
-        p.drawText(QRectF(6, 2, HEAD_W, 12), Qt.AlignVCenter | Qt.AlignLeft, "RPM ↓")
-        p.drawText(QRectF(6, 13, HEAD_W, 12), Qt.AlignVCenter | Qt.AlignLeft, "kPa →")
-        p.setFont(head)
-        for c in range(nc):
-            r = self._rect(0, c)
-            p.drawText(QRectF(r.x(), 2, r.width(), HEAD_H), Qt.AlignCenter, f"{self.map[c]:g}")
-        for r in range(nr):
-            p.drawText(QRectF(2, HEAD_H + 2 + r * ROW_H, HEAD_W - 8, ROW_H),
-                       Qt.AlignVCenter | Qt.AlignRight, f"{self.rpm[r]:g}")
+        if area.top() < HEAD_H + 2 or area.left() < HEAD_W + 2:      # the axis headers are in the update
+            p.setFont(T.font(12, 700, mono=True))
+            p.setPen(T.fg)
+            p.drawText(QRectF(6, 2, HEAD_W, 12), Qt.AlignVCenter | Qt.AlignLeft, "RPM ↓")
+            p.drawText(QRectF(6, 13, HEAD_W, 12), Qt.AlignVCenter | Qt.AlignLeft, "kPa →")
+            p.setFont(head)
+            for c in range(nc):
+                r = self._rect(0, c)
+                p.drawText(QRectF(r.x(), 2, r.width(), HEAD_H), Qt.AlignCenter, f"{self.map[c]:g}")
+            for r in range(nr):
+                p.drawText(QRectF(2, HEAD_H + 2 + r * ROW_H, HEAD_W - 8, ROW_H),
+                           Qt.AlignVCenter | Qt.AlignRight, f"{self.rpm[r]:g}")
+        # the rows and columns the update touches (all of them for a full repaint)
+        r_lo = max(0, int((area.top() - HEAD_H - 2) // ROW_H))
+        r_hi = min(nr - 1, int((area.bottom() - HEAD_H - 2) // ROW_H))
+        cw = self.cell_w()
+        c_lo = max(0, int((area.left() - HEAD_W - 2) // cw) - 1)
+        c_hi = min(nc - 1, int((area.right() - HEAD_W - 2) // cw) + 1)
         cell, bold = T.font(13, 600, mono=True), T.font(13, 800, mono=True)
         ink = T.on_heat
         tri = QPolygonF([QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)])
         trail = self.trail if self.trail is not None and self.trail.shape == (nr, nc) else None
         p.setFont(cell)
-        for r in range(nr):
+        for r in range(r_lo, r_hi + 1):
             heat, text, changed = self._heat[r], self._text[r], self._changed[r]
-            for c in range(nc):
+            for c in range(c_lo, c_hi + 1):
                 rect = self._rect(r, c)
                 p.fillRect(rect, heat[c])
                 if trail is not None and trail[r, c] > 0:

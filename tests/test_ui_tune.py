@@ -283,3 +283,45 @@ def test_demo_tables_keep_working_without_a_rom(shell, app):
     assert not tune.chip.open_btn.isEnabled() and not tune.chip.burn_btn.isEnabled()
     assert tune.chip.save_btn.isEnabled() and tune.inc_btn.isEnabled() and not tune.redo_btn.isEnabled()
     assert not tune.open_rom("x.bin") and not tune.load_definition("x.xdf") and not tune.build_burn_image("x")
+
+
+def test_the_grid_repaints_only_the_cells_that_changed(app):
+    """The live cell and the trail move several times a second; the grid
+    repaints those cells, and the result is what a full repaint gives."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QPixmap, QRegion
+    from hondalog.ui.screens.tune import TableGrid
+    grid = TableGrid()
+    grid.resize(560, 508)
+    rpm = np.round((500 + np.arange(20) * 7000 / 19) / 50) * 50
+    kpa = np.round(17 + np.arange(10) * 84 / 9)
+    values = np.add.outer(np.arange(20) * 0.1, np.arange(10) * 0.5) + 1.0
+    grid.load(values, values.copy(), rpm, kpa, 2, 0.0, 8.0)
+    tracer = TableTracer(rpm, kpa, trail_seconds=7.0)
+    screen = QPixmap(grid.size())
+    grid.render(screen, QPoint(), QRegion(grid.rect()))
+    updates = []
+    real = grid.update
+    grid.update = lambda *a: (updates.append(a), real(*a))[1]
+    cells = 0
+    for i in range(120):                                    # 12 s: up through the table and back to idle
+        t = i * 0.1
+        pos = tracer.update(t, 900 + 5500 * abs(np.sin(t / 3.0)), 30 + 60 * abs(np.sin(t / 3.0)))
+        updates.clear()
+        row, col = pos.nearest
+        grid.set_live((col, row), tracer.heat(t).T)
+        assert all(a for a in updates), "never the whole grid"
+        cells += len(updates)
+        for (rect,) in updates:
+            grid.render(screen, rect.topLeft(), QRegion(rect))
+    assert 100 < cells < 120 * 12                           # a few cells per sample, not two hundred
+    whole = QPixmap(grid.size())
+    grid.render(whole, QPoint(), QRegion(grid.rect()))
+    assert screen.toImage() == whole.toImage()
+    updates.clear()
+    grid.set_live(None)                                     # no data: the outline and every bar go
+    assert grid.live is None and grid.trail is None and updates
+    for (rect,) in updates:
+        grid.render(screen, rect.topLeft(), QRegion(rect))
+    grid.render(whole, QPoint(), QRegion(grid.rect()))
+    assert screen.toImage() == whole.toImage()

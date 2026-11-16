@@ -137,6 +137,13 @@ def headless_power_cut():
     with open_log(event.path) as cap:
         after = cap.t1 - event.t
     check(after >= 10.0, f"kept logging {after:.1f} s after the drop")
+    # delete that drive again the way the owner would: hondalog-log rm
+    from hondalog import logtool
+    before = sqlite3.connect(event.path.db).execute("SELECT count(*) FROM drives").fetchone()[0]
+    code = logtool.main(["rm", "--yes", event.path.drive])
+    left = [r[0] for r in sqlite3.connect(event.path.db).execute("SELECT name FROM drives")]
+    check(code == 0 and len(left) == before - 1 and event.path.drive not in left,
+          f"hondalog-log rm removed {event.path.drive}; {len(left)} drive(s) left")
 
 
 def gui(docs: Path):
@@ -191,12 +198,21 @@ def gui(docs: Path):
         mapper.send(protocol.parse_hex("20 05 76 0A"), True)
         mapper.set_sweeping(True)
         check(spin(12, lambda: mapper.sweeps >= 3), "three memory sweeps done")
+        check(spin(25, lambda: mapper.sweeps >= 8), "eight sweeps for the correlation finder")
         mapper.set_sweeping(False)
         moved = int((mapper.changes > 0).sum())
         check(moved > 5 and (mapper.cur >= 0).all(), f"mapper saw {moved} bytes change, all 256 read")
         check("checksum OK" in mapper.console(), "hex console round trip")
         mapper.send(protocol.parse_hex("21 04 00"), True)
         check(spin(3, lambda: "blocked" in mapper.console()), "a frame that is not a read is refused")
+        win.raw.show_rank(True)
+        win.raw.rank.set_reference("rpm")
+        win.raw.rank.rank()
+        ranked = win.raw.rank.rows
+        check(win.raw.rank.ranked and (ranked or mapper.console()),
+              "rank addresses against rpm: " + (", ".join(f"{r.label} {r.score:.2f}" for r in ranked[:3])
+                                                or mapper.console()))
+        win.raw.show_rank(False)
         mapper.export(TMP / "scan.txt")
         check((TMP / "scan.txt").stat().st_size > 1000, "sweep export")
         spin(0.3)
@@ -212,6 +228,10 @@ def gui(docs: Path):
         view = win.replay.view
         check(win.current() == REPLAY and view is not None and view.trigger_t is not None
               and len(view.markers) >= 1, "stall capture opens in replay with markers and a trigger")
+        model = win.replay.model
+        check(model is not None and model.session is view.replay and win.replay.block.traces >= 1,
+              "replay lanes are drawn from the drive's ReplaySession "
+              f"({len(model.events())} events to step through)")
         check(len(win.replay.forensics.loss) >= 1, "order of loss computed: "
               + "; ".join(f"{r.signal} {r.t:+.1f}s" for r in win.replay.forensics.loss[:3]))
         spin(0.5)
