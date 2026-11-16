@@ -139,21 +139,27 @@ The GPS is plugged into **P1**, whose pin 3 is GPIO44 (RX0). That needs the
   GPIO44 through a 100 Ω series resistor, and so does the GPS. It works only
   if the GPS wins. Watch `GPS OK/BAD` on the Link screen.
 
-#### Recommended: GPS TX to P3 pin 2, normal build
+#### Recommended: GPS on P3 (data pin 2, PPS pin 1), normal build
 
 | NEO-6M | Goes to |
 |---|---|
 | TX | **P3 pin 2 (GPIO18)** |
+| PPS | **P3 pin 1 (GPIO17)** |
 | VCC | P1 pin 1 (5 V) |
 | GND | P1 pin 4 (GND) |
 | RX | not connected |
+
+Nothing goes on P1 pins 2 and 3.
 
 GPIO18 is what the normal build already listens on, so this uses the
 standard firmware (no `--gps-p1`). It frees UART0 completely: the console
 comes back, and the serial link to the laptop can be two-way.
 
-P3 then carries three wires: GPS on pin 2, the K-line on pins 3 and 4. Pin 1
-(GPIO17) stays free for the optional second button.
+P3 then carries four wires: GPS PPS on pin 1, GPS data on pin 2, the K-line
+on pins 3 and 4. In the normal build GPIO17 is the PPS input and is no longer
+the optional second button (it still is in the `--gps-p1` build, which has no
+PPS). If P3 is wired the other way round (data on pin 1, PPS on pin 2), the
+firmware sees the NMEA on the PPS pin and swaps the UART to it at run time.
 
 #### What does not work
 
@@ -399,7 +405,7 @@ released.
 pin: held at reset, the board enters the flashing mode and the screen stays
 dark. Power-cycle to recover.
 
-**Optional second button:** a momentary switch from GPIO17 (P3 pin 1) to
+**Optional second button** (only in the `--gps-p1` build; in the normal build GPIO17 is the GPS PPS input): a momentary switch from GPIO17 (P3 pin 1) to
 GND. A short press steps *back* a screen. It does nothing else.
 
 ## Stalls, alarms and marks
@@ -523,7 +529,8 @@ python tools/cyd_debug.py COM17 --reset --seconds 15   # reset the board and wat
 
 Every 2 s the firmware logs a `gps diag` line: whether the GPS reader is
 running, its UART and pin, bytes received, how many times the RX pin was
-pulled low (a hardware pulse counter, independent of the UART), the sentence
+pulled low on the data pin and on the PPS pin (hardware pulse counters,
+independent of the UART), PPS rising edges as time-stamped by an ISR, the sentence
 counts and the last bytes received. **Falling edges 0** means nothing ever
 pulls the line low: the GPS has no power, its TX goes to another pin, or
 something else holds the line high.

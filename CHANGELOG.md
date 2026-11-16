@@ -126,6 +126,11 @@ against the simulators and the host builds of the firmware cores.
   `hondalog-cydsim` simulates the handheld for testing.
 - A build option for the GPS on header P1 (`--gps-p1`), and GPS sentence
   counters (`GPS OK/BAD`) on the Link screen.
+- GPS on header P3: data on GPIO18 and the PPS output on GPIO17 (replacing the
+  optional second button in the normal build). PPS rising edges are
+  time-stamped by an ISR, the firmware swaps the UART to the PPS pin at run
+  time if P3 is wired the other way round, and the `gps diag` line now reports
+  both pins.
 
 ### Tuning (Track C)
 

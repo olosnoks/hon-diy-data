@@ -113,6 +113,10 @@
 #define HH_GPS_BAUD             9600
 #define HH_GPS_RX               18   /* [C] P4/P3. GPS TX -> here. Free on the N board: touch IRQ only on R; on C it needs R17, not fitted */
 #define HH_GPS_TX               (-1) /* not wired. If the GPS must be configured, use 17 and give up HH_BTN_2 */
+#define HH_GPS_PPS              17   /* GPS PPS (one pulse per second) on P3, next to the data pin. The firmware
+                                      * watches both: if the data shows up on this pin instead (P3 wired the other
+                                      * way round), it swaps the two at run time. Takes the place of HH_BTN_2. */
+#undef  HH_BTN_2
 
 /* Variant: GPS on header P1 (UART0, next to the USB-C) instead of P4.
  * Build with -DHH_GPS_P1=1 and sdkconfig.gps_p1 (console off). GPIO44 is also
@@ -125,6 +129,9 @@
 #undef  HH_GPS_TX
 #define HH_GPS_UART_NUM         1    /* UART1 routed to GPIO44 through the GPIO matrix, so a pulse counter can watch the pin too */
 #define HH_GPS_RX               44   /* P1 pin 3, RX0 */
+#undef  HH_GPS_PPS
+#define HH_GPS_PPS              (-1) /* no PPS on P1 */
+#define HH_BTN_2                17   /* P3 is free in this build: the optional second button again */
 #define HH_GPS_TX               (-1) /* P1 pin 2 (TX0) left idle: nothing is sent to the GPS */
 #endif
 

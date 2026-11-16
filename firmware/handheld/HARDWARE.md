@@ -27,7 +27,7 @@ in `include/board_pins.h`, one `#define` each, with the source beside it.
 | 2 | backlight | on board | enable of the boost LED driver, active high, PWM dims it |
 | 10, 11, 12, 13 | microSD CS, MOSI, SCK, MISO | slot; 11–13 also on P2 | SPI2 |
 | 43, 44 | UART0 TX, RX | CH340C and P1 | laptop link (SERIAL.md), console, flashing |
-| 17 | **free** → second button (optional) | P3, P4 | nothing on the board uses it |
+| 17 | **free** → GPS PPS (second button only in the `--gps-p1` build) | P3, P4 | nothing on the board uses it |
 | 18 | **free on N** → GPS RX | P3, P4 | touch interrupt on the R board only |
 | 19 | **free on N** → USB D− (plan A) or K-line TX (plan B) | P3, P2 | touch SDA on the C board; see "pull-ups" below |
 | 20 | **free on N** → USB D+ (plan A) or K-line RX (plan B) | P3 | touch SCL on the C board |
@@ -258,7 +258,7 @@ the GPS or the buttons.
 A NEO-6M module (GY-NEO6MV2 or similar) on P4, which has exactly the four
 pins it needs. In practice the GPS's stock cable does not fit P4's socket;
 the GPS now sits on P1 (the `--gps-p1` build) and the recommended place is
-P3 pin 2, the same GPIO18. See
+P3: data on pin 2 (GPIO18), PPS on pin 1 (GPIO17). See
 [GPS placement](../../docs/handheld.md#gps-placement), and never move one
 cable between P1 and P4: their power pins are at opposite ends.
 
@@ -270,6 +270,12 @@ cable between P1 and P4: their power pins are at opposite ends.
  RX  ─── not connected             (pin 3, GPIO17, if you ever need to configure it)
 ```
 
+- Recommended wiring on P3 (normal build): GPS VCC and GND to P1 pins 1
+  (5 V) and 4 (GND), GPS TX to P3 pin 2 (GPIO18), GPS PPS to P3 pin 1
+  (GPIO17), GPS RX not connected, nothing on P1 pins 2 and 3. If P3 is wired
+  the other way round the firmware auto-swaps the two pins at run time.
+  GPIO17 is the PPS input there, no longer the optional second button (it
+  still is in the `--gps-p1` build).
 - UART1, RX = GPIO18. `HH_GPS_TX` is −1: the module sends NMEA at 9600 once
   a second without being asked.
 - Power from 3V3, as the black box does. The module draws about 45 mA
@@ -357,7 +363,7 @@ board has the circuit]**.
 One-button use: short press = next page, long press = action on that page
 (mark, night mode).
 
-**A second button is possible on GPIO17**, the one pin left, as long as the
+**A second button is possible on GPIO17** only in the `--gps-p1` build (in the normal build GPIO17 is the GPS PPS input), as long as the
 GPS's RX stays unconnected. Momentary switch from P3 pin 1 to GND, internal
 pull-up, no resistor needed:
 

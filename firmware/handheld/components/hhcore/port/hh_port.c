@@ -31,6 +31,10 @@
 #include "driver/spi_common.h"
 #include "driver/pulse_cnt.h"
 #include "driver/uart.h"
+#include "esp_private/gpio.h"
+#include "esp_rom_gpio.h"
+#include "soc/io_mux_reg.h"
+#include "soc/uart_periph.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -268,67 +272,132 @@ static void link_task(void *arg)
     for (;;) hh_core_step(core);        /* every step ends in an exchange or a wait */
 }
 
-/* GPS diagnostics, logged every 2 s (as log frames on the laptop link): did
- * the reader start, how many bytes arrived, how many times the RX pin was
- * pulled low at all (hardware pulse counter, independent of the UART), and the
- * last bytes as text. Zero edges = nothing ever drives the line low: no power
- * to the GPS, TX on the wrong pin, or something else holding the line high. */
+/* GPS diagnostics, logged every 2 s (as log frames on the laptop link).
+ * Hardware pulse counters watch the data pin and the PPS pin, independent of
+ * the UART: falling edges 0 means nothing ever drives that line low. If the
+ * NMEA shows up on the PPS pin instead (P3 wired the other way round), the two
+ * are swapped at run time and the UART moves to the busy pin. PPS rising edges
+ * are time-stamped (esp_timer us) for the clock. */
+#ifndef HH_GPS_PPS
+#define HH_GPS_PPS (-1)
+#endif
+enum { PIN_DATA, PIN_PPS, N_PROBE };
+static int gps_pin[N_PROBE] = {HH_GPS_RX, HH_GPS_PPS};
 static int gps_status = -99;            /* 0 running, else the step that failed */
 static uint32_t gps_bytes;
 static char gps_tail[49];
-static pcnt_unit_handle_t gps_pcnt;
-static int gps_edges_overflows;
+static pcnt_unit_handle_t gps_pcnt[N_PROBE];
+static volatile int gps_overflows[N_PROBE];
+static volatile int64_t pps_last_us;
+static volatile uint32_t pps_count;
 
 static bool gps_pcnt_overflow(pcnt_unit_handle_t u, const pcnt_watch_event_data_t *e, void *ctx)
 {
-    (void)u; (void)e; (void)ctx;
-    gps_edges_overflows++;
+    (void)e; (void)ctx;
+    for (int i = 0; i < N_PROBE; i++)       /* by handle: the roles can swap */
+        if (gps_pcnt[i] == u) gps_overflows[i]++;
     return false;
+}
+
+static void IRAM_ATTR pps_isr(void *arg)
+{
+    (void)arg;
+    pps_last_us = esp_timer_get_time();
+    pps_count++;
+}
+
+static void probe_init(int i)
+{
+    if (gps_pin[i] < 0) return;
+    pcnt_unit_config_t uc = {.low_limit = -1, .high_limit = 30000};
+    if (pcnt_new_unit(&uc, &gps_pcnt[i]) != ESP_OK) { gps_pcnt[i] = NULL; return; }
+    pcnt_chan_config_t cc = {.edge_gpio_num = gps_pin[i], .level_gpio_num = -1};
+    pcnt_channel_handle_t ch;
+    if (pcnt_new_channel(gps_pcnt[i], &cc, &ch) != ESP_OK
+        || pcnt_channel_set_edge_action(ch, PCNT_CHANNEL_EDGE_ACTION_HOLD, PCNT_CHANNEL_EDGE_ACTION_INCREASE) != ESP_OK) {
+        pcnt_del_unit(gps_pcnt[i]); gps_pcnt[i] = NULL; return;
+    }
+    pcnt_unit_add_watch_point(gps_pcnt[i], 30000);
+    pcnt_event_callbacks_t cbs = {.on_reach = gps_pcnt_overflow};
+    pcnt_unit_register_event_callbacks(gps_pcnt[i], &cbs, NULL);
+    pcnt_unit_enable(gps_pcnt[i]);
+    pcnt_unit_clear_count(gps_pcnt[i]);
+    pcnt_unit_start(gps_pcnt[i]);
+}
+
+static void pps_attach(int pin)
+{
+    static int attached = -1;
+    if (attached >= 0) gpio_isr_handler_remove((gpio_num_t)attached);
+    attached = -1;
+    if (pin < 0) return;
+    esp_err_t e = gpio_install_isr_service(0);
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) return;
+    gpio_set_intr_type((gpio_num_t)pin, GPIO_INTR_POSEDGE);
+    if (gpio_isr_handler_add((gpio_num_t)pin, pps_isr, NULL) == ESP_OK) {
+        gpio_intr_enable((gpio_num_t)pin);
+        attached = pin;
+    }
+}
+
+/* Route the GPS RX through the GPIO matrix, never the IOMUX shortcut, so the pulse counter on the same pin keeps working. */
+static void gps_route_rx(int pin)
+{
+    uart_set_pin((uart_port_t)HH_GPS_UART_NUM, HH_GPS_TX, pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    gpio_func_sel((gpio_num_t)pin, PIN_FUNC_GPIO);
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT); /* gpio_input_enable() does not exist in IDF 5.3.1 */
+    esp_rom_gpio_connect_in_signal(pin, UART_PERIPH_SIGNAL(HH_GPS_UART_NUM, SOC_UART_RX_PIN_IDX), false);
 }
 
 static void gps_diag_init(void)
 {
-    if (HH_GPS_RX < 0) return;
-    pcnt_unit_config_t uc = {.low_limit = -1, .high_limit = 30000};
-    if (pcnt_new_unit(&uc, &gps_pcnt) != ESP_OK) { gps_pcnt = NULL; return; }
-    pcnt_chan_config_t cc = {.edge_gpio_num = HH_GPS_RX, .level_gpio_num = -1};
-    pcnt_channel_handle_t ch;
-    if (pcnt_new_channel(gps_pcnt, &cc, &ch) != ESP_OK
-        || pcnt_channel_set_edge_action(ch, PCNT_CHANNEL_EDGE_ACTION_HOLD, PCNT_CHANNEL_EDGE_ACTION_INCREASE) != ESP_OK) {
-        pcnt_del_unit(gps_pcnt); gps_pcnt = NULL; return;
-    }
-    pcnt_unit_add_watch_point(gps_pcnt, 30000);
-    pcnt_event_callbacks_t cbs = {.on_reach = gps_pcnt_overflow};
-    pcnt_unit_register_event_callbacks(gps_pcnt, &cbs, NULL);
-    pcnt_unit_enable(gps_pcnt);
-    pcnt_unit_clear_count(gps_pcnt);
-    pcnt_unit_start(gps_pcnt);
+    for (int i = 0; i < N_PROBE; i++) probe_init(i);
+    pps_attach(gps_pin[PIN_PPS]);
 }
 
-static uint32_t gps_edges(void)
+static uint32_t probe_edges(int i)
 {
     int c = 0;
-    if (!gps_pcnt || pcnt_unit_get_count(gps_pcnt, &c) != ESP_OK) return 0;
-    return (uint32_t)gps_edges_overflows * 30000u + (uint32_t)c;
+    if (!gps_pcnt[i] || pcnt_unit_get_count(gps_pcnt[i], &c) != ESP_OK) return 0;
+    return (uint32_t)gps_overflows[i] * 30000u + (uint32_t)c;
 }
 
 static void gps_diag_log(void)
 {
-    static uint32_t last_bytes, last_edges;
-    uint32_t edges = gps_edges();
+    static uint32_t last_bytes, last_edges[N_PROBE], last_pps;
+    uint32_t edges[N_PROBE], d[N_PROBE];
+    for (int i = 0; i < N_PROBE; i++) { edges[i] = probe_edges(i); d[i] = edges[i] - last_edges[i]; }
+
+    /* data on the PPS pin and nothing on the data pin: P3 is the other way round */
+    if (gps_status == 0 && gps_pin[PIN_PPS] >= 0 && d[PIN_PPS] > 200 && d[PIN_PPS] > 20 * (d[PIN_DATA] + 1)) {
+        int t = gps_pin[PIN_DATA]; gps_pin[PIN_DATA] = gps_pin[PIN_PPS]; gps_pin[PIN_PPS] = t;
+        pcnt_unit_handle_t u = gps_pcnt[PIN_DATA]; gps_pcnt[PIN_DATA] = gps_pcnt[PIN_PPS]; gps_pcnt[PIN_PPS] = u;
+        int o = gps_overflows[PIN_DATA]; gps_overflows[PIN_DATA] = gps_overflows[PIN_PPS]; gps_overflows[PIN_PPS] = o;
+        uint32_t e = edges[PIN_DATA]; edges[PIN_DATA] = edges[PIN_PPS]; edges[PIN_PPS] = e;
+        e = d[PIN_DATA]; d[PIN_DATA] = d[PIN_PPS]; d[PIN_PPS] = e;
+        e = last_edges[PIN_DATA]; last_edges[PIN_DATA] = last_edges[PIN_PPS]; last_edges[PIN_PPS] = e;
+        gps_route_rx(gps_pin[PIN_DATA]);
+        pps_attach(gps_pin[PIN_PPS]);
+        ESP_LOGW(TAG, "gps: NMEA found on GPIO%d, PPS expected on GPIO%d: swapped (P3 wired the other way round)",
+                 gps_pin[PIN_DATA], gps_pin[PIN_PPS]);
+    }
+
     hh_snapshot_t s;
     hh_snapshot(&s);
     char tail[sizeof(gps_tail)];
     memcpy(tail, gps_tail, sizeof(tail));
-    ESP_LOGI(TAG, "gps diag: reader %s, uart%d rx pin %d @%d baud, pin now %s, bytes %u (+%u), falling edges %s%u (+%u), "
-             "sentences ok %u bad %u, fix %u sats %u, last \"%s\"",
-             gps_status == 0 ? "running" : "NOT running", (int)HH_GPS_UART_NUM, (int)HH_GPS_RX, (int)cfg.gps_baud,
-             HH_GPS_RX >= 0 ? (gpio_get_level((gpio_num_t)HH_GPS_RX) ? "high" : "LOW") : "-",
-             (unsigned)gps_bytes, (unsigned)(gps_bytes - last_bytes), gps_pcnt ? "" : "(no counter) ",
-             (unsigned)edges, (unsigned)(edges - last_edges), (unsigned)s.nmea.good, (unsigned)s.nmea.bad,
-             (unsigned)s.gps.fix, (unsigned)s.gps.sats, tail);
+    uint32_t pps = pps_count;
+    int64_t age = pps_last_us ? (esp_timer_get_time() - pps_last_us) / 1000 : -1;
+    ESP_LOGI(TAG, "gps diag: reader %s, uart%d data GPIO%d @%d baud (%s), bytes %u (+%u), data edges %u (+%u), "
+             "PPS GPIO%d edges +%u pulses %u (+%u, last %lld ms ago), sentences ok %u bad %u, fix %u sats %u, last \"%s\"",
+             gps_status == 0 ? "running" : "NOT running", (int)HH_GPS_UART_NUM, gps_pin[PIN_DATA], (int)cfg.gps_baud,
+             gps_pin[PIN_DATA] >= 0 ? (gpio_get_level((gpio_num_t)gps_pin[PIN_DATA]) ? "high" : "LOW") : "-",
+             (unsigned)gps_bytes, (unsigned)(gps_bytes - last_bytes), (unsigned)edges[PIN_DATA], (unsigned)d[PIN_DATA],
+             gps_pin[PIN_PPS], (unsigned)d[PIN_PPS], (unsigned)pps, (unsigned)(pps - last_pps), (long long)age,
+             (unsigned)s.nmea.good, (unsigned)s.nmea.bad, (unsigned)s.gps.fix, (unsigned)s.gps.sats, tail);
     last_bytes = gps_bytes;
-    last_edges = edges;
+    for (int i = 0; i < N_PROBE; i++) last_edges[i] = edges[i];
+    last_pps = pps;
 }
 
 static void gps_task(void *arg)
@@ -383,6 +452,7 @@ static int gps_start(void)
         return gps_status = -3;
     }
     gps_diag_init();
+    gps_route_rx(gps_pin[PIN_DATA]);
     ESP_LOGI(TAG, "gps: uart%d rx pin %d at %d baud", (int)port, (int)HH_GPS_RX, (int)cfg.gps_baud);
     return gps_status = 0;
 }
