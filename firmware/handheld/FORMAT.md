@@ -146,12 +146,29 @@ window`. Written when the post-trigger time is over. The data of a capture
 is the drive's own data between start and end; a stall whose record is
 missing (power went first) is still marked by its event.
 
-**Time record**, 24 bytes: `u64 t_us, i64 Unix µs at that moment, u8 source
-(1 GPS, 2 the clock as it was, 3 set by the laptop over the serial link,
-SERIAL.md), 7 reserved`. The handheld has no battery
+**Time record**, 24 bytes: `u64 t_us, i64 Unix µs at that moment, u8 source,
+u8 reserved, u16 err_us, i32 drift_ppb`. `source`:
+
+| source | meaning | accuracy of `unix` |
+|---|---|---|
+| 1 | GPS, from the NMEA sentences alone (no pulse, or it was lost) | about 1 s |
+| 2 | the clock as it was (nothing from GPS yet) | unknown |
+| 3 | set by the laptop over the serial link (SERIAL.md) | milliseconds |
+| 4 | GPS with the PPS pulse: the sentence's second paired with the pulse's edge | tens of µs |
+
+`err_us` (saturating at 65535) and `drift_ppb` (the device clock's rate error
+as the filter has it: unix minus device time changes by this many ns per
+second) are only set for source 4, and are 0 for the others; a reader that
+knows only sources 1 to 3 reads the same 24 bytes with the last 7 as
+reserved. A record is written when the source changes (to 4 when the pulse is
+locked, to 1 when it is lost for 10 s), once a minute while it is 4, and at
+the start of every file. The handheld has no battery
 clock: a drive that starts before the first GPS fix has 0 in its header and
 gets its wall time from the first TIME record. Readers use the newest GPS
-one: `epoch = unix - (t - t0)`.
+one (source 1 or 4): `epoch = unix - (t - t0)`. With source 4 that map is
+exact at the record and drifts by the crystal's error (up to about 20 µs per
+second) away from it, so for the best stamps use the nearest record, and
+`drift_ppb` to carry it across.
 
 ### Capture files
 

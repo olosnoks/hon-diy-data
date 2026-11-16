@@ -131,6 +131,23 @@ against the simulators and the host builds of the firmware cores.
   time-stamped by an ISR, the firmware swaps the UART to the PPS pin at run
   time if P3 is wired the other way round, and the `gps diag` line now reports
   both pins.
+- Wall clock from the GPS pulse: each PPS edge is paired with the UTC second of
+  the GGA/RMC that follows within 900 ms, and an alpha-beta filter keeps the
+  device clock's offset and drift, so `unix_us` is good to tens of microseconds
+  while the pulse is there (portable `hh_pps.c`, host tests with simulated
+  pulses, jitter, missing and noise pulses, a lost fix and a clock step). Noise
+  pulses (not 1 s +- 1 ms) and pairs far from the prediction are ignored. With
+  no pulse or no fix it falls back to the sentences' time as before. The
+  snapshot has `time_source` (none / GPS sentences / PPS / laptop) and the error
+  estimate; the Link screen shows `TIME PPS +-20us`; drive files get a TIME
+  record (new source 4, with the error and drift) when the source changes and
+  every minute; the serial link's hello has a PPS flag and STATS gains
+  `time_source` and `time_err_us` (104 bytes, the first 96 unchanged), and its
+  `t_us` and `unix_us` are now read at the same instant. The `gps time` log
+  line shows the offset, drift and jitter. The laptop reads the new codes
+  (`hondalog-handheld status`, the importer's epoch) and still reads files and
+  frames from older firmware. The Link screen's STALL row is shortened to make
+  room for TIME.
 
 ### Tuning (Track C)
 
