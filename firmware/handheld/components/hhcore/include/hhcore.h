@@ -346,6 +346,8 @@ typedef struct {
     int32_t sleep_probe_s;      /* while asleep, wake this often and ask the ECU */
     int32_t usb_latency_ms;     /* FTDI latency timer */
     int32_t utc_offset_min;     /* for the clock on screen only; files are UTC */
+    int32_t serial;             /* 1: the binary link to the laptop on the USB-C port (SERIAL.md); 0 = off */
+    int32_t serial_baud;        /* its baud rate */
 } hh_config_t;
 
 void   hh_config_default(hh_config_t *c);
@@ -554,6 +556,28 @@ int  hh_iso_pid_len(uint8_t pid);                       /* data bytes of a Mode 
 
 typedef struct hh_core hh_core_t;
 
+/* The tap: everything the engine learns, as it learns it, for a listener that
+ * is not the card (hh_serial.c streams it to the laptop). Called with the
+ * engine's lock held, on whichever task produced the record: it must only
+ * copy. The records are the payloads of SERIAL.md's frames. */
+enum { HH_TAP_READ = 1, HH_TAP_TICK, HH_TAP_LINK, HH_TAP_GPS, HH_TAP_EVENT, HH_TAP_ISO };
+typedef struct HH_PACKED { uint64_t t_us; uint8_t addr, len; uint16_t latency_us; } hh_tap_read_t;    /* + len data bytes */
+typedef struct HH_PACKED { uint64_t t_us; uint16_t latency_us, hz_c; uint32_t n; } hh_tap_tick_t;     /* one fast cycle done; hz_c = Hz x 100 */
+typedef struct HH_PACKED { uint64_t t_us; uint8_t state, up, backend, iso; } hh_tap_link_t;           /* state: HH_LINK_* */
+typedef struct HH_PACKED { uint64_t t_us; uint8_t mode, pid, len, flags; } hh_tap_iso_t;              /* + len data bytes */
+/* HH_TAP_GPS carries an hh_gps_t, HH_TAP_EVENT an hh_rec_event_t. */
+typedef void (*hh_tap_fn)(void *ctx, uint8_t kind, const void *rec, size_t len, const void *data, size_t data_len);
+
+/* Who the engine is, for a hello. */
+typedef struct {
+    char    map_hash[12];
+    uint8_t map_sha[8];
+    char    device[12];
+    uint8_t ecu_id[10], ecu_id_len;
+    uint8_t link_state, backend, link_mode, builtin_map, time_valid, sd_ok, n_ch;
+    uint32_t boot_no;
+} hh_core_info_t;
+
 typedef struct {
     hh_clock_t clk;
     hh_transport_t *transport;          /* opened and closed by the engine */
@@ -571,6 +595,8 @@ typedef struct {
     uint8_t *ring_mem; uint32_t ring_size;          /* pre-trigger reads (external RAM) */
     uint8_t *queue_mem; uint32_t queue_size;        /* blocks waiting for the card */
     uint8_t builtin_map;                /* the map is the compiled-in one */
+    hh_tap_fn tap;                      /* may be NULL */
+    void *tap_ctx;
 } hh_platform_t;
 
 size_t     hh_core_size(void);
@@ -597,6 +623,17 @@ double hh_core_idle_s(hh_core_t *c);
 void hh_core_stop(hh_core_t *c, int reason);
 const hh_link_stats_t *hh_core_link_stats(const hh_core_t *c);
 const hh_plan_t *hh_core_plan(const hh_core_t *c);
+/* A listener for everything the engine learns (see hh_tap_fn); NULL = none. Set it before the tasks run. */
+void hh_core_set_tap(hh_core_t *c, hh_tap_fn tap, void *ctx);
+/* For the laptop link (any task). None of these can put a byte on the K-line. */
+void hh_core_info(hh_core_t *c, hh_core_info_t *out);
+/* The laptop's clock, when the GPS has not set one: 0 taken, 1 ignored (GPS time is in use). */
+int  hh_core_set_time(hh_core_t *c, int64_t unix_us);
+/* on = 0: end the drive now and start no other until on = 1 (or a restart).
+ * on = 1: drives start again, at once if the ECU is answering. */
+void hh_core_drive(hh_core_t *c, int on);
+/* 1 while DRIVES/Dnnnnnn.HHD (kind HH_FK_DRIVE) or CAPTURES/Cnnnnnn.HHD is open for writing or queued to be. */
+int  hh_core_file_busy(hh_core_t *c, uint8_t kind, uint32_t file_no);
 
 #ifdef __cplusplus
 }

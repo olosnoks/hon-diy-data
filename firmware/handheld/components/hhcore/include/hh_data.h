@@ -64,6 +64,9 @@ typedef struct {
     char status[40];            /* one line for a status bar: "USB cable not found", "no reply" ... */
     struct { uint8_t valid, n; uint16_t code[6]; int64_t t_us; } dtc;   /* last Mode 03 read; code = raw 2 bytes */
     struct { uint32_t good, bad; } nmea;   /* GPS sentences that passed / failed their checksum since boot */
+    /* The link to the laptop on the USB-C port (SERIAL.md). mode: 0 off, 1 tx-only (GPS on P1), 2 two-way.
+     * host: 1 = the laptop was heard within 3 s (two-way only; tx-only cannot know). frames sent, frames dropped. */
+    struct { uint8_t mode, host; uint32_t frames, dropped; } pc;
 } hh_snapshot_t;
 
 const hh_channel_info_t *hh_channels(uint16_t *n);

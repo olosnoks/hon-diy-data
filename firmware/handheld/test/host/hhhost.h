@@ -5,6 +5,7 @@
 #define HHHOST_H
 
 #include "hhcore.h"
+#include "hh_serial.h"
 
 typedef struct {
     int    (*open)(void);
@@ -39,5 +40,12 @@ void hhhost_set_stale(hhhost_t *h, const char *path);
 int64_t hhhost_time_set(const hhhost_t *h);         /* what the engine last set the clock to, 0 = never */
 uint32_t hhhost_syncs(const hhhost_t *h);
 size_t hhhost_default_map(const uint8_t **out);
+/* The laptop link on this engine: the card is the harness's folder. tx_only:
+ * as built for GPS on P1 (nothing is heard). ring_size 0 = 32 KB. Once only. */
+hh_serial_t *hhhost_serial(hhhost_t *h, int tx_only, uint32_t ring_size);
+/* What the UART would send next, and bytes "received" from the laptop (for ctypes). */
+size_t hhhost_serial_poll(hhhost_t *h, uint8_t *out, size_t cap);
+void hhhost_serial_rx(hhhost_t *h, const uint8_t *data, size_t len);
+uint32_t hhhost_serial_stat(hhhost_t *h, const char *what);
 
 #endif

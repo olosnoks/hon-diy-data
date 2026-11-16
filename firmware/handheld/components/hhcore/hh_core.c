@@ -73,6 +73,7 @@ struct hh_core {
     int fails, probes, iso_fails;
     double probe_wait, reopen_wait, quiet_until, honda_last_ok, next_iso_try, next_dtc;
     double last_emit;                   /* < 0 = none */
+    uint16_t tick_latency_us;           /* age of the read that closes the sample being emitted */
     uint32_t reads, errors, next_replan;
     uint8_t ecu_id[10], ecu_id_len;
     uint8_t iso_pid[N_ISO_PIDS]; int16_t iso_ch[N_ISO_PIDS]; int n_iso, iso_i;
@@ -90,12 +91,13 @@ struct hh_core {
     hh_snapshot_t snap;
 
     /* files, as queued (under the lock) */
-    uint8_t drive_open, cap_open;
+    uint8_t drive_open, cap_open, drive_hold;
     uint32_t drive_no, cap_no, nonce, cap_nonce, seq, cap_seq, n_reads, queued_bytes;
     hh_blk_t blk_reads, blk_iso, blk_gps;
 
     /* storage task */
     void *fh_drive, *fh_cap;
+    uint32_t fh_drive_no, fh_cap_no;    /* the files those are */
     uint32_t written, cap_written, sd_fail;
     double last_sync;
     uint8_t dirty, sd_ok, sd_err;
@@ -107,6 +109,10 @@ static void nap(hh_core_t *c, double s) { if (s > 0) c->plat.clk.sleep(c->plat.c
 static void lock(hh_core_t *c) { if (c->plat.lock) c->plat.lock(c->plat.lock_ctx); }
 static void unlock(hh_core_t *c) { if (c->plat.unlock) c->plat.unlock(c->plat.lock_ctx); }
 static uint64_t us(double t) { return t <= 0 ? 0 : (uint64_t)(t * 1e6 + 0.5); }
+static void tap(hh_core_t *c, uint8_t kind, const void *rec, size_t len, const void *data, size_t data_len)
+{
+    if (c->plat.tap) c->plat.tap(c->plat.tap_ctx, kind, rec, len, data, data_len);
+}
 
 size_t hh_core_size(void) { return sizeof(hh_core_t); }
 const hh_link_stats_t *hh_core_link_stats(const hh_core_t *c) { return &c->link.stats; }
@@ -170,10 +176,11 @@ static void flush_all(hh_core_t *c)
 static void log_event(hh_core_t *c, double t, uint8_t code, uint8_t src, uint16_t aux, int32_t iv, float fv, int is_float)
 {
     hh_rec_event_t e;
-    if (!c->drive_open && !c->cap_open) return;
     memset(&e, 0, sizeof(e));
     e.t_us = us(t); e.code = code; e.src = src; e.aux = aux;
     if (is_float) e.v.f = fv; else e.v.i = iv;
+    tap(c, HH_TAP_EVENT, &e, sizeof(e), NULL, 0);
+    if (!c->drive_open && !c->cap_open) return;
     flush_all(c);                       /* keep what led up to it in front of it */
     put_block(c, HH_B_EVENTS, 1, e.t_us, &e, sizeof(e));
     q_push(c, Q_SYNC, NULL, 0);         /* events are rare and are what the drive is kept for */
@@ -198,6 +205,10 @@ static void log_read(hh_core_t *c, double t_sampled, uint8_t addr, const uint8_t
     item.r.dt_us = 0; item.r.addr = addr; item.r.len = len;
     item.r.latency_us = (uint16_t)(lat_us > 65535 ? 65535 : lat_us);
     memcpy(item.data, data, len);
+    if (c->plat.tap) {
+        hh_tap_read_t tr = {t_us, addr, len, item.r.latency_us};
+        tap(c, HH_TAP_READ, &tr, sizeof(tr), data, len);
+    }
     if (c->ring.buf) {
         /* keep pre_s seconds: drop what is older */
         uint64_t keep = us(c->stall.pre_s + 1.0);
@@ -226,6 +237,10 @@ static void log_iso(hh_core_t *c, double t, uint8_t mode, uint8_t pid, const uin
 {
     hh_rec_iso_t r;
     uint32_t dt;
+    if (c->plat.tap) {
+        hh_tap_iso_t ti = {us(t), mode, pid, len, 0};
+        tap(c, HH_TAP_ISO, &ti, sizeof(ti), data, len);
+    }
     if (!c->drive_open && !c->cap_open) return;
     uint8_t *at = blk_room(c, &c->blk_iso, us(t), sizeof(r) + len, &dt);
     r.dt_us = dt; r.mode = mode; r.pid = pid; r.len = len; r.flags = 0;
@@ -409,6 +424,10 @@ static void publish_state(hh_core_t *c)
     default: set_status(c, "connecting"); break;
     }
     c->snap.seq++;
+    if (c->plat.tap) {
+        hh_tap_link_t tl = {us(now(c)), c->snap.link.state, (uint8_t)(c->down_since < 0), c->snap.link.backend, c->iso_mode};
+        tap(c, HH_TAP_LINK, &tl, sizeof(tl), NULL, 0);
+    }
 }
 
 static void values_unknown(hh_core_t *c)
@@ -472,6 +491,11 @@ static void emit(hh_core_t *c, double t)
     c->snap.link.reads = c->reads;
     c->snap.link.errors = c->errors;
     c->snap.seq++;
+    if (c->plat.tap) {
+        float hz = c->snap.link.hz_fast > 650 ? 650 : c->snap.link.hz_fast;
+        hh_tap_tick_t tt = {us(t), c->tick_latency_us, (uint16_t)(hz * 100.0f + 0.5f), c->snap.seq};
+        tap(c, HH_TAP_TICK, &tt, sizeof(tt), NULL, 0);
+    }
 }
 
 /* The ECU is not answering right now. Called on every failed probe, so the
@@ -583,7 +607,7 @@ static void went_up(hh_core_t *c, uint8_t iso)
     if (c->drive_open && c->iso_mode != iso) drive_end(c, HH_END_STOPPED);  /* another protocol: another drive */
     c->iso_mode = iso;
     c->down_since = -1;
-    drive_begin(c, t);
+    if (!c->drive_hold) drive_begin(c, t);
     log_event(c, t, HH_EV_LINK_UP, c->plat.transport->backend, iso, 0, 0, 0);
     stall_feed(c, t, NAN, 1);
     publish_state(c);
@@ -740,7 +764,7 @@ static void iso_step(hh_core_t *c)
         if (ch >= 0) { c->value[ch] = (float)v; c->fresh[ch] = 1; }
         if (pid == 0x0C) stall_feed(c, t, v, 1);
     }
-    if (++c->iso_i >= c->n_iso) { c->iso_i = 0; emit(c, t); }
+    if (++c->iso_i >= c->n_iso) { c->iso_i = 0; c->tick_latency_us = 0; emit(c, t); }
     unlock(c);
 }
 
@@ -816,7 +840,11 @@ static void step_read(hh_core_t *c)
     c->pending[index] = 0;
     if (none_set(c->pending, c->plan.n_blocks)) {
         memcpy(c->pending, c->sched.top, c->plan.n_blocks);
-        if (none_set(c->unread, c->plan.n_blocks)) emit(c, t);
+        if (none_set(c->unread, c->plan.n_blocks)) {
+            double lat_us = r.latency_s * 1e6;
+            c->tick_latency_us = (uint16_t)(lat_us > 65535 ? 65535 : lat_us < 0 ? 0 : lat_us);
+            emit(c, t);
+        }
     }
     unlock(c);
     if (c->reads >= c->next_replan) {
@@ -900,6 +928,7 @@ void hh_core_gps_bytes(hh_core_t *c, const uint8_t *data, size_t len)
         c->gps = c->nmea.fix;
         c->gps.t_us = us(t);
         c->gps_at = t;
+        tap(c, HH_TAP_GPS, &c->gps, sizeof(c->gps), NULL, 0);
         if (c->gps.fix && c->gps.utc > 1577836800u) {       /* a date after 2020: the receiver knows the time */
             int64_t unix_us = (int64_t)c->gps.utc * 1000000;
             int64_t have = c->plat.get_time ? c->plat.get_time(c->plat.time_ctx) : 0;
@@ -1005,14 +1034,85 @@ void hh_core_snapshot(hh_core_t *c, hh_snapshot_t *out)
     unlock(c);
 }
 
+/* ---- for the laptop link ----------------------------------------------------------------- */
+
+void hh_core_set_tap(hh_core_t *c, hh_tap_fn fn, void *ctx)
+{
+    lock(c);
+    c->plat.tap = NULL;
+    c->plat.tap_ctx = ctx;
+    c->plat.tap = fn;
+    unlock(c);
+}
+
+void hh_core_info(hh_core_t *c, hh_core_info_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    lock(c);
+    memcpy(out->map_hash, c->map->hdr.map_hash, sizeof(out->map_hash));
+    memcpy(out->map_sha, c->map->hdr.map_sha256, sizeof(out->map_sha));
+    if (c->plat.device) strncpy(out->device, c->plat.device, sizeof(out->device) - 1);
+    memcpy(out->ecu_id, c->ecu_id, sizeof(out->ecu_id));
+    out->ecu_id_len = c->ecu_id_len;
+    out->link_state = c->snap.link.state;
+    out->backend = c->plat.transport->backend;
+    out->link_mode = c->iso_mode;
+    out->builtin_map = c->plat.builtin_map;
+    out->time_valid = c->time_valid;
+    out->sd_ok = (uint8_t)(c->sd_ok && !c->sd_err);
+    out->n_ch = (uint8_t)c->n_ch;
+    out->boot_no = c->plat.boot_no;
+    unlock(c);
+}
+
+int hh_core_set_time(hh_core_t *c, int64_t unix_us)
+{
+    int rc = 1;
+    lock(c);
+    if (!c->time_valid && unix_us > 0 && c->plat.set_time) {    /* GPS time, once there, is the better clock */
+        c->plat.set_time(c->plat.time_ctx, unix_us);
+        log_time(c, now(c), unix_us, 3);
+        rc = 0;
+    }
+    unlock(c);
+    return rc;
+}
+
+void hh_core_drive(hh_core_t *c, int on)
+{
+    lock(c);
+    if (!on) {
+        c->drive_hold = 1;
+        drive_end(c, HH_END_STOPPED);
+    } else {
+        c->drive_hold = 0;
+        if (c->down_since < 0 && !c->drive_open) drive_begin(c, now(c));
+    }
+    unlock(c);
+}
+
+int hh_core_file_busy(hh_core_t *c, uint8_t kind, uint32_t file_no)
+{
+    int busy;
+    lock(c);
+    if (kind == HH_FK_DRIVE)
+        busy = (c->drive_open && c->drive_no == file_no) || (c->fh_drive && c->fh_drive_no == file_no);
+    else
+        busy = (c->cap_open && c->cap_no == file_no) || (c->fh_cap && c->fh_cap_no == file_no);
+    unlock(c);
+    return busy;
+}
+
 /* ---- storage task ------------------------------------------------------------------------ */
 
-static void file_open(hh_core_t *c, void **fh, const char *dir, char letter, const uint8_t *hdr_bytes, uint32_t *written)
+static void file_open(hh_core_t *c, void **fh, uint32_t *fh_no, const char *dir, char letter, const uint8_t *hdr_bytes,
+                      uint32_t *written)
 {
     hh_file_hdr_t h;
     char path[40];
     memcpy(&h, hdr_bytes, sizeof(h));
     if (*fh) { c->plat.io.close(c->plat.io.ctx, *fh); *fh = NULL; }
+    *fh_no = h.file_no;
     snprintf(path, sizeof(path), "/%s/%c%06lu.HHD", dir, letter, (unsigned long)(h.file_no % 1000000u));
     *fh = c->plat.io.open(c->plat.io.ctx, path, "wb");
     *written = 0;
@@ -1061,8 +1161,8 @@ int hh_core_storage_step(hh_core_t *c)
     const uint8_t *body = item + 1;
     size_t len = (size_t)n - 1;
     switch (item[0]) {
-    case Q_DRIVE_OPEN: file_open(c, &c->fh_drive, "DRIVES", 'D', body, &c->written); c->last_sync = t; break;
-    case Q_CAP_OPEN: file_open(c, &c->fh_cap, "CAPTURES", 'C', body, &c->cap_written); break;
+    case Q_DRIVE_OPEN: file_open(c, &c->fh_drive, &c->fh_drive_no, "DRIVES", 'D', body, &c->written); c->last_sync = t; break;
+    case Q_CAP_OPEN: file_open(c, &c->fh_cap, &c->fh_cap_no, "CAPTURES", 'C', body, &c->cap_written); break;
     case Q_DRIVE_DATA:
         if (c->fh_drive) {
             if (c->plat.io.write(c->plat.io.ctx, c->fh_drive, body, len) != 0) { c->sd_fail++; c->sd_err = 1; }

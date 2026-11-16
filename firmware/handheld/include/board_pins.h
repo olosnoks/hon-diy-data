@@ -128,6 +128,25 @@
 #define HH_GPS_TX               (-1) /* P1 pin 2 (TX0) left idle: nothing is sent to the GPS */
 #endif
 
+/* ---- Laptop link (SERIAL.md): binary frames through the CH340C ------------ */
+/* Default build: UART0, both directions, shared with (and replacing) the
+ * console. GPS on P1: UART0 and GPIO44 belong to the GPS at 9600 baud, and a
+ * UART has one baud rate for both directions, so the link takes UART1 and
+ * routes only its TX to GPIO43: the handheld talks, it cannot listen. */
+#define HH_SERIAL_UART_NUM      0
+#define HH_SERIAL_TX            HH_PIN_UART0_TX
+#define HH_SERIAL_RX            HH_PIN_UART0_RX
+#define HH_SERIAL_TX_ONLY       0
+#define HH_SERIAL_BAUD          921600  /* HANDHELD.CFG serial_baud; the CH340C's nearest rate is 923077 (+0.16 %) */
+#if defined(HH_GPS_P1) && HH_GPS_P1
+#undef  HH_SERIAL_UART_NUM
+#undef  HH_SERIAL_RX
+#undef  HH_SERIAL_TX_ONLY
+#define HH_SERIAL_UART_NUM      1
+#define HH_SERIAL_RX            (-1)
+#define HH_SERIAL_TX_ONLY       1
+#endif
+
 /* ---- K-line plan A: KKL cable on the S3's own USB (host, full speed) ----- */
 #define HH_USBH_DM              19   /* [F] USB D-, fixed pad. [C] P3 (and P2 pin 1). Touch SDA on the C board only */
 #define HH_USBH_DP              20   /* [F] USB D+, fixed pad. [C] P3. Touch SCL on the C board only */

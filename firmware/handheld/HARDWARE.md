@@ -26,7 +26,7 @@ in `include/board_pins.h`, one `#define` each, with the source beside it.
 | 39, 40, 41, 42 | LCD HSYNC, DE, VSYNC, PCLK | LCD connector | |
 | 2 | backlight | on board | enable of the boost LED driver, active high, PWM dims it |
 | 10, 11, 12, 13 | microSD CS, MOSI, SCK, MISO | slot; 11–13 also on P2 | SPI2 |
-| 43, 44 | UART0 TX, RX | CH340C and P1 | console and flashing |
+| 43, 44 | UART0 TX, RX | CH340C and P1 | laptop link (SERIAL.md), console, flashing |
 | 17 | **free** → second button (optional) | P3, P4 | nothing on the board uses it |
 | 18 | **free on N** → GPS RX | P3, P4 | touch interrupt on the R board only |
 | 19 | **free on N** → USB D− (plan A) or K-line TX (plan B) | P3, P2 | touch SDA on the C board; see "pull-ups" below |

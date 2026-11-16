@@ -47,6 +47,8 @@ sleep_after_s = 300     # sleep this long after the drive ended; 0 = never (use 
 sleep_probe_s = 20      # asleep: wake this often and ask the ECU
 usb_latency_ms = 1      # FTDI latency timer
 utc_offset_min = 0      # clock on the screen only; files are UTC
+serial = 1              # the link to the laptop on the USB-C port; 0 = off (plain log console)
+serial_baud = 921600    # its speed; try 460800 if the laptop sees damaged frames
 """
 
 
