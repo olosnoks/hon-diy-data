@@ -3,7 +3,7 @@ name = "hondalog"
 version = "0.1.0"
 description = "Live data logger for pre-2002 Honda ECUs over a KKL K-line cable"
 requires-python = ">=3.11"
-dependencies = ["PySide6", "pyqtgraph", "pyserial", "numpy"]
+dependencies = ["PySide6", "pyqtgraph", "pyserial", "numpy", "esptool>=5"]
 
 [project.optional-dependencies]
 gl = ["PyOpenGL"]            # 3D views; without it Map 3D and Tune use the 2D heat map

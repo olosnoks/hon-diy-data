@@ -391,6 +391,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", default="cyd:", help=port_help)
     p.set_defaults(fn=_command)
 
+    from . import hl_cli
+    hl_cli.register(sub, port_help)
+
     args = parser.parse_args(argv)
     try:
         return int(args.fn(args))
