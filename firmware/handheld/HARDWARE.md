@@ -256,7 +256,11 @@ the GPS or the buttons.
 ## GPS
 
 A NEO-6M module (GY-NEO6MV2 or similar) on P4, which has exactly the four
-pins it needs.
+pins it needs. In practice the GPS's stock cable does not fit P4's socket;
+the GPS now sits on P1 (the `--gps-p1` build) and the recommended place is
+P3 pin 2, the same GPIO18. See
+[GPS placement](../../docs/handheld.md#gps-placement), and never move one
+cable between P1 and P4: their power pins are at opposite ends.
 
 ```
  NEO-6M            P4
@@ -428,7 +432,8 @@ battery voltage and RX at 3.3 V, then steps 11 and 12 on UART2.
 
 ## Not verified
 
-- Nothing has been built, compiled or run.
+- Nothing has been built or run on a board. (The firmware compiles with
+  ESP-IDF 5.3.1.)
 - **Whether R3/R4 (4.7 kΩ pull-ups on GPIO19/20) are fitted on the N
   board.** This decides whether plan A needs a soldering iron.
 - Whether P1 pin 1 gives 5 V out when the board is powered from USB-C.
