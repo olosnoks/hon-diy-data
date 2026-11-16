@@ -17,6 +17,7 @@ typedef struct {
     uint32_t warn, on_warn;      /* fill and the text on it */
     uint32_t alarm, on_alarm;
     uint32_t ok, unver;          /* verified / unverified marker */
+    uint32_t water;              /* the Map screen's lakes and rivers: non-text, 3:1 against bg and under fg */
 } ui_tokens_t;
 
 extern const ui_tokens_t UI_DAYLIGHT, UI_NIGHT;
@@ -24,6 +25,9 @@ extern const ui_tokens_t UI_DAYLIGHT, UI_NIGHT;
 /* Every (text, ground) pair the UI draws, for the contrast test. */
 typedef struct { const char *name; uint32_t fg, bg; } ui_pair_t;
 int ui_theme_pairs(const ui_tokens_t *t, ui_pair_t *out, int max);
+/* The Map screen's graphics (not text), which need 3:1 (WCAG 1.4.11): water
+ * against the ground and the roads drawn over it, railways, the trail. */
+int ui_map_pairs(const ui_tokens_t *t, ui_pair_t *out, int max);
 
 void ui_theme_set(bool night);
 bool ui_theme_night(void);

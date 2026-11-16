@@ -467,6 +467,23 @@ battery voltage and RX at 3.3 V, then steps 11 and 12 on UART2.
 - That the accessory socket in this car is switched with the key.
 - SD behaviour at power loss. The format rules above reduce the risk; step
   14 measures it.
+- **Flash writes with the display running.** NVS writes (the Day/Night
+  choice; the Map screen's last position, at the end of a drive and at most
+  every 15 minutes on a long one) disable the flash cache, and with it
+  PSRAM, for a few milliseconds. The LCD interrupt is IRAM-safe
+  (`CONFIG_LCD_RGB_ISR_IRAM_SAFE`) and keeps running; ESP-IDF notes that
+  reading a PSRAM frame buffer from it while the cache is off crashes, and
+  in the 180-degree mode `rot180_fill_cb` reads the PSRAM frame buffer.
+  Toggle Day/Night 20 times in each orientation: if it resets ("Cache
+  disabled but cached memory region accessed") or the picture jumps,
+  set `CONFIG_SPIRAM_XIP_FROM_PSRAM=y` in `sdkconfig.defaults`, which keeps
+  PSRAM readable during flash writes.
+- The Map screen on the board: SD read time per tile (sdspi at 20 MHz,
+  through FatFs, sharing the volume with the logger), the map task's draw
+  time on the S3 (about 0.5 ms a picture in the PC simulator; expect tens of
+  ms at 240 MHz from PSRAM), and the full-body redraw when a new picture
+  arrives (480 x 216 RGB565, about 200 KB copied from PSRAM). Read them with
+  the `esp32s3-perf` build.
 
 ## Sources
 

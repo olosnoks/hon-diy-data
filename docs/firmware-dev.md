@@ -154,11 +154,13 @@ compiles for the PC and is tested there.
 |---|---|---|---|
 | `bbcore` (black box) | `firmware/blackbox/components/bbcore/` | `make -C firmware/blackbox/test/host` builds `build/libbbhost.so` | `tests/test_bb_core.py`, `tests/test_bb_host.py` load it with ctypes and compare it with the Python model: triggers, capture files, the USB protocol, clock sync |
 | `hhcore` (handheld) | `firmware/handheld/components/hhcore/` | `make -C firmware/handheld/test/host` builds `build/libhhhost.so` and runs the C unit tests (`build/hhtest`) | The C tests, plus `tests/test_hh_core.py`, `test_hh_map.py`, `test_hh_import.py` |
+| `hhmap` (handheld road map) | `firmware/handheld/components/hhmap/` | the same `make` builds and runs `build/hmtest` | `hmtest.c` reads `test/host/fixtures/tinymap`, a MAP the Python builder made from `tests/fixtures/osmmap/tiny.osm`, and checks it against the builder's own `expect.txt`; then damage, the cache, rendering. `tests/test_hh_osmmap.py` checks the fixture is current (`HH_UPDATE_FIXTURES=1` rewrites it) |
 
 ```sh
 make -C firmware/blackbox/test/host
 make -C firmware/handheld/test/host          # builds, then runs the C unit tests
-python3 -m pytest tests/test_bb_core.py tests/test_bb_host.py tests/test_hh_core.py tests/test_hh_map.py tests/test_hh_import.py
+python3 -m pytest tests/test_bb_core.py tests/test_bb_host.py tests/test_hh_core.py tests/test_hh_map.py tests/test_hh_import.py \
+    tests/test_hh_osmmap.py
 ```
 
 Both build with `-Wall -Wextra -Werror`. The handheld core is also built
@@ -187,16 +189,24 @@ make lvgl             # fetch LVGL v9.2.2 into .lvgl/ (once), or pass LVGL_DIR=/
 make test             # logic, contrast and layout checks
 make screenshots      # every screen in both themes -> ../docs/screenshots/
 make budget           # pixels redrawn per frame, per screen
+make testmap          # rebuild testmap/MAP from the OSM extracts in OSM_DIR (default ~/osm)
 make clean
 ```
 
 Needs `cc`, `make` and `libpng-dev`.
 
+The Map screen reads `testmap/MAP`, a committed 12-mile map of Jackson
+(1.4 MB, map data © OpenStreetMap contributors, ODbL), and the stub drives
+real routes on it (`hh_stub_set_route`: State Street downtown, I-55). The
+map worker runs in place in the simulator. `HH_SIM_MAP=/path/to/MAP
+build/hhsim test` runs the checks against another map, such as a full
+100-mile build.
+
 | Target | Checks or makes |
 |---|---|
-| `test` | The UI's logic, text contrast in both themes, and layout |
+| `test` | The UI's logic, text contrast in both themes (and 3:1 for the map's water, roads over it, rail and trail), layout, the Map screen (zoom by speed and by button, pins, trail, banner, no map, Night) |
 | `screenshots` | The PNGs in [`firmware/handheld/docs/screenshots/`](../firmware/handheld/docs/screenshots/): each screen, each alarm state, the hold gestures, the stall screens, day and night |
-| `budget` | How many pixels each screen redraws per frame, the number that decides the frame rate on the board |
+| `budget` | How many pixels each screen redraws per frame, the number that decides the frame rate on the board; for the Map screen also how often a new picture arrives and the worker's time per picture |
 
 The screenshots in [Handheld](handheld.md) come from `make screenshots`.
 Run it again after changing the UI and commit the new pictures.
@@ -278,13 +288,14 @@ hon-diy-data/
     │   ├── main/                  ESP-IDF application; main/hal/ is the only chip-specific code
     │   └── test/host/             host build of the core
     └── handheld/
-        ├── HARDWARE.md, FORMAT.md
+        ├── HARDWARE.md, FORMAT.md, SERIAL.md, MAPFORMAT.md
         ├── include/board_pins.h   every pin
         ├── components/hhcore/     portable C core (port/ holds the ESP-IDF glue)
+        ├── components/hhmap/      the road map: reader, tile cache, renderer (portable C)
         ├── components/hhcore_stub/   fake data for UI work and the simulator
         ├── components/usb_host_*/ vendored USB host drivers
         ├── main/                  application; main/ui/ is the portable UI, main/port/ the board
-        ├── sim/                   PC simulator
+        ├── sim/                   PC simulator; sim/testmap/ its 12-mile map
         ├── test/host/             host build and C unit tests of the core
         ├── tools/gen_fonts.py
         └── docs/screenshots/      simulator output

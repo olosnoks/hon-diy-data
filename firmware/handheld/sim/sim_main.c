@@ -20,6 +20,8 @@
 #include "ui.h"
 #include "ui_data.h"
 #include "ui_input.h"
+#include "ui_map.h"
+#include "ui_mapsvc.h"
 #include "ui_perf.h"
 #include "ui_screens.h"
 #include "ui_theme.h"
@@ -34,6 +36,32 @@ static uint32_t tick_cb(void) { return clock_ms; }
 static int64_t stub_clock(void) { return (int64_t)clock_ms * 1000; }
 
 void ui_port_theme_changed(bool night) { (void)night; theme_changes++; }
+
+/* ---- the map: the worker runs in place, the "NVS" is two variables ------------- */
+static const char *map_dir = "testmap/MAP";
+static bool have_last_pos;
+static double last_lat, last_lon;
+static int pos_saves;
+
+void ui_port_map_kick(void)
+{
+    static int depth;
+    if (depth) return;
+    depth++;
+    for (int i = 0; i < 200 && mapsvc_work(); i++) {}
+    depth--;
+}
+void ui_port_map_lock(void) {}
+void ui_port_map_unlock(void) {}
+void *ui_port_map_alloc(size_t n) { return malloc(n); }
+void ui_port_map_free(void *p) { free(p); }
+const char *ui_port_map_dir(void) { return map_dir; }
+bool ui_port_last_pos(double *lat, double *lon)
+{
+    if (have_last_pos) { *lat = last_lat; *lon = last_lon; }
+    return have_last_pos;
+}
+void ui_port_save_pos(double lat, double lon) { last_lat = lat; last_lon = lon; have_last_pos = true; pos_saves++; }
 void ui_port_cpu(int *c0, int *c1) { *c0 = *c1 = -1; }
 int64_t ui_port_micros(void)
 {
@@ -67,8 +95,23 @@ static void press(uint32_t ms)
 static void start(bool night, hh_stub_scene_t scene)
 {
     hh_stub_set_scene(scene);
+    hh_stub_set_route(HH_ROUTE_NONE, 0);
     ui_create(night);
     run(300);
+}
+
+static int map_stop(void) { return ui_sensor_pages() + 2; }
+
+/* drive a route for a while, then open the Map screen */
+static void start_map(bool night, hh_stub_scene_t scene, hh_stub_route_t route, double start_m, uint32_t drive_ms)
+{
+    hh_stub_set_scene(HH_SCENE_DRIVE);
+    hh_stub_set_route(route, start_m);
+    ui_create(night);
+    run(drive_ms);
+    hh_stub_set_scene(scene);
+    ui_goto(map_stop());
+    run(1500);
 }
 
 /* ---- PNG -------------------------------------------------------------------- */
@@ -165,7 +208,7 @@ static int shots(const char *dir)
             int pages = ui_sensor_pages();
             if (stop == 0) snprintf(title, sizeof(title), "gauges");
             else if (stop <= pages) snprintf(title, sizeof(title), "sensors-%d", stop);
-            else snprintf(title, sizeof(title), stop == pages + 1 ? "gps" : "link");
+            else snprintf(title, sizeof(title), stop == pages + 1 ? "gps" : stop == pages + 2 ? "map" : "link");
             snprintf(name, sizeof(name), "%s-%d-%s", th, stop + 1, title);
             rc |= save_png(dir, name);
             check_layout(name);
@@ -175,7 +218,7 @@ static int shots(const char *dir)
             {HH_SCENE_WARN, 1, "warn-sensors"},  {HH_SCENE_WARN, 0, "warn-gauges"},
             {HH_SCENE_ALARM, 0, "alarm-gauges"}, {HH_SCENE_ALARM, 1, "alarm-sensors"},
             {HH_SCENE_LINK_LOST, 0, "linklost-gauges"}, {HH_SCENE_LINK_LOST, 1, "linklost-sensors"},
-            {HH_SCENE_CONNECTING, 3, "connecting-gps"}, {HH_SCENE_CONNECTING, 4, "connecting-link"},
+            {HH_SCENE_CONNECTING, 3, "connecting-gps"}, {HH_SCENE_CONNECTING, 5, "connecting-link"},
         };
         for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
             start(night, HH_SCENE_DRIVE);
@@ -202,6 +245,41 @@ static int shots(const char *dir)
         snprintf(name, sizeof(name), "%s-stall-after", th);
         rc |= save_png(dir, name);
         check_layout(name);
+
+        /* the Map screen: downtown at walking pace with a mark and a stall on the way, I-55 at
+         * 70 mph, no fix (last known position), no map on the card */
+        start_map(night, HH_SCENE_DRIVE, HH_ROUTE_STATE_ST, 1500, 30000);
+        press(1500);                                 /* a marker here */
+        run(25000);
+        hh_stub_set_scene(HH_SCENE_STALL);           /* a stall here */
+        run(400);
+        press(100);                                  /* dismiss the capture screen */
+        hh_stub_set_scene(HH_SCENE_DRIVE);
+        run(20000);
+        snprintf(name, sizeof(name), "%s-map-downtown", th);
+        rc |= save_png(dir, name);
+        check_layout(name);
+
+        start_map(night, HH_SCENE_DRIVE, HH_ROUTE_I55, 2500, 75000);
+        snprintf(name, sizeof(name), "%s-map-i55", th);
+        rc |= save_png(dir, name);
+        check_layout(name);
+
+        start_map(night, HH_SCENE_CONNECTING, HH_ROUTE_STATE_ST, 1500, 20000);
+        run(1000);
+        snprintf(name, sizeof(name), "%s-map-nofix", th);
+        rc |= save_png(dir, name);
+        check_layout(name);
+
+        const char *keep = map_dir;
+        map_dir = "testmap/none";
+        mapsvc_reopen();
+        start_map(night, HH_SCENE_DRIVE, HH_ROUTE_STATE_ST, 1500, 2000);
+        snprintf(name, sizeof(name), "%s-map-nomap", th);
+        rc |= save_png(dir, name);
+        check_layout(name);
+        map_dir = keep;
+        mapsvc_reopen();
 
         /* the hint strip while the button is held, and after a mark */
         start(night, HH_SCENE_DRIVE);
@@ -261,6 +339,12 @@ static void test_contrast(void)
             double a = contrast(pairs[i].fg, pairs[i].bg, false), b = contrast(pairs[i].fg, pairs[i].bg, true);
             printf("  %-9s %-22s %5.2f / %5.2f\n", t ? "night" : "daylight", pairs[i].name, a, b);
             CHECK(a >= 7.0 && b >= 7.0, "%s %s is below 7:1", t ? "night" : "daylight", pairs[i].name);
+        }
+        n = ui_map_pairs(themes[t], pairs, 24);
+        for (int i = 0; i < n; i++) {
+            double a = contrast(pairs[i].fg, pairs[i].bg, false), b = contrast(pairs[i].fg, pairs[i].bg, true);
+            printf("  %-9s %-22s %5.2f / %5.2f  (map graphics, 3:1)\n", t ? "night" : "daylight", pairs[i].name, a, b);
+            CHECK(a >= 3.0 && b >= 3.0, "%s %s is below 3:1", t ? "night" : "daylight", pairs[i].name);
         }
     }
 }
@@ -376,6 +460,137 @@ static void test_flow(void)
     CHECK(!strcmp(lv_label_get_text(title), "LINK"), "the second button steps back, got %s", lv_label_get_text(title));
 }
 
+/* ---- the Map screen ------------------------------------------------------------- */
+
+static int body_pixels(uint32_t hex)
+{
+    uint16_t c = lv_color_to_u16(lv_color_hex(hex));
+    int n = 0;
+    for (int y = UI_BODY_Y; y < UI_BODY_Y + UI_BODY_H; y++)
+        for (int x = 0; x < UI_W; x++) n += fb[y * UI_W + x] == c;
+    return n;
+}
+
+static bool has_label(const ui_map_info_t *mi, const char *text)
+{
+    for (int i = 0; i < mi->n_labels; i++) if (strstr(mi->labels[i], text)) return true;
+    return false;
+}
+
+static bool find_text(lv_obj_t *obj, const char *text)
+{
+    if (lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) return false;
+    if (lv_obj_check_type(obj, &lv_label_class) && strstr(lv_label_get_text(obj), text)) return true;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++)
+        if (find_text(lv_obj_get_child(obj, (int32_t)i), text)) return true;
+    return false;
+}
+
+static const char *title_text(void)
+{
+    return lv_label_get_text(lv_obj_get_child(lv_obj_get_child(lv_screen_active(), 0), 0));
+}
+
+static void test_map(void)
+{
+    ui_map_info_t mi;
+    printf("map screen:\n");
+    pos_saves = 0;
+    have_last_pos = false;
+
+    /* downtown at 25 km/h: the closest level, real streets, labels, a trail */
+    start_map(false, HH_SCENE_DRIVE, HH_ROUTE_STATE_ST, 1500, 20000);
+    ui_map_info(&mi);
+    CHECK(!strcmp(title_text(), "MAP"), "title %s", title_text());
+    CHECK(mi.status == MAPSVC_OK, "a map is drawn (status %d; run 'make testmap' if testmap/MAP is missing)", mi.status);
+    CHECK(mi.level == 0 && mi.manual < 0 && mi.mpp == 4.0f, "25 km/h: AUTO 1/4 (level %d)", mi.level + 1);
+    CHECK(mi.n_trail >= 5, "a trail (%d points)", mi.n_trail);
+    CHECK(!mi.banner && !mi.message, "no banner, no message with a fix and a map");
+    CHECK(mi.n_labels >= 3 && has_label(&mi, "US 51"), "labels (%d): %s, %s, %s ...",
+          mi.n_labels, mi.labels[0], mi.labels[1], mi.labels[2]);
+    int ink = body_pixels(UI_DAYLIGHT.fg), water = body_pixels(UI_DAYLIGHT.water);
+    CHECK(ink > 4000, "streets drawn in fg (%d px)", ink);
+    printf("  downtown: %d labels, %d px of road ink, %d px of water, worker %u us\n", mi.n_labels, ink, water,
+           (unsigned)mi.render_us);
+    CHECK(pos_saves == 0, "no flash writes while driving a short way (%d)", pos_saves);
+
+    /* the picture is redrawn only when the car has moved off its centre */
+    uint32_t r0 = mi.renders;
+    run(10000);
+    ui_map_info(&mi);
+    CHECK(mi.renders - r0 <= 3, "10 s at 25 km/h: %u new pictures (at most 3)", (unsigned)(mi.renders - r0));
+
+    /* a mark and a stall drop pins */
+    press(1500);
+    run(300);
+    ui_map_info(&mi);
+    CHECK(mi.n_pins == 1, "MARK drops a pin (%d)", mi.n_pins);
+    hh_stub_set_scene(HH_SCENE_STALL);
+    run(300);
+    press(100);
+    hh_stub_set_scene(HH_SCENE_DRIVE);
+    run(15000);                                      /* drive on: the car no longer covers it */
+    ui_map_info(&mi);
+    CHECK(mi.n_pins == 2, "a stall drops a pin (%d)", mi.n_pins);
+    CHECK(body_pixels(UI_DAYLIGHT.alarm) > 40, "the stall pin is drawn (an octagon in the alarm colour)");
+
+    /* the second button: zoom steps, then back to AUTO; a hold steps back a screen */
+    for (int i = 0; i < 5; i++) {
+        button_back = true; run(100); button_back = false; run(1200);
+        ui_map_info(&mi);
+        if (i < 4) CHECK(mi.manual == i && mi.level == i && mi.mpp == mapsvc_mpp(i), "zoom press %d: FIXED %d/4 (%d, %.0f m/px)", i + 1, i + 1, mi.level + 1, (double)mi.mpp);
+        else CHECK(mi.manual < 0 && mi.level == 0, "fifth press: AUTO again");
+    }
+    button_back = true; run(1300); button_back = false; run(200);
+    CHECK(!strcmp(title_text(), "GPS TRIP"), "holding the second button steps back (%s)", title_text());
+
+    /* the theme: the same picture in Night colours */
+    ui_goto(map_stop());
+    run(1200);
+    press(3300);
+    run(1500);
+    ui_map_info(&mi);
+    CHECK(ui_night() && mi.status == MAPSVC_OK && body_pixels(UI_NIGHT.fg) > 4000 &&
+          body_pixels(UI_NIGHT.bg) > UI_W * UI_BODY_H / 2 && body_pixels(UI_NIGHT.water) > 1000,
+          "Night: white roads on black, Night water");
+    press(3300);
+
+    /* I-55 at 70 mph: the widest level */
+    start_map(false, HH_SCENE_DRIVE, HH_ROUTE_I55, 2500, 40000);
+    ui_map_info(&mi);
+    CHECK(mi.level == 3 && mi.mpp == 60.0f, "113 km/h: AUTO 4/4 (level %d)", mi.level + 1);
+    CHECK(has_label(&mi, "I-55"), "the I-55 shield (%s, %s, %s ...)", mi.labels[0], mi.labels[1], mi.labels[2]);
+    printf("  I-55: %d labels, worker %u us\n", mi.n_labels, (unsigned)mi.render_us);
+
+    /* no fix: the banner, the last position; the drive ends (recording stops): the position is kept */
+    int saves = pos_saves;
+    start_map(false, HH_SCENE_CONNECTING, HH_ROUTE_STATE_ST, 1500, 5000);
+    ui_map_info(&mi);
+    CHECK(mi.banner && !strcmp(mi.banner_text, "NO GPS FIX"), "NO GPS FIX banner (%s)", mi.banner_text);
+    CHECK(mi.status == MAPSVC_OK, "still a map, at the last fix");
+    CHECK(pos_saves == saves + 1 && have_last_pos && last_lat > 32.278 && last_lat < 32.30, "the end of the drive keeps the position (%d)",
+          pos_saves - saves);
+    have_last_pos = true;
+    last_lat = 32.30; last_lon = -90.18;
+    hh_stub_set_scene(HH_SCENE_CONNECTING);
+    ui_create(false);                                /* a power-up with no fix yet: the position from NVS */
+    ui_goto(map_stop());
+    run(1500);
+    ui_map_info(&mi);
+    CHECK(mi.banner && mi.status == MAPSVC_OK && mi.n_trail == 0, "power-up without a fix: last known position");
+
+    /* no map on the card: says so, and how to make one */
+    const char *keep = map_dir;
+    map_dir = "testmap/none";
+    mapsvc_reopen();
+    start_map(false, HH_SCENE_DRIVE, HH_ROUTE_STATE_ST, 1500, 2000);
+    ui_map_info(&mi);
+    CHECK(mi.message && strstr(mi.message_title, "NO MAP"), "no map: %s", mi.message_title);
+    CHECK(find_text(lv_screen_active(), "hondalog-handheld map-build"), "the message gives the map-build command");
+    map_dir = keep;
+    mapsvc_reopen();
+}
+
 /* ---- render budget ------------------------------------------------------------ */
 
 static void budget(void)
@@ -394,9 +609,36 @@ static void budget(void)
         int pages = ui_sensor_pages();
         if (stop == 0) snprintf(title, sizeof(title), "gauges");
         else if (stop <= pages) snprintf(title, sizeof(title), "sensors %d", stop);
-        else snprintf(title, sizeof(title), stop == pages + 1 ? "gps" : "link");
+        else snprintf(title, sizeof(title), stop == pages + 1 ? "gps" : stop == pages + 2 ? "map" : "link");
         printf("  %-14s %8.1f %9u %9.1f%% %12u\n", title, frames / 10.0, frames ? px / frames : 0,
                frames ? 100.0 * px / frames / (UI_W * UI_H) : 0, frames ? us / frames : 0);
+    }
+}
+
+/* the Map screen while driving: the car moves every frame, a new picture now and then */
+static void budget_map(void)
+{
+    static const struct { hh_stub_route_t route; double start_m; const char *name; } runs[] = {
+        {HH_ROUTE_STATE_ST, 1500, "downtown 25 km/h"}, {HH_ROUTE_I55, 2500, "I-55 113 km/h"},
+    };
+    printf("\nMap screen, 30 s of driving (new pictures redraw the 480 x 216 body once each):\n");
+    printf("  %-18s %8s %9s %10s %9s %14s\n", "scene", "frames/s", "px/frame", "of screen", "pictures", "worker us/pic");
+    for (size_t i = 0; i < sizeof(runs) / sizeof(runs[0]); i++) {
+        ui_map_info_t a, b;
+        start_map(false, HH_SCENE_DRIVE, runs[i].route, runs[i].start_m, 8000);
+        run(2000);
+        ui_map_info(&a);
+        ui_perf_totals_t pa = *ui_perf_totals();
+        uint32_t worker = 0, n = 0, last = a.renders;
+        for (int k = 0; k < 300; k++) {
+            run(100);
+            ui_map_info(&b);
+            if (b.renders != last) { worker += b.render_us; n++; last = b.renders; }
+        }
+        ui_perf_totals_t pb = *ui_perf_totals();
+        uint32_t frames = pb.frames - pa.frames, px = pb.px - pa.px;
+        printf("  %-18s %8.1f %9u %9.1f%% %9u %14u\n", runs[i].name, frames / 30.0, frames ? px / frames : 0,
+               frames ? 100.0 * px / frames / (UI_W * UI_H) : 0, (unsigned)n, n ? (unsigned)(worker / n) : 0);
     }
 }
 
@@ -410,12 +652,13 @@ int main(int argc, char **argv)
     ui_perf_attach(disp);
     hh_stub_set_clock(stub_clock);
     hh_core_start();
+    if (getenv("HH_SIM_MAP")) map_dir = getenv("HH_SIM_MAP");     /* another MAP folder, e.g. a full build */
 
     const char *cmd = argc > 1 ? argv[1] : "";
     if (!strcmp(cmd, "shots") && argc > 2) return shots(argv[2]);
-    if (!strcmp(cmd, "budget")) { budget(); return 0; }
+    if (!strcmp(cmd, "budget")) { budget(); budget_map(); return 0; }
     if (!strcmp(cmd, "test")) {
-        test_contrast(); test_button(); test_fonts(); test_format(); test_flow();
+        test_contrast(); test_button(); test_fonts(); test_format(); test_flow(); test_map();
         printf(failures ? "%d FAILED\n" : "all passed\n", failures);
         return failures != 0;
     }

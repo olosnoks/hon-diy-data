@@ -164,6 +164,36 @@ against the simulators and the host builds of the firmware cores.
   time-stamped by an ISR, the firmware swaps the UART to the PPS pin at run
   time if P3 is wired the other way round, and the `gps diag` line now reports
   both pins.
+- Map screen: an offline road map from `MAP/` on the SD card, north up and
+  centred on the GPS fix, in the press cycle between GPS trip and Link.
+  Roads by class (black on white, white on black at night), water, dashed
+  railways, towns by population, fuel stations; route shields (`I-55`,
+  `US 49`), street and place names placed around each other; a heading arrow,
+  the drive's trail as breadcrumbs, octagon pins for stalls and diamonds for
+  marks on this drive; a scale bar in miles; "© OpenStreetMap contributors"
+  always on screen. Four zoom levels follow the speed (under 30, 60, 90
+  km/h and over) with hysteresis; the optional second button steps the zoom.
+  `NO GPS FIX` banner with the last fix, or the last known position kept in
+  NVS at the end of each drive (Jackson before any fix). Without `MAP/` the
+  screen says so and gives the `map-build` command.
+- The map is drawn by `components/hhmap` (portable C: reader, LRU tile cache,
+  anti-aliased renderer) in a low-priority task on core 0, into PSRAM
+  canvases the UI swaps in; the UI never waits on the card, and redraws the
+  map only when the car has moved 24 px, the zoom or theme changes, or a pin
+  is added. The SD mount allows 6 open files (was 4).
+- `hondalog-handheld map-build --pbf FILE... --center LAT,LON --radius-mi N
+  --out SDCARD [--zip FILE]`: builds `MAP/` from Geofabrik OpenStreetMap
+  extracts with pyosmium: 4 detail levels with Douglas-Peucker
+  simplification each, tiles clipped exactly at their edges, int16
+  coordinates, a CRC per tile, an index for one-seek lookup. 100 miles
+  around Jackson from the Mississippi and Louisiana extracts: 17.3 MB,
+  about 2 minutes. Format: `firmware/handheld/MAPFORMAT.md`.
+  `hondalog-handheld info CARD` checks a `MAP/` folder tile by tile.
+- Simulator: Map scenes on real Jackson roads (downtown on State Street,
+  I-55 at 70 mph, no fix, no map) from a committed 12-mile map
+  (`sim/testmap`, `make testmap` rebuilds it), with layout, 3:1 contrast
+  checks for the map's graphics, and the render budget.
+- Fonts: the © sign added to the text fonts.
 
 ### Tuning (Track C)
 

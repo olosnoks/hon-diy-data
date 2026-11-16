@@ -168,7 +168,8 @@ static int sd_mount(void)
     sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot.gpio_cs = HH_SD_CS;
     slot.host_id = host.slot;
-    const esp_vfs_fat_sdmmc_mount_config_t mount = {.format_if_mount_failed = false, .max_files = 4,
+    /* max_files: stdio files open at once; the Map screen keeps MAP/MAP.IDX and MAP/MAP.DAT open */
+    const esp_vfs_fat_sdmmc_mount_config_t mount = {.format_if_mount_failed = false, .max_files = 6,
                                                     .allocation_unit_size = 32 * 1024};
     if (esp_vfs_fat_sdspi_mount(MOUNT, &host, &slot, &mount, &card) != ESP_OK) {
         card = NULL;

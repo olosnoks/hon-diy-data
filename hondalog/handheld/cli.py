@@ -6,7 +6,10 @@
     hondalog-handheld import SDCARD [--db FILE] [--map TOML] [--force]
         every drive on the card into the database (skips what is already in)
     hondalog-handheld info FILE...
-        what is in a drive file, a capture file or a HANDHELD.MAP
+        what is in a drive file, a capture file, a HANDHELD.MAP or a MAP folder
+    hondalog-handheld map-build --pbf FILE [--pbf FILE...] --center LAT,LON --radius-mi 100 --out SDCARD
+        the offline road map for the Map screen, from OpenStreetMap extracts
+        (Geofabrik .osm.pbf), into SDCARD/MAP (MAPFORMAT.md)
 
 Over the handheld's USB-C cable (firmware/handheld/SERIAL.md; PORT is
 ``cyd:`` = found by itself, or ``cyd:/dev/ttyUSB0``):
@@ -85,10 +88,42 @@ def _import(args: argparse.Namespace) -> int:
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
+def _info_map(path: Path) -> int:
+    """A MAP folder (or the card holding one): its header, and every tile checked."""
+    from . import osmmap as OM
+    folder = path / OM.DIR_NAME if (path / OM.DIR_NAME / OM.IDX_NAME).exists() else path
+    try:
+        mr = OM.MapReader(folder)
+    except (OSError, ValueError) as exc:
+        print(f"{folder}: {exc}", file=sys.stderr)
+        return 1
+    h = mr.header
+    print(f"{folder}: road map built {h.build_date}, centre {h.proj.lat0:.4f}, {h.proj.lon0:.4f}, "
+          f"radius {h.radius_m / 1609.344:.0f} mi")
+    print(f"  {h.sources}; {h.attribution}")
+    bad = 0
+    for i, lv in enumerate(h.levels):
+        for col, row in ((c, r) for r in range(lv.rows) for c in range(lv.cols)):
+            raw = mr.raw(i, col, row)
+            if raw is None:
+                continue
+            try:
+                OM.decode_tile(raw)
+            except ValueError as exc:
+                bad += 1
+                print(f"  level {i} tile {col},{row}: {exc}")
+        print(f"  level {i}: {lv.n_tiles} tiles of {lv.tile_m / 1000:g} km, {lv.data_bytes / 1e6:.1f} MB")
+    print(f"  {'all tiles check out' if not bad else f'{bad} damaged tiles'}")
+    return 1 if bad else 0
+
+
 def _info(args: argparse.Namespace) -> int:
     code = 0
     for name in args.files:
         path = Path(name)
+        if path.is_dir():
+            code |= _info_map(path)
+            continue
         try:
             head = path.read_bytes()[:4]
             if head == F.MAP_MAGIC.to_bytes(4, "little"):
@@ -250,6 +285,39 @@ def _command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _map_build(args: argparse.Namespace) -> int:
+    try:
+        from . import osmbuild
+    except ImportError as exc:          # pragma: no cover - numpy missing
+        print(f"map-build: {exc}", file=sys.stderr)
+        return 1
+    try:
+        import osmium  # noqa: F401
+    except ImportError:
+        print("map-build needs pyosmium: pip install osmium  (Debian/Ubuntu: apt install python3-pyosmium)",
+              file=sys.stderr)
+        return 1
+    try:
+        lat, lon = (float(v) for v in args.center.split(","))
+    except ValueError:
+        print(f"map-build: --center wants LAT,LON, got {args.center!r}", file=sys.stderr)
+        return 2
+    if not (-85 < lat < 85 and -180 <= lon <= 180) or not 0 < args.radius_mi <= 250:
+        print("map-build: centre or radius out of range (radius 0 to 250 miles)", file=sys.stderr)
+        return 2
+    for p in args.pbf:
+        if not Path(p).is_file():
+            print(f"map-build: {p}: no such file", file=sys.stderr)
+            return 1
+    say = (lambda msg: None) if args.quiet else (lambda msg: print(msg, flush=True))
+    report = osmbuild.build(args.pbf, args.out, lat, lon, args.radius_mi, rail=not args.no_rail,
+                            fuel=not args.no_fuel, zip_path=args.zip, progress=say)
+    for line in report.lines():
+        print(line)
+    print(f"copy {report.folder} to the root of the handheld's SD card; Map data {osmbuild.M.ATTRIBUTION}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hondalog-handheld", description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -279,6 +347,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("files", nargs="+")
     p.add_argument("--events", type=int, default=20)
     p.set_defaults(fn=_info)
+
+    p = sub.add_parser("map-build", help="build the offline road map (SDCARD/MAP) from OpenStreetMap extracts")
+    p.add_argument("--pbf", action="append", required=True, metavar="FILE",
+                   help="an OSM extract (.osm.pbf, or .osm); repeat for several (e.g. two states)")
+    p.add_argument("--center", required=True, metavar="LAT,LON", help="centre of the map, e.g. 32.2988,-90.1848")
+    p.add_argument("--radius-mi", dest="radius_mi", type=float, default=100.0, help="radius in miles (default 100)")
+    p.add_argument("--out", required=True, metavar="SDCARD", help="the SD card (MAP/ is written into it)")
+    p.add_argument("--zip", metavar="FILE", help="also write a zip holding the MAP folder")
+    p.add_argument("--no-rail", dest="no_rail", action="store_true", help="leave the railways out")
+    p.add_argument("--no-fuel", dest="no_fuel", action="store_true", help="leave the fuel stations out")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(fn=_map_build)
 
     port_help = "the handheld: cyd: (found by itself), cyd:/dev/ttyUSB0, cyd:/dev/ttyUSB0@460800"
     p = sub.add_parser("status", help="ask the handheld who it is, over its USB-C cable")

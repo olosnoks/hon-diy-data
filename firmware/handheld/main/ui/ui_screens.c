@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "ui_data.h"
+#include "ui_map.h"
 #include "ui_screens.h"
 #include "ui_shapes.h"
 #include "ui_theme.h"
@@ -326,6 +327,7 @@ void ui_screen_title(ui_screen_id_t id, int page, char *buf, size_t n)
         else snprintf(buf, n, "SENSORS");
         break;
     case UI_SCR_GPS: snprintf(buf, n, "GPS TRIP"); break;
+    case UI_SCR_MAP: snprintf(buf, n, "MAP"); break;
     default: snprintf(buf, n, "LINK"); break;
     }
 }
@@ -336,6 +338,7 @@ void ui_screen_create(ui_screen_id_t id, int page, lv_obj_t *body)
     case UI_SCR_GAUGES: gauges_create(body); break;
     case UI_SCR_SENSORS: sensors_create(body, page); break;
     case UI_SCR_GPS: gps_create(body); break;
+    case UI_SCR_MAP: ui_map_create(body); break;
     default: link_create(body); break;
     }
 }
@@ -346,6 +349,7 @@ void ui_screen_update(ui_screen_id_t id, const hh_snapshot_t *s, const ui_derive
     case UI_SCR_GAUGES: gauges_update(s, d); break;
     case UI_SCR_SENSORS: sensors_update(s, d); break;
     case UI_SCR_GPS: gps_update(s, d); break;
+    case UI_SCR_MAP: ui_map_update(s, d->now_ms); break;
     default: link_update(s, d); break;
     }
 }

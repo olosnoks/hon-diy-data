@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="hondalog tests (hand-made, not OSM data)">
+  <node id="1" version="1" lat="32.2700000" lon="-90.1745000"/>
+  <node id="2" version="1" lat="32.2900000" lon="-90.1750000"/>
+  <node id="3" version="1" lat="32.3050000" lon="-90.1752000"/>
+  <node id="4" version="1" lat="32.3300000" lon="-90.1748000"/>
+  <node id="5" version="1" lat="32.2950000" lon="-90.2100000"/>
+  <node id="6" version="1" lat="32.2952000" lon="-90.1800000"/>
+  <node id="7" version="1" lat="32.2950000" lon="-90.1500000"/>
+  <node id="8" version="1" lat="32.3050000" lon="-90.1900000"/>
+  <node id="9" version="1" lat="32.3051000" lon="-90.1850000"/>
+  <node id="10" version="1" lat="32.3000000" lon="-90.1830000"/>
+  <node id="11" version="1" lat="32.3010000" lon="-90.1825000"/>
+  <node id="12" version="1" lat="32.2970000" lon="-90.1880000"/>
+  <node id="13" version="1" lat="32.3030000" lon="-90.1870000"/>
+  <node id="14" version="1" lat="32.2850000" lon="-90.2000000"/>
+  <node id="15" version="1" lat="32.3150000" lon="-90.1600000"/>
+  <node id="16" version="1" lat="32.2860000" lon="-90.1950000"/>
+  <node id="17" version="1" lat="32.2900000" lon="-90.1900000"/>
+  <node id="18" version="1" lat="32.2880000" lon="-90.1850000"/>
+  <node id="19" version="1" lat="32.2920000" lon="-90.1800000"/>
+  <node id="20" version="1" lat="32.2900000" lon="-90.1700000"/>
+  <node id="21" version="1" lat="32.3100000" lon="-90.2000000"/>
+  <node id="22" version="1" lat="32.3120000" lon="-90.1980000"/>
+  <node id="23" version="1" lat="33.0000000" lon="-90.2000000"/>
+  <node id="24" version="1" lat="33.0010000" lon="-90.1000000"/>
+  <node id="25" version="1" lat="32.2886500" lon="-90.1921200"/>
+  <node id="26" version="1" lat="32.2886500" lon="-90.1878800"/>
+  <node id="27" version="1" lat="32.2913500" lon="-90.1878800"/>
+  <node id="28" version="1" lat="32.2913500" lon="-90.1921200"/>
+  <node id="29" version="1" lat="32.3073000" lon="-90.1732000"/>
+  <node id="30" version="1" lat="32.3073000" lon="-90.1668000"/>
+  <node id="31" version="1" lat="32.3127000" lon="-90.1668000"/>
+  <node id="32" version="1" lat="32.3127000" lon="-90.1732000"/>
+  <node id="33" version="1" lat="32.3095500" lon="-90.1705300"/>
+  <node id="34" version="1" lat="32.3095500" lon="-90.1694700"/>
+  <node id="35" version="1" lat="32.3104500" lon="-90.1694700"/>
+  <node id="36" version="1" lat="32.3104500" lon="-90.1705300"/>
+  <node id="37" version="1" lat="32.3019000" lon="-90.1951000"/>
+  <node id="38" version="1" lat="32.3019000" lon="-90.1949000"/>
+  <node id="39" version="1" lat="32.3021000" lon="-90.1949000"/>
+  <node id="40" version="1" lat="32.3021000" lon="-90.1951000"/>
+  <node id="41" version="1" lat="32.3000000" lon="-90.1800000">
+    <tag k="place" v="city"/>
+    <tag k="name" v="Testville"/>
+    <tag k="population" v="12,000"/>
+  </node>
+  <node id="42" version="1" lat="32.3100000" lon="-90.1900000">
+    <tag k="place" v="village"/>
+    <tag k="name" v="Smallton"/>
+  </node>
+  <node id="43" version="1" lat="32.2950000" lon="-90.1950000">
+    <tag k="place" v="hamlet"/>
+    <tag k="name" v="Tiny Corner"/>
+  </node>
+  <node id="44" version="1" lat="32.2960000" lon="-90.1810000">
+    <tag k="amenity" v="fuel"/>
+    <tag k="name" v="Gas"/>
+  </node>
+  <node id="45" version="1" lat="33.0000000" lon="-90.1800000">
+    <tag k="place" v="town"/>
+    <tag k="name" v="Faraway"/>
+  </node>
+  <way id="1" version="1">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <tag k="highway" v="motorway"/>
+    <tag k="ref" v="I 55;I 20"/>
+    <tag k="name" v="Interstate 55"/>
+  </way>
+  <way id="2" version="1">
+    <nd ref="5"/>
+    <nd ref="6"/>
+    <nd ref="7"/>
+    <tag k="highway" v="primary"/>
+    <tag k="ref" v="US 49"/>
+    <tag k="name" v="North Highway Drive"/>
+  </way>
+  <way id="3" version="1">
+    <nd ref="8"/>
+    <nd ref="9"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Test Street"/>
+  </way>
+  <way id="4" version="1">
+    <nd ref="10"/>
+    <nd ref="11"/>
+    <tag k="highway" v="service"/>
+  </way>
+  <way id="5" version="1">
+    <nd ref="12"/>
+    <nd ref="13"/>
+    <tag k="highway" v="tertiary"/>
+    <tag k="name" v="West Elm Avenue"/>
+  </way>
+  <way id="6" version="1">
+    <nd ref="14"/>
+    <nd ref="15"/>
+    <tag k="railway" v="rail"/>
+  </way>
+  <way id="7" version="1">
+    <nd ref="16"/>
+    <nd ref="17"/>
+    <nd ref="18"/>
+    <nd ref="19"/>
+    <nd ref="20"/>
+    <tag k="waterway" v="river"/>
+    <tag k="name" v="Test River"/>
+  </way>
+  <way id="8" version="1">
+    <nd ref="21"/>
+    <nd ref="22"/>
+    <tag k="highway" v="footway"/>
+  </way>
+  <way id="9" version="1">
+    <nd ref="23"/>
+    <nd ref="24"/>
+    <tag k="highway" v="primary"/>
+    <tag k="ref" v="MS 99"/>
+  </way>
+  <way id="10" version="1">
+    <nd ref="25"/>
+    <nd ref="26"/>
+    <nd ref="27"/>
+    <nd ref="28"/>
+    <nd ref="25"/>
+    <tag k="natural" v="water"/>
+    <tag k="name" v="Test Lake"/>
+  </way>
+  <way id="11" version="1">
+    <nd ref="29"/>
+    <nd ref="30"/>
+    <nd ref="31"/>
+    <nd ref="32"/>
+    <nd ref="29"/>
+  </way>
+  <way id="12" version="1">
+    <nd ref="33"/>
+    <nd ref="34"/>
+    <nd ref="35"/>
+    <nd ref="36"/>
+    <nd ref="33"/>
+  </way>
+  <way id="13" version="1">
+    <nd ref="37"/>
+    <nd ref="38"/>
+    <nd ref="39"/>
+    <nd ref="40"/>
+    <nd ref="37"/>
+    <tag k="natural" v="water"/>
+  </way>
+  <relation id="1" version="1">
+    <member type="way" ref="11" role="outer"/>
+    <member type="way" ref="12" role="inner"/>
+    <tag k="type" v="multipolygon"/>
+    <tag k="natural" v="water"/>
+    <tag k="water" v="reservoir"/>
+    <tag k="name" v="Test Reservoir"/>
+  </relation>
+</osm>

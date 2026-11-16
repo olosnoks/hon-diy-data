@@ -62,7 +62,72 @@ static hh_stub_scene_t scene = HH_SCENE_DEMO;
 static int64_t t0_us;
 static uint32_t seq, marks, acks;
 
+/* (lat, lon) along real roads (OpenStreetMap, ODbL): see hh_stub_set_route */
+static const double ROUTE_STATE_ST[][2] = {
+    {32.278223, -90.188691}, {32.278777, -90.187396}, {32.279046, -90.186813}, {32.279387, -90.186117},
+    {32.279728, -90.185654}, {32.280345, -90.185139}, {32.281179, -90.184736}, {32.281547, -90.184549},
+    {32.282368, -90.184161}, {32.282744, -90.183949}, {32.283111, -90.183768}, {32.283636, -90.183517},
+    {32.284434, -90.183245}, {32.284815, -90.183181}, {32.285479, -90.183045}, {32.286375, -90.182873},
+    {32.288257, -90.182506}, {32.289372, -90.182272}, {32.289932, -90.182166}, {32.290373, -90.182083},
+    {32.290945, -90.181972}, {32.291580, -90.181849}, {32.293572, -90.181458}, {32.294021, -90.181372},
+    {32.294462, -90.181291}, {32.294902, -90.181210}, {32.295397, -90.181113}, {32.296056, -90.180997},
+    {32.296500, -90.180916}, {32.296863, -90.180881}, {32.298132, -90.180642}, {32.298673, -90.180514},
+    {32.299122, -90.180436}, {32.299199, -90.180421},
+};
+static const double ROUTE_I55[][2] = {
+    {32.279867, -90.172965}, {32.281085, -90.172332}, {32.282215, -90.171622}, {32.285298, -90.169084},
+    {32.286718, -90.168195}, {32.287948, -90.167702}, {32.289248, -90.167410}, {32.290355, -90.167384},
+    {32.293167, -90.167594}, {32.294342, -90.167613}, {32.296446, -90.167467}, {32.298401, -90.167146},
+    {32.301510, -90.166583}, {32.303236, -90.166111}, {32.306654, -90.164751}, {32.309221, -90.163647},
+    {32.310423, -90.162988}, {32.311366, -90.162216}, {32.313211, -90.160366}, {32.314753, -90.158852},
+    {32.315739, -90.158265}, {32.317051, -90.158140}, {32.318988, -90.158740}, {32.320160, -90.158821},
+    {32.321509, -90.158514}, {32.322604, -90.158472}, {32.324454, -90.159235}, {32.325738, -90.159828},
+    {32.329349, -90.161325}, {32.330901, -90.161965}, {32.332301, -90.162334}, {32.333447, -90.162454},
+    {32.334723, -90.162394}, {32.336185, -90.162053}, {32.337378, -90.161476}, {32.339054, -90.160398},
+    {32.341119, -90.159029}, {32.342721, -90.157972}, {32.347534, -90.154838}, {32.348556, -90.154228},
+    {32.349811, -90.153585}, {32.351449, -90.152907}, {32.352805, -90.152452}, {32.354415, -90.152048},
+    {32.356329, -90.151674}, {32.360585, -90.150854}, {32.362079, -90.150566}, {32.363995, -90.150217},
+    {32.365189, -90.149948}, {32.367256, -90.149543}, {32.371033, -90.148794}, {32.374038, -90.148218},
+    {32.375692, -90.147900}, {32.377572, -90.147524}, {32.380109, -90.147068},
+};
+
+static hh_stub_route_t route = HH_ROUTE_NONE;
+static double route_start_m;
+static int64_t route_t0_us;
+
 void hh_stub_set_scene(hh_stub_scene_t s) { scene = s; }
+void hh_stub_set_route(hh_stub_route_t r, double start_m)
+{
+    route = r;
+    route_start_m = start_m;
+    route_t0_us = clock_us();
+}
+
+/* position, heading and speed at time t (s) on the route */
+static void drive(float t, double *lat, double *lon, float *heading, float *kmh)
+{
+    const double (*pts)[2] = route == HH_ROUTE_I55 ? ROUTE_I55 : ROUTE_STATE_ST;
+    int n = route == HH_ROUTE_I55 ? (int)(sizeof(ROUTE_I55) / sizeof(ROUTE_I55[0]))
+                                  : (int)(sizeof(ROUTE_STATE_ST) / sizeof(ROUTE_STATE_ST[0]));
+    *kmh = route == HH_ROUTE_I55 ? 113.0f : route == HH_ROUTE_PARKED ? 0.0f : 25.0f;
+    double kx = 111319.49 * cos(pts[0][0] * 0.017453292519943295), ky = 110900.0, total = 0;
+    for (int i = 1; i < n; i++) total += hypot((pts[i][0] - pts[i - 1][0]) * ky, (pts[i][1] - pts[i - 1][1]) * kx);
+    double along = fmod(route_start_m + (double)*kmh / 3.6 * t, 2 * total);
+    int back = along > total;
+    if (back) along = 2 * total - along;
+    for (int i = 1; i < n; i++) {
+        double dy = (pts[i][0] - pts[i - 1][0]) * ky, dx = (pts[i][1] - pts[i - 1][1]) * kx, seg = hypot(dx, dy);
+        if (along > seg && i < n - 1) { along -= seg; continue; }
+        double f = seg > 0 ? along / seg : 0;
+        if (f > 1) f = 1;
+        *lat = pts[i - 1][0] + f * (pts[i][0] - pts[i - 1][0]);
+        *lon = pts[i - 1][1] + f * (pts[i][1] - pts[i - 1][1]);
+        float h = (float)(atan2(dx, dy) * 57.29577951308232);
+        if (back) h += 180;
+        *heading = fmodf(h + 360.0f, 360.0f);
+        return;
+    }
+}
 void hh_stub_set_clock(int64_t (*now_us)(void)) { clock_us = now_us ? now_us : platform_now_us; }
 uint32_t hh_stub_marks(void) { return marks; }
 uint32_t hh_stub_acks(void) { return acks; }
@@ -139,10 +204,18 @@ void hh_snapshot(hh_snapshot_t *out)
     snprintf(out->link.ecu_id, sizeof(out->link.ecu_id), "37820-P2P");
 
     out->gps.fix = 3; out->gps.sats = 9;
-    out->gps.lat = 32.27412 + 0.0001 * t; out->gps.lon = -90.13021 - 0.00007 * t;
-    out->gps.speed_kmh = v[C_VSS] - 1.4f;
-    out->gps.heading = 247 + 4 * sinf(t * 0.2f);
+    if (route == HH_ROUTE_NONE) {
+        out->gps.lat = 32.27412 + 0.0001 * t; out->gps.lon = -90.13021 - 0.00007 * t;
+        out->gps.speed_kmh = v[C_VSS] - 1.4f;
+        out->gps.heading = 247 + 4 * sinf(t * 0.2f);
+    } else {
+        float kmh;
+        drive((float)((now - route_t0_us) / 1000) / 1000.0f, &out->gps.lat, &out->gps.lon, &out->gps.heading, &kmh);
+        out->gps.speed_kmh = kmh;
+        v[C_VSS] = kmh + 1.4f;
+    }
     out->gps.hdop = 0.9f;
+    out->markers = marks;
 
     out->log.sd_ok = 1; out->log.recording = 1; out->log.drive_no = 14;
     out->log.bytes = (uint32_t)(t * 5200) + 2412544;
