@@ -63,6 +63,11 @@ open (`--rom`), the cells are the fuel table's own cells.
 |---|---|
 | ![Replay](docs/screenshots/replay-daylight.png) | ![mockup](docs/mockups/replay-stall-forensics.png) |
 
+Two cursors (A and B, with the change of every lane between them) and a
+second stall laid over the first in grey:
+
+![Replay: two cursors and a second drive](docs/screenshots/replay-compare-daylight.png)
+
 A stall caught on the simulated ECU, banner and capture opened in Replay:
 
 ![Stall banner](docs/screenshots/sim-stall-banner.png)
@@ -76,11 +81,21 @@ A stall caught on the simulated ECU, banner and capture opened in Replay:
 
 ![Raw tools on the simulated ECU](docs/screenshots/sim-rawtools.png)
 
+Rank addresses (R): what followed the throttle in the sweeps so far, ready
+to be assigned to a channel:
+
+![Rank addresses](docs/screenshots/rawtools-rank-daylight.png)
+
 ### Tuning table editor (chipped P28)
 
 | app | mockup |
 |---|---|
 | ![Tune](docs/screenshots/tune-daylight.png) | ![mockup](docs/mockups/tune-table-p28.png) |
+
+With a ROM opened from the app: the definition's own tables and axes, the
+live cell with its trail on the table and the surface, the ROM card:
+
+![Tune with a ROM open](docs/screenshots/tune-rom-daylight.png)
 
 ### Status bar and alarm states
 

@@ -82,6 +82,7 @@ class Tile(QWidget):
     def _reset(self) -> None:
         self._gen = self._spark_gen = -1
         self._units_rev = -1
+        self._seen: tuple | None = None
         self._scale, self._offset = 1.0, 0.0
         self._value_t = -1e9
         self._fast = False
@@ -128,6 +129,7 @@ class Tile(QWidget):
             self._value_font = None
             self._tag = "BLACK BOX" if spec.source == "BB" else spec.source
             self._gen = self._spark_gen = -1
+            self._seen = None
             dirty = True
         stale = self.demo_stale or st.stale(now)
         level = self.demo_level if self.demo_level is not None else (
@@ -185,6 +187,10 @@ class Tile(QWidget):
         is drawn changed, 1 if the value or the gauge did, 2 if the session
         min / max in the footer did as well."""
         value = st.value
+        seen = (value, st.vmin, st.vmax, stale, self.width())
+        if seen == self._seen:              # read again with the same number: nothing to work out
+            return 0
+        self._seen = seen
         text = "---" if stale and not spec.is_flag else self._fmt(spec, value)
         if stale and spec.is_flag:
             text = "---"
