@@ -97,6 +97,7 @@ def lib(build_dir: Path):
     L.hhhost_serial_poll.restype = C.c_size_t
     L.hhhost_serial_poll.argtypes = [C.c_void_p, U8P, C.c_size_t]
     L.hhhost_serial_rx.argtypes = [C.c_void_p, C.c_char_p, C.c_size_t]
+    L.hhhost_serial_tick.argtypes = [C.c_void_p]
     L.hhhost_serial_stat.restype = C.c_uint32
     L.hhhost_serial_stat.argtypes = [C.c_void_p, C.c_char_p]
     _lib = L
@@ -244,6 +245,9 @@ class Handheld:
     def serial_rx(self, data: bytes) -> None:
         """Bytes from the laptop (the card is serviced after them)."""
         self.L.hhhost_serial_rx(self.h, data, len(data))
+
+    def serial_tick(self) -> None:
+        self.L.hhhost_serial_tick(self.h)
 
     def serial_stat(self, what: str) -> int:
         return self.L.hhhost_serial_stat(self.h, what.encode())

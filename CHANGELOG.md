@@ -9,6 +9,26 @@ against the simulators and the host builds of the firmware cores.
 
 ## Unreleased
 
+### Handheld tab in the laptop app, and the HL text session
+
+- A **Handheld** tab (F10) in the PySide6 app: port picker with CH340 detection and one Connect that stays open
+  across the sub-views Status, SD card (tree, download, upload, delete), Config (`HANDHELD.CFG` as a form or
+  text, with the lines the handheld will skip), Map (folder picker, percent, MB, ETA, resume; sent over the binary
+  map-upload commands), Console (live log, send a line, record to a file) and Install firmware (esptool 5, merged
+  image check, progress, the port released before flashing and reopened after). Serial work runs on a worker
+  thread. Needs the `esptool` package (now a dependency).
+- `hondalog-handheld ls`, `get`, `put`, `rm`, `cfg get|put`, `stat`, `mark`, `time`, `reboot` and `flash`: thin
+  wrappers on `hondalog/handheld/hl_client.py`, the same client the tab uses. `put-map` stays the one map command.
+- Firmware: the HL text session (`components/hhcore/hh_hl.c`, SERIAL.md "The HL session"): hello, stat, ls, get,
+  put with resume, cfg, rm, mark, time, reboot, a 30 s idle timeout, base64 lines in a window of three, writes
+  limited to `MAP/` and the two settings files, deletes to those and `DRIVES/`, the drive being recorded refused.
+  It pauses the binary stream while open and is not built into the GPS-on-P1 firmware. The UART receive buffer is
+  now 16 KB. `port/hh_serfs.c` gained path-based list, read and remove.
+- `hondalog-cydsim` speaks HL (`--wire-baud`, `--sd-kbps` model the cable and the card; `--no-logs`). Tested: a host
+  C test for line parsing, base64, CRC32, PUT with resume and a bad checksum, the path rules and the timeout
+  (`hhhltest`); the laptop client against the firmware C (`tests/test_hh_hl.py`); the client against the simulator
+  over in-process and pty ports; the screen offscreen against the simulator. Not run on the board yet.
+
 ### Link and protocol (Track A)
 
 - Read planner: merges nearby addresses into the fewest requests using a

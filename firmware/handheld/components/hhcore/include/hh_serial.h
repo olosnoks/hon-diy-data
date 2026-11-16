@@ -45,6 +45,8 @@ extern "C" {
 enum { HH_SF_HELLO = 0x40, HH_SF_READ = 0x41, HH_SF_TICK = 0x42, HH_SF_LINK = 0x43, HH_SF_GPS = 0x44,
        HH_SF_EVENT = 0x45, HH_SF_STATS = 0x46, HH_SF_LOG = 0x47, HH_SF_ISO = 0x48, HH_SF_TIME_RSP = 0x49,
        HH_SF_ACK = 0x4A, HH_SF_FILE_INFO = 0x4B, HH_SF_FILE_DATA = 0x4C, HH_SF_MAPUP = 0x4D };
+/* ring only, never framed: the raw bytes of an HL text line (hh_hl.c) */
+#define HH_SF_TEXT          0xFE
 /* laptop -> handheld (two-way builds only) */
 enum { HH_SC_GET_HELLO = 0x60, HH_SC_TIME_REQ = 0x61, HH_SC_TIME_SET = 0x62, HH_SC_MARK = 0x63,
        HH_SC_ACK_ALARM = 0x64, HH_SC_DRIVE = 0x65, HH_SC_LIST_FILES = 0x66, HH_SC_READ_FILE = 0x67,
@@ -57,6 +59,7 @@ enum { HH_SER_VARIANT_DEFAULT = 0, HH_SER_VARIANT_GPS_P1 = 1 };
 #define HH_SER_CAP_PUT      0x0004  /* PUT_* (HANDHELD.MAP, HANDHELD.CFG) */
 #define HH_SER_CAP_LOG      0x0008  /* ESP_LOG lines arrive as LOG frames */
 #define HH_SER_CAP_MAPUP    0x0010  /* MAPUP_* (files into the card's MAP/ folder) */
+#define HH_SER_CAP_HL       0x0020  /* the HL text session (hh_hl.c, SERIAL.md "The HL session") */
 
 /* file kinds on the wire */
 enum { HH_SER_F_DRIVE = 1, HH_SER_F_CAPTURE = 2, HH_SER_F_MAP = 3, HH_SER_F_CFG = 4 };
@@ -155,7 +158,36 @@ typedef struct {
     int (*mapup_commit)(void *ctx, const char *name, uint32_t size, uint32_t crc);
     void (*mapup_pause)(void *ctx);
     void (*mapup_abort)(void *ctx);
+    /* The HL session's path-based side. Paths are canonical: upper case, no leading slash, "" = the card's root
+     * ("MAP/MAP.DAT"). ls: calls emit for each entry after the first `skip` ones (is_dir, name, size, mtime) until it
+     * returns non-zero. Returns 0 when the folder has been listed to its end, 1 when emit stopped it, HH_SER_E_ARG
+     * if there is no such folder. read: up to len bytes at offset (0 = end), *size = the file's length; HH_SER_E_ARG
+     * = no such file, HH_SER_E_BUSY = the drive file being recorded. rm: HH_SER_OK, E_ARG, E_BUSY, E_IO. */
+    int (*hl_ls)(void *ctx, const char *path, uint32_t skip,
+                 int (*emit)(void *arg, int is_dir, const char *name, uint32_t size, uint32_t mtime), void *arg);
+    int (*hl_read)(void *ctx, const char *path, uint32_t offset, uint8_t *buf, uint16_t len, uint32_t *size);
+    int (*hl_rm)(void *ctx, const char *path);
 } hh_serial_fs_t;
+
+/* ---- the HL text session (hh_hl.c) ------------------------------------------------ */
+
+#define HH_HL_LINE_MAX      3072    /* one received line */
+#define HH_HL_CHUNK         2048    /* file bytes in one DATA line (the HELLO says so) */
+#define HH_HL_WINDOW        3       /* DATA lines the laptop may have in flight */
+#define HH_HL_TIMEOUT_S     30.0    /* idle this long: the session ends (HL TIMEOUT) */
+#define HH_HL_PATH_MAX      68
+
+typedef struct {
+    uint8_t  open;                  /* a session is open: the binary stream is paused */
+    uint8_t  skip_data;             /* a PUT failed: DATA lines still on the wire are ignored */
+    uint8_t  held;                  /* the map reader has been told to keep off MAP/ for a PUT */
+    uint8_t  put_kind;              /* 0 none, 1 HANDHELD.MAP, 2 HANDHELD.CFG, 3 a file in MAP/ */
+    uint8_t  get_on, ls_on;
+    double   deadline, reboot_at;
+    char     put_path[HH_HL_PATH_MAX], get_path[HH_HL_PATH_MAX], ls_path[HH_HL_PATH_MAX];
+    uint32_t put_size, put_crc, put_held, put_run;
+    uint32_t get_off, get_size, get_crc, ls_skip, data_lines;
+} hh_hl_t;
 
 typedef struct {
     hh_core_t *core;                /* NULL until hh_serial_attach */
@@ -188,6 +220,15 @@ typedef struct {
     char     mapup_name[HH_SER_MAPUP_NAME_MAX + 1];
     uint32_t mapup_size, mapup_crc, mapup_got;
     double   mapup_t;                       /* time of the last MAPUP frame */
+    /* the HL text session */
+    hh_hl_t  hl;
+    void (*reboot)(void *ctx);              /* HL REBOOT: restart the handheld (NULL = ignored). Called ~0.5 s after the reply */
+    uint8_t  hl_text;                       /* a text line is being received */
+    uint8_t  hl_over;                       /* ... and it is too long: dropped at its end */
+    uint16_t hl_n;
+    uint8_t  hl_in[HH_HL_LINE_MAX];
+    uint8_t  hl_io[HH_HL_CHUNK + 256];      /* file bytes: a chunk read for GET, or decoded from a DATA line */
+    char     hl_out[HH_HL_LINE_MAX];        /* a reply line being built */
 } hh_serial_t;
 
 /* mem/size: the ring (16 KB or more). caps without HH_SER_CAP_RX = tx-only. */
@@ -209,6 +250,16 @@ void hh_serial_rx(hh_serial_t *s, const uint8_t *data, size_t len);
 /* Command task, after each read and each timeout: a MAP/ upload that has gone quiet for HH_SER_MAPUP_IDLE_S
  * gives the map reader its files back. The temporary file stays, and the next chunk carries on. */
 void hh_serial_tick(hh_serial_t *s);
+/* HL text session (hh_hl.c). A line the laptop sent ("HL ..."), without its LF; may be modified. */
+void hh_hl_line(hh_serial_t *s, char *line, size_t len);
+/* Timer work: the 30 s timeout, a restart that is due, a GET or LS in progress. Command task only. */
+void hh_hl_tick(hh_serial_t *s);
+/* Raw text into the ring in one piece (other tasks cannot get a line in between). */
+void hh_serial_push_text(hh_serial_t *s, const char *text, size_t len);
+uint32_t hh_serial_ring_free(hh_serial_t *s);
+int  hh_serial_mapup_name_ok(const char *name, size_t len);
+/* 1 while an HL session is open (the binary stream is paused; ESP_LOG goes out as plain lines). */
+int  hh_serial_in_session(const hh_serial_t *s);
 /* 1 while the laptop has been heard within HH_SER_HOST_S. */
 int  hh_serial_host_attached(const hh_serial_t *s);
 
@@ -219,7 +270,8 @@ int      hh_cobs_decode(const uint8_t *in, size_t len, uint8_t *out);   /* bytes
 size_t   hh_ser_frame(uint8_t type, uint8_t seq, const uint8_t *payload, size_t len, uint8_t *out);
 
 /* The card through stdio under a root folder ("/sd"): port/hh_serfs.c. */
-typedef struct { char root[200]; hh_core_t *core; void *fh; uint8_t kind; uint32_t file_no, size; void *put; void *mup; } hh_serfs_t;
+typedef struct { char root[200]; hh_core_t *core; void *fh; uint8_t kind; uint32_t file_no, size; void *put; void *mup;
+                 void *hl; char hl_path[68]; uint32_t hl_size; } hh_serfs_t;
 void hh_serfs_init(hh_serfs_t *fs, const char *root, hh_core_t *core, hh_serial_fs_t *ops);
 
 #ifdef __cplusplus

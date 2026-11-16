@@ -261,7 +261,7 @@ class CydSim(HlMixin):
         return data
 
     def hello(self) -> P.Hello:
-        caps = P.CAP_LOG if self.tx_only else P.CAP_RX | P.CAP_LOG | (P.CAP_FILES | P.CAP_PUT | P.CAP_MAPUP if self.sd else 0)
+        caps = P.CAP_LOG if self.tx_only else P.CAP_RX | P.CAP_LOG | P.CAP_HL | (P.CAP_FILES | P.CAP_PUT | P.CAP_MAPUP if self.sd else 0)
         unix = self.unix_us(self.now)
         state = P.LINK_OK if self._up else P.LINK_OFF if self._down_since is not None else P.LINK_CONNECTING
         return P.Hello(P.REV, P.VARIANT_GPS_P1 if self.tx_only else P.VARIANT_DEFAULT, caps, FW, self.device,

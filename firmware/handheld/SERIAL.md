@@ -246,6 +246,57 @@ or asks the engine for something the button already offers. DTC asks for
 the engine's own Mode 03 read, behind the same guard (`hh_iso_allowed`) as
 the button: live data pauses for up to about 10 s while it runs.
 
+## The HL session
+
+A second, text protocol shares the wire with the frames: the laptop app's **Handheld** tab and
+`hondalog-handheld ls|get|put|cfg|stat|rm|mark|time|reboot` speak it. Implemented in
+`components/hhcore/hh_hl.c`; the reference device is `hondalog/handheld/cydsim_hl.py`, the reference client
+`hondalog/handheld/hl_client.py` (shared pieces in `hl_proto.py`). The HELLO caps bit is `0x20` (`HH_SER_CAP_HL`);
+a `--gps-p1` build has no receive path and none of this.
+
+**Telling lines from frames.** A frame starts with a COBS length code and then `0x01` (the version); no line has
+`0x01` second, so the first two received bytes decide. A text line ends with LF; a leading LF (the laptop's
+resync) is skipped; a line that does not start with `HL` is console input and is ignored; a `0x00` ends anything
+half-received. Lines are at most 3071 bytes.
+
+**Session.** `HL HELLO` opens it (and may be repeated); `HL BYE` or 30 s without a command (`HL TIMEOUT`) ends it.
+While open the binary stream is not sent (frames are discarded, the engine and the drive file go on), binary
+commands are ignored, and ESP_LOG goes out as plain lines (dropped rather than displace a transfer when the ring is
+nearly full). Every command except `STAT` and every `DATA` re-arms the timer. When it ends the stream starts again
+with a HELLO. A `0x00` is sent at both ends of a session to close anything half-sent.
+
+| Command | Reply |
+|---|---|
+| `HL HELLO` | `HL HELLO fw=.. model=cyd-4827s043n proto=1 id=.. map=.. variant=default\|gps-p1 chunk=2048 win=3` |
+| `HL BYE` / `HL REBOOT` | `HL OK bye` / `HL OK reboot` (the restart follows about 0.5 s later) |
+| `HL STAT` | `HL STAT {json}`: link, ecu, gps, sd, drive, time, serial |
+| `HL MARK` | `HL OK` |
+| `HL TIME <unix ms>` | `HL OK`, or `HL OK ignored` when the GPS has set the clock |
+| `HL LS [path]` | `HL D <path>` and `HL F <size> <mtime> <path>` lines, then `HL END` |
+| `HL GET <path>` / `HL CFG GET` | `HL BEGIN <size>`, `HL DATA <base64>` lines of up to 2048 bytes, `HL END <crc32>` |
+| `HL RM <path>` | `HL OK` |
+| `HL PUT <path> <size> <crc32 hex> [offset]` | `HL READY <held>`; then the laptop sends `HL DATA [@offset] <base64>` lines, at most three unanswered, each answered `HL ACK <held>`; after the last, `HL OK` |
+| `HL STATUS <path>` | `HL PART <held> <size> <crc32>` (what an unfinished PUT of that path holds) |
+| `HL CFG PUT <size> <crc32 hex>` | as PUT, to `/HANDHELD.CFG`; the final reply is `HL OK skipped=<lines the handheld will ignore>` |
+
+Errors are `HL ERR <reason>`: `nosession`, `badcmd`, `args`, `path` (not a path on the card: relative, `..`, `//`,
+backslash, odd characters, over 64 characters), `denied`, `size`, `nofile`, `busy` (the drive being recorded; MAP/
+being uploaded), `nosd`, `offset`, `b64`, `crc`, `io`, `refused` (a `HANDHELD.MAP` that would not load), `state`.
+After a failed PUT the DATA lines still on the wire are ignored, so one error is answered once.
+
+**What can be written.** `PUT`: `/HANDHELD.CFG` (8 KB), `/HANDHELD.MAP` (256 KB) and 8.3 names directly in `/MAP/`
+(not `UPLOAD.TMP`). `RM`: those and files in `/DRIVES/`. Everything is checked as the binary PUT and MAP upload
+check it: the file is written to a temporary name, read back from the card, length and CRC32 compared, a map loaded
+or a config parsed, and only then renamed over the old one (`HANDHELD.MBK` / `.CBK` keep the previous settings
+files). A `MAP/` PUT holds the map reader off the folder like a binary map upload, and fails with `busy` while one
+is in progress. A PUT cut off in a `MAP/` file keeps its temporary file; `STATUS` says how much, and a `PUT` with
+that `offset` (same size and CRC) carries on from there, also in a later session. `HANDHELD.*` uploads start again.
+Nothing in this module can reach the K-line, and the read-only guard counters stay at zero (tested).
+
+**Throughput.** One 2048-byte chunk is a 2732-character line: 25 % over the wire, so 69 kB/s at most at 921600 baud
+(`hondalog-cydsim --wire-baud 921600 --sd-kbps 500`: 69 kB/s put and get; unthrottled, 1.2 MB/s). The UART receive
+buffer is 16 KB so three lines in flight survive a card write that stalls for 100 ms.
+
 ## Inside the handheld
 
     engine --tap--> hh_serial_tap() --+

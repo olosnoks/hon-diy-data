@@ -784,6 +784,53 @@ Wi-Fi access-point mode is a possible later transport. Running the radio can
 glitch the display, so it may end up as a download mode rather than something
 that runs while driving.
 
+## Managing the CYD from the laptop app
+
+The laptop app has a **Handheld** tab (key **F10**) for everything you would otherwise do with a card reader or
+a terminal: look at the handheld's state, browse its SD card, edit `HANDHELD.CFG`, copy the road map over,
+watch its log and install new firmware. It talks over the same USB-C cable as the live stream, so the
+handheld must be the normal two-way build (not `--gps-p1`; that build never listens, and the tab says so).
+
+Pick the port (a CH340, `1a86:7523`, is chosen for you; `/dev/hondalog-cyd` if you installed the udev rule)
+and press **Connect**. The connection stays open while you move between the sub-views. It is a separate
+connection from the one on F1: disconnect there first if the live view has the port.
+
+| Sub-view | What it does |
+|---|---|
+| Status | ECU link, GPS, SD card, drive file, clock source and the link itself, refreshed once a second while it is showing. Buttons: drop a marker, set the clock from this PC (ignored when the GPS has set it), restart the handheld. |
+| SD card | A tree of the card. Download a file, upload one (it lands in `MAP/`, or at the root for `HANDHELD.CFG` / `HANDHELD.MAP`), delete one. Only `MAP/`, the two settings files and `DRIVES/` can be changed; the drive being recorded can be neither read nor deleted. |
+| Config | `HANDHELD.CFG` as a form or as text. Read it from the card, change it, write it back; the handheld checks length and checksum first, keeps the old file as `HANDHELD.CBK`, and uses the new one from the next start. Lines it will skip are listed before you write. |
+| Map | Choose the `MAP` folder made by `hondalog-handheld map-build`; the tab shows what is in it and uploads it with percent, MB, elapsed time and ETA. An interrupted upload carries on from what the card holds when you press Upload again. |
+| Console | The handheld's log lines, live; a line to send; **Record to file**. |
+| Install firmware | Choose the merged `.bin` (written at `0x0`) and press Install. The tab checks the image (an ESP32-S3 merged image with its partition table) before touching the board, lets go of the serial port, runs esptool, and connects again after the restart. Another chip is refused by esptool before anything is erased. |
+
+The map goes over the binary map-upload commands (the same as `hondalog-handheld put-map`): the tab closes its
+text session, sends the files, and opens the session again. Everything else uses the text session described in
+[SERIAL.md](../firmware/handheld/SERIAL.md#the-hl-session).
+
+The same operations are available from a terminal; they share the tab's client (`hondalog/handheld/hl_client.py`):
+
+```sh
+hondalog-handheld stat                          # what the Status view shows (--json for the raw numbers)
+hondalog-handheld ls /MAP                       # list a folder
+hondalog-handheld get /HANDHELD.CFG out.cfg     # download
+hondalog-handheld put maps/MAP.DAT /MAP/MAP.DAT # upload (resumes if cut off)
+hondalog-handheld cfg get | cfg put FILE        # HANDHELD.CFG
+hondalog-handheld rm /MAP/OLD.DAT
+hondalog-handheld mark | time | reboot
+hondalog-handheld put-map ~/maps/MAP            # the map folder, over the binary link
+hondalog-handheld flash image.bin               # esptool, with progress
+```
+
+Speed: the text session moves about 69 kB/s of file at 921600 baud, which is the wire (base64 costs a quarter),
+so the 16 MB state map takes about four minutes. The card is written while the next chunks arrive. A session
+that is idle for 30 seconds ends by itself; the handheld goes back to streaming. The live stream is paused while
+a session is open (the engine, the GPS and the drive file go on), so do not leave it open in the car.
+
+Not verified on the real board yet: the text session over the CH340 at 921600 baud, uploads while the engine is
+being read, and esptool's reset sequence through the CH340's DTR/RTS (hold BOOT and tap RESET if it does not enter
+the bootloader).
+
 ## Troubleshooting
 
 **Red and blue are swapped** (the alarm colour looks blue). The public pin lists for this board disagree about which pin group

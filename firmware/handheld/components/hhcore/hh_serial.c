@@ -77,9 +77,9 @@ void hh_serial_init(hh_serial_t *s, const hh_clock_t *clk, uint8_t *mem, uint32_
     hh_ring_init(&s->ring, mem, mem ? size : 0);
     s->variant = variant;
 #ifdef HH_SERIAL_TX_ONLY
-    caps &= (uint16_t)~(HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP);
+    caps &= (uint16_t)~(HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP | HH_SER_CAP_HL);
 #endif
-    if (!(caps & HH_SER_CAP_RX)) caps &= (uint16_t)~(HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP);
+    if (!(caps & HH_SER_CAP_RX)) caps &= (uint16_t)~(HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP | HH_SER_CAP_HL);
     s->caps = caps;
     s->baud = baud;
     s->last_rx = -1;
@@ -87,18 +87,33 @@ void hh_serial_init(hh_serial_t *s, const hh_clock_t *clk, uint8_t *mem, uint32_
 
 void hh_serial_attach(hh_serial_t *s, hh_core_t *core) { s->core = core; }
 
+/* One ring item (under the lock). `numbered`: frames carry the sequence number; raw text does not. */
+static void push_locked(hh_serial_t *s, uint8_t type, const void *data, size_t len, int numbered)
+{
+    uint8_t *item = s->item;            /* any task may log or tap: the frame is built here, not on its stack */
+    item[0] = type;
+    item[1] = numbered ? s->seq++ : 0;  /* numbered here: the laptop sees a gap where frames were dropped */
+    if (len) memcpy(item + 2, data, len);
+    while (s->ring.cap - s->ring.used < len + 4) {
+        hh_ring_pop(&s->ring);          /* the laptop is not keeping up (or is not there): the oldest go */
+        s->tx_dropped++;
+    }
+    hh_ring_push(&s->ring, item, (uint16_t)(len + 2));
+    if (s->ring.used > s->ring_peak) s->ring_peak = s->ring.used;
+}
+
 int hh_serial_push(hh_serial_t *s, uint8_t type, const void *head, size_t head_len, const void *data, size_t data_len)
 {
     size_t len = head_len + data_len;
     if (!s->ring.buf || len > HH_SER_MAX_PAYLOAD || len + 4 > s->ring.cap) return -1;
     lock(s);
-    uint8_t *item = s->item;            /* any task may log or tap: the frame is built here, not on its stack */
+    uint8_t *item = s->item;
     item[0] = type;
-    item[1] = s->seq++;                 /* numbered here: the laptop sees a gap where frames were dropped */
+    item[1] = s->seq++;
     if (head_len) memcpy(item + 2, head, head_len);
     if (data_len) memcpy(item + 2 + head_len, data, data_len);
     while (s->ring.cap - s->ring.used < len + 4) {
-        hh_ring_pop(&s->ring);          /* the laptop is not keeping up (or is not there): the oldest go */
+        hh_ring_pop(&s->ring);
         s->tx_dropped++;
     }
     hh_ring_push(&s->ring, item, (uint16_t)(len + 2));
@@ -107,6 +122,29 @@ int hh_serial_push(hh_serial_t *s, uint8_t type, const void *head, size_t head_l
     if (s->wake) s->wake(s->lock_ctx);
     return 0;
 }
+
+void hh_serial_push_text(hh_serial_t *s, const char *text, size_t len)
+{
+    if (!s->ring.buf) return;
+    lock(s);
+    while (len) {
+        size_t n = len > 480 ? 480 : len;
+        push_locked(s, HH_SF_TEXT, text, n, 0);
+        text += n; len -= n;
+    }
+    unlock(s);
+    if (s->wake) s->wake(s->lock_ctx);
+}
+
+uint32_t hh_serial_ring_free(hh_serial_t *s)
+{
+    lock(s);
+    uint32_t free_b = s->ring.cap - s->ring.used;
+    unlock(s);
+    return free_b;
+}
+
+int hh_serial_in_session(const hh_serial_t *s) { return s->hl.open; }
 
 void hh_serial_tap(void *ctx, uint8_t kind, const void *rec, size_t len, const void *data, size_t data_len)
 {
@@ -117,6 +155,15 @@ void hh_serial_tap(void *ctx, uint8_t kind, const void *rec, size_t len, const v
 
 void hh_serial_log(hh_serial_t *s, const char *text, size_t len)
 {
+    if (s->hl.open) {                   /* a session is plain lines: this one, cut at its first line end, with one LF */
+        char line[240];
+        size_t n = 0;
+        while (n < len && n < sizeof(line) - 1 && text[n] != '\n' && text[n] != '\r') { line[n] = text[n]; n++; }
+        if (!n || hh_serial_ring_free(s) < 6000) return;    /* never push a GET or a reply out of the ring for a log line */
+        line[n++] = '\n';
+        hh_serial_push_text(s, line, n);
+        return;
+    }
     while (len) {
         size_t n = len > 240 ? 240 : len;
         hh_serial_push(s, HH_SF_LOG, text, n, NULL, 0);
@@ -206,8 +253,10 @@ size_t hh_serial_poll(hh_serial_t *s, uint8_t *out, size_t cap)
 {
     size_t w = 0;
     double t = now(s);
-    if (t >= s->next_hello) { s->next_hello = t + HH_SER_HELLO_S; push_hello(s); }
-    if (t >= s->next_stats) { s->next_stats = t + HH_SER_STATS_S; push_stats(s); }
+    if (!s->hl.open) {
+        if (t >= s->next_hello) { s->next_hello = t + HH_SER_HELLO_S; push_hello(s); }
+        if (t >= s->next_stats) { s->next_stats = t + HH_SER_STATS_S; push_stats(s); }
+    }
     while (cap - w >= HH_SER_FRAME_MAX) {
         uint8_t item[2 + HH_SER_MAX_PAYLOAD];
         uint32_t pos;
@@ -218,6 +267,12 @@ size_t hh_serial_poll(hh_serial_t *s, uint8_t *out, size_t cap)
         else if (s->ring.used) hh_ring_clear(&s->ring);     /* cannot happen; never spin on it */
         unlock(s);
         if (n < 2) break;
+        if (item[0] == HH_SF_TEXT) {            /* an HL line: as it is */
+            memcpy(out + w, item + 2, (size_t)n - 2);
+            w += (size_t)n - 2;
+            continue;
+        }
+        if (s->hl.open) continue;               /* a session pauses the stream (the engine and the card go on) */
         size_t len = hh_ser_frame(item[0], item[1], item + 2, (size_t)n - 2, out + w);
         w += len;
         s->tx_frames++;
@@ -325,7 +380,7 @@ static void cmd_put(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *p,
 
 /* "MAP/" and an 8.3 name: 1-8 of A-Z 0-9 _ - ~ $, optionally a dot and 0-3 of the same. No other
  * folder, no "..", no lower case, no spaces. The temporary file's own name is not one to upload. */
-static int mapup_name_ok(const char *name, size_t len)
+int hh_serial_mapup_name_ok(const char *name, size_t len)
 {
     if (len < 5 || len > HH_SER_MAPUP_NAME_MAX || memcmp(name, "MAP/", 4) != 0) return 0;
     const char *f = name + 4;
@@ -389,7 +444,7 @@ static void cmd_mapup(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *
         if (len < sizeof(o)) { ack(s, type, seq, HH_SER_E_ARG, 0); return; }
         memcpy(&o, p, sizeof(o));
         const char *name = (const char *)p + sizeof(o);
-        if (len != sizeof(o) + o.name_len || !mapup_name_ok(name, o.name_len)
+        if (len != sizeof(o) + o.name_len || !hh_serial_mapup_name_ok(name, o.name_len)
             || o.size == 0 || o.size > HH_SER_MAPUP_SIZE_MAX) { ack(s, type, seq, HH_SER_E_REFUSED, 0); return; }
         if (s->mapup_active && s->mapup_size == o.size && s->mapup_crc == o.crc32
             && strlen(s->mapup_name) == o.name_len && memcmp(s->mapup_name, name, o.name_len) == 0) {
@@ -457,11 +512,13 @@ static void cmd_mapup(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *
 void hh_serial_tick(hh_serial_t *s)
 {
     if (s->mapup_held && now(s) - s->mapup_t > HH_SER_MAPUP_IDLE_S) mapup_pause(s);
+    hh_hl_tick(s);
 }
 
 static void dispatch(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *p, size_t len)
 {
     hh_core_t *c = s->core;
+    if (s->hl.open) return;             /* a text session has the link: binary commands wait for its end */
     switch (type) {
     case HH_SC_GET_HELLO:
         push_hello(s);
@@ -512,15 +569,53 @@ static void dispatch(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *p
     }
 }
 
+/* A line of text from the laptop. The first two bytes of a frame are a COBS length code and the version (0x01); no
+ * line has 0x01 second, so two bytes tell them apart. A lone LF in front (the laptop's resync) is skipped. */
+static void rx_text_byte(hh_serial_t *s, uint8_t b)
+{
+    if (b == '\n') {
+        if (!s->hl_over) {
+            s->hl_in[s->hl_n] = 0;
+            if (s->hl_n >= 2 && s->hl_in[0] == 'H' && s->hl_in[1] == 'L') {
+                s->last_rx = now(s);
+                hh_hl_line(s, (char *)s->hl_in, s->hl_n);
+            }                           /* any other line is the console: nothing to do with it */
+        } else if (s->hl_n) {
+            s->rx_bad++;
+        }
+        s->hl_text = 0; s->hl_over = 0; s->hl_n = 0;
+        return;
+    }
+    if (b == '\r') return;
+    if (s->hl_n < HH_HL_LINE_MAX - 1) s->hl_in[s->hl_n++] = b; else s->hl_over = 1;
+}
+
 void hh_serial_rx(hh_serial_t *s, const uint8_t *data, size_t len)
 {
     if (!(s->caps & HH_SER_CAP_RX)) return;
     for (size_t i = 0; i < len; i++) {
         uint8_t b = data[i];
+        if (s->hl_text) {
+            if (b == 0) { s->hl_text = 0; s->hl_over = 0; s->hl_n = 0; s->rx_bad++; continue; }   /* a frame cut in: start over */
+            rx_text_byte(s, b);
+            continue;
+        }
         if (b != 0) {
             if (s->rx_skip) continue;
             if (s->rx_n >= sizeof(s->rx)) { s->rx_skip = 1; s->rx_n = 0; s->rx_bad++; continue; }
             s->rx[s->rx_n++] = b;
+            if (s->rx_n == 2 && s->rx[1] != HH_SER_PROTO) {
+                if (s->rx[0] == '\n' || s->rx[0] == '\r') {       /* a blank line before a line (or a frame) */
+                    s->rx[0] = s->rx[1];
+                    s->rx_n = 1;
+                } else {                                          /* text */
+                    s->hl_text = 1; s->hl_over = 0; s->hl_n = 0;
+                    uint8_t a = s->rx[0], c = s->rx[1];
+                    s->rx_n = 0;
+                    rx_text_byte(s, a);
+                    rx_text_byte(s, c);
+                }
+            }
             continue;
         }
         uint16_t n = s->rx_n;
@@ -538,6 +633,7 @@ void hh_serial_rx(hh_serial_t *s, const uint8_t *data, size_t len)
         s->last_rx = now(s);
         dispatch(s, raw[1], raw[2], raw + 3, (size_t)m - 5);
     }
+    hh_hl_tick(s);                      /* a GET goes on as soon as the ring has room */
 }
 
 #endif /* !HH_SERIAL_TX_ONLY */

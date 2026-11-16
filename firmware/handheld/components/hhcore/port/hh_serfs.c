@@ -312,6 +312,92 @@ static int fs_mapup_commit(void *ctx, const char *name, uint32_t size, uint32_t 
     return HH_SER_OK;
 }
 
+/* ---- the HL session's path-based side ------------------------------------------------ */
+
+/* "DRIVES/D000012.HHD" -> the drive's number, else -1 (the file the engine may be writing) */
+static long drive_no_of(const char *path)
+{
+    if (strncmp(path, "DRIVES/", 7) != 0) return -1;
+    return number_of(path + 7, 'D');
+}
+
+static int path_busy(const hh_serfs_t *fs, const char *path)
+{
+    long no = drive_no_of(path);
+    return no > 0 && busy(fs, HH_SER_F_DRIVE, (uint32_t)no);
+}
+
+static void full_path(const hh_serfs_t *fs, const char *path, char *out, size_t cap)
+{
+    snprintf(out, cap, "%s%s%s", fs->root, *path ? "/" : "", path);
+}
+
+static int fs_hl_ls(void *ctx, const char *path,  uint32_t skip,
+                    int (*emit)(void *arg, int is_dir, const char *name, uint32_t size, uint32_t mtime), void *arg)
+{
+    hh_serfs_t *fs = ctx;
+    char dir[280], file[560];
+    struct stat st;
+    full_path(fs, path, dir, sizeof(dir));
+    DIR *d = opendir(dir);
+    if (!d) return HH_SER_E_ARG;
+    struct dirent *e;
+    uint32_t i = 0;
+    int rc = 0;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        snprintf(file, sizeof(file), "%s/%s", dir, e->d_name);
+        if (stat(file, &st) != 0) continue;                   /* gone since readdir: not counted */
+        if (i++ < skip) continue;
+        if (emit(arg, S_ISDIR(st.st_mode), e->d_name, (uint32_t)st.st_size, (uint32_t)st.st_mtime)) { rc = 1; break; }
+    }
+    closedir(d);
+    return rc;
+}
+
+static int fs_hl_read(void *ctx, const char *path, uint32_t offset, uint8_t *buf, uint16_t len, uint32_t *size)
+{
+    hh_serfs_t *fs = ctx;
+    char full[280];
+    if (path_busy(fs, path)) {
+        if (fs->hl && strcmp(fs->hl_path, path) == 0) { fclose(fs->hl); fs->hl = NULL; }
+        return HH_SER_E_BUSY;
+    }
+    if (!fs->hl || strcmp(fs->hl_path, path) != 0) {
+        if (fs->hl) { fclose(fs->hl); fs->hl = NULL; }
+        struct stat st;
+        full_path(fs, path, full, sizeof(full));
+        if (stat(full, &st) != 0 || !S_ISREG(st.st_mode)) return HH_SER_E_ARG;
+        FILE *f = fopen(full, "rb");
+        if (!f) return HH_SER_E_ARG;
+        fs->hl = f;
+        snprintf(fs->hl_path, sizeof(fs->hl_path), "%s", path);
+        fs->hl_size = (uint32_t)st.st_size;
+    }
+    *size = fs->hl_size;
+    if (len == 0 || offset >= fs->hl_size) {
+        if (offset >= fs->hl_size && len) { fclose(fs->hl); fs->hl = NULL; }
+        return 0;
+    }
+    if (fseek(fs->hl, (long)offset, SEEK_SET) != 0) { fclose(fs->hl); fs->hl = NULL; return HH_SER_E_IO; }
+    size_t n = fread(buf, 1, len, fs->hl);
+    if (n == 0 && ferror((FILE *)fs->hl)) { fclose(fs->hl); fs->hl = NULL; return HH_SER_E_IO; }
+    return (int)n;
+}
+
+static int fs_hl_rm(void *ctx, const char *path)
+{
+    hh_serfs_t *fs = ctx;
+    char full[280];
+    struct stat st;
+    if (path_busy(fs, path)) return HH_SER_E_BUSY;
+    full_path(fs, path, full, sizeof(full));
+    if (stat(full, &st) != 0 || !S_ISREG(st.st_mode)) return HH_SER_E_ARG;
+    if (fs->hl) { fclose(fs->hl); fs->hl = NULL; }
+    if (fs->fh) drop_handle(fs);
+    return remove(full) == 0 ? HH_SER_OK : HH_SER_E_IO;
+}
+
 void hh_serfs_init(hh_serfs_t *fs, const char *root, hh_core_t *core, hh_serial_fs_t *ops)
 {
     memset(fs, 0, sizeof(*fs));
@@ -322,4 +408,5 @@ void hh_serfs_init(hh_serfs_t *fs, const char *root, hh_core_t *core, hh_serial_
     ops->put_begin = fs_put_begin; ops->put_data = fs_put_data; ops->put_end = fs_put_end;
     ops->mapup_open = fs_mapup_open; ops->mapup_write = fs_mapup_write;
     ops->mapup_commit = fs_mapup_commit; ops->mapup_pause = fs_mapup_pause; ops->mapup_abort = fs_mapup_abort;
+    ops->hl_ls = fs_hl_ls; ops->hl_read = fs_hl_read; ops->hl_rm = fs_hl_rm;
 }

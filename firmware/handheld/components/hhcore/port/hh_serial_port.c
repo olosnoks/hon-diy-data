@@ -25,6 +25,7 @@
 #include "driver/uart_vfs.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 
 #include "board_pins.h"
@@ -34,7 +35,7 @@
 #define RING_BYTES      (32 * 1024)     /* about 16 s of the stream; PSRAM */
 #define RING_FALLBACK   (8 * 1024)      /* internal RAM, when there is no PSRAM */
 #define UART_TX_BUF     4096
-#define UART_RX_BUF     2048
+#define UART_RX_BUF     16384   /* an HL upload has three 2.7 KB lines in flight, and the card can stall a write for 100 ms: 9 KB at 921600 baud */
 
 static const char *TAG = "hhserial";
 
@@ -52,6 +53,8 @@ static void s_sleep(void *ctx, double s) { (void)ctx; (void)s; }
 static void s_lock(void *ctx) { (void)ctx; xSemaphoreTake(ser_mutex, portMAX_DELAY); }
 static void s_unlock(void *ctx) { (void)ctx; xSemaphoreGive(ser_mutex); }
 static void s_wake(void *ctx) { (void)ctx; if (tx_handle) xTaskNotifyGive(tx_handle); }
+
+static void s_reboot(void *ctx) { (void)ctx; esp_restart(); }
 
 /* ESP_LOG's output function: the line becomes a LOG frame. Also returned to
  * nobody: with the binary link on, plain text on this UART would only damage frames. */
@@ -75,7 +78,9 @@ static void tx_task(void *arg)
     out[0] = 0;
     for (;;) {
         size_t n = hh_serial_poll(&ser, out + 1, sizeof(out) - 1);
-        if (n) uart_write_bytes(ser_port, out, n + 1);  /* waits here, and only here, when the UART is behind */
+        /* In an HL session the stream is lines of text, and a 0x00 in the middle of one would cut it: no lead byte */
+        int text = hh_serial_in_session(&ser);
+        if (n) uart_write_bytes(ser_port, text ? out + 1 : out, text ? n : n + 1);  /* waits here, and only here, when the UART is behind */
         else ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));  /* until a frame is pushed (or HELLO/STATS fall due) */
     }
 }
@@ -85,10 +90,11 @@ static void tx_task(void *arg)
  * handled as soon as it is in, not when a buffer fills or a timeout passes. */
 static void rx_task(void *arg)
 {
-    static uint8_t buf[256];
+    static uint8_t buf[1024];
     (void)arg;
     for (;;) {
-        int n = uart_read_bytes(ser_port, buf, 1, pdMS_TO_TICKS(100));
+        /* 20 ms: also the pace of a GET and of the HL timeout (hh_serial_tick) */
+        int n = uart_read_bytes(ser_port, buf, 1, pdMS_TO_TICKS(20));
         if (n <= 0) { hh_serial_tick(&ser); continue; }     /* quiet: drop an upload that has gone silent */
         size_t more = 0;
         if (uart_get_buffered_data_len(ser_port, &more) == ESP_OK && more) {
@@ -130,11 +136,13 @@ int hh_serial_port_start(hh_core_t *core, const hh_config_t *cfg, int sd_ok)
     hh_serial_init(&ser, &clk, mem, size, HH_SER_VARIANT_GPS_P1, HH_SER_CAP_LOG, (uint32_t)cfg->serial_baud);
 #else
     hh_serial_init(&ser, &clk, mem, size, HH_SER_VARIANT_DEFAULT,
-                   HH_SER_CAP_RX | HH_SER_CAP_LOG | (sd_ok ? HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP : 0),
+                   HH_SER_CAP_RX | HH_SER_CAP_LOG | HH_SER_CAP_HL
+                       | (sd_ok ? HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP : 0),
                    (uint32_t)cfg->serial_baud);
     if (sd_ok) hh_serfs_init(&serfs, "/sd", core, &ser.fs);
 #endif
     ser.lock = s_lock; ser.unlock = s_unlock; ser.wake = s_wake;
+    ser.reboot = s_reboot;
     hh_serial_attach(&ser, core);
     hh_core_set_tap(core, hh_serial_tap, &ser);
     running = true;

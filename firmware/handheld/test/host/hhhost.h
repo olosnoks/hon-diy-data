@@ -49,6 +49,8 @@ hh_serial_t *hhhost_serial(hhhost_t *h, int tx_only, uint32_t ring_size);
 /* What the UART would send next, and bytes "received" from the laptop (for ctypes). */
 size_t hhhost_serial_poll(hhhost_t *h, uint8_t *out, size_t cap);
 void hhhost_serial_rx(hhhost_t *h, const uint8_t *data, size_t len);
+/* Timers of the laptop link (an HL session's timeout, a GET in progress): the firmware calls this every 20 ms. */
+void hhhost_serial_tick(hhhost_t *h);
 uint32_t hhhost_serial_stat(hhhost_t *h, const char *what);
 
 #endif
