@@ -184,7 +184,7 @@ def summary(pins: Sequence[StallPin], radius_m: float = CLUSTER_RADIUS_M,
     if len(big) < 2:
         return head + f". No two within {distance(radius_m)} of each other: no one place stands out."
     lat, lon = centre(pins, big)
-    moving = [pins[i].max_speed_30s for i in big if pins[i].max_speed_30s is not None]
+    moving = [float(v) for v in (pins[i].max_speed_30s for i in big) if v is not None]
     fast = f", moving at up to {speed(float(np.median(moving)))} before" if moving else ""
     return (head + f". {len(big)} of them within {distance(max(1.0, 2 * spread_m(pins, big)))} of one another, "
             f"near {lat:.5f}, {lon:.5f}{fast}.")

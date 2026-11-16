@@ -87,7 +87,7 @@ def _iso(unix: float) -> str:
 def _segments(track: Track, i0: int = 0, i1: int | None = None) -> list[np.ndarray]:
     """Index runs of the track without a gap."""
     i1 = len(track) if i1 is None else i1
-    starts = [i for i in np.flatnonzero(track.breaks[i0:i1]) + i0]
+    starts = [int(i) for i in np.flatnonzero(track.breaks[i0:i1]) + i0]
     if not starts or starts[0] != i0:
         starts = [i0] + starts
     bounds = starts + [i1]

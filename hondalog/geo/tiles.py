@@ -231,7 +231,7 @@ class TileCache:
                                     "url": self.source.url}), encoding="utf-8")
 
     def _scan(self) -> list[tuple[float, int, Path]]:
-        out = []
+        out: list[tuple[float, int, Path]] = []
         if not self.dir.is_dir():
             return out
         for path in self.dir.rglob("*.png"):
@@ -368,7 +368,7 @@ class TileFetcher:
             self._known.pop(key, None)
 
     def poll(self, limit: int = 64) -> list[Result]:
-        out = []
+        out: list[Result] = []
         while self._done and len(out) < limit:
             out.append(self._done.popleft())
         return out

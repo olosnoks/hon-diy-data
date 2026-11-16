@@ -339,13 +339,11 @@ def drive_captures(log: Any) -> list[Waypoint]:
         rows = []
     finally:
         conn.close()
-    lo = hi = None
-    if ref.capture:                        # a capture: only what lies inside its window
-        lo, hi = log.t0, log.t1
+    lo, hi = (float(log.t0), float(log.t1)) if ref.capture else (-np.inf, np.inf)   # a capture: its window
     out = []
     for name, kind, reason, message, t in rows:
         t = float(t)
-        if lo is not None and not lo - 1e-6 <= t <= hi + 1e-6:
+        if not lo - 1e-6 <= t <= hi + 1e-6:
             continue
         out.append(Waypoint(t, "stall" if kind == "stall" else "capture", str(name),
                             str(message or reason or kind), DriveRef(ref.db, ref.drive, str(name))))
