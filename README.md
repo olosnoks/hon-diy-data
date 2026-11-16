@@ -281,11 +281,25 @@ it tells you what to do, judges the recorded data, and on a pass writes
 `status = "verified"` and the evidence into your address map. When the
 check fails it lists the addresses that did behave as expected.
 
-**Tune (F6).** Table grid with a 3D surface beside it. Start with
-`hondalog --rom tuned.bin --definition p28.toml` (or `.xdf`) to edit a ROM:
-edits go through the ROM session's undo, "Save .bin" writes a new image
-with the checksum fixed, and the live cursor follows RPM and MAP. Without
-a ROM, or if it cannot be read, the read-only sample tables are shown.
+**Tune (F6).** Table grid with a 3D surface beside it. "Definition…" loads
+a ROM definition (a TunerPro `.xdf` or a hondalog `.toml`) and "Open ROM…" a
+ROM image; the table list, the grid and the surface are rebuilt from them
+(more than four tables: one button with a menu, T steps through them). The
+definition is remembered for the next ROM, and loading another one reads the
+open ROM again with it. `hondalog --rom tuned.bin --definition p28.toml`
+does the same from the command line. The ROM card says which file and
+definition are open, whether the checksum is right and whether there are
+unsaved edits; opening something else with unsaved edits asks first. Edits
+go through the ROM session: Undo (Ctrl+Z) and Redo (Ctrl+Y), "Save .bin"
+(Ctrl+S) writes a new image with the checksum fixed and never overwrites the
+ROM that was opened, and "Burn image…" writes the chip-ready 64 KB file only
+if the session's checks pass (size, not blank, checksum, signature): save
+first, because an edit makes the checksum wrong. While the engine runs the
+table shows where it is: the live cell is outlined, the cells it has been
+through in the last 7 s carry a bar that shortens as the visit ages, and the
+surface has the point and its trail (W5's `TableTracer`, on the table's own
+axes); "at edge" means RPM or MAP is off the table. Without a ROM, or if it
+cannot be read, the read-only sample tables are shown.
 
 **Alarms (F7).** The shape key, the live alarm list and the limits. The
 alarms are the `[[alarm]]` rules in the address map; the black box rails
@@ -756,7 +770,8 @@ same model in-process, with ISO 9141-2.
 ## ROM tuning tools (chipped P28)
 
 `hondalog/tuning/` edits ROM files for the chipped OBD1 P28. The Tune screen
-edits tables (`hondalog --rom FILE --definition FILE`); the command
+edits tables ("Open ROM…" and "Definition…", or `hondalog --rom FILE
+--definition FILE`); the command
 `hondalog-tune` covers the file work:
 
 ```sh

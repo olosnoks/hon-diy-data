@@ -454,7 +454,8 @@ Tune
 | = / - | Raise / lower (fuel 0.05 ms, ignition 0.5 degrees; Shift: x5) |
 | I / S | Interpolate / smooth the selection |
 | T | Next table |
-| Ctrl+Z / Ctrl+S | Undo / save .bin |
+| Ctrl+Z / Ctrl+Y / Ctrl+S | Undo / redo (also Ctrl+Shift+Z) / save .bin |
+| Ctrl+O / Ctrl+D / Ctrl+B | Open ROM… / Definition… / Burn image… |
 
 ---
 

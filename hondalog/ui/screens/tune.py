@@ -1,12 +1,24 @@
 """F6, tuning table editor shell (HANDOFF 5.6): exact values in a 2D grid,
-shape in the 3D surface next to it. All table logic is in the TableModel."""
+shape in the 3D surface next to it. All table logic is in the TableModel.
+
+"Open ROM…" and "Definition…" (a TunerPro .xdf or a hondalog .toml) change
+what the model holds; the screen rebuilds its table list, grid and surface
+when ``TableModel.layout`` moves. Saving, the checksum line, undo / redo and
+"Burn image…" all go through the model, which is W5's ``RomSession`` with
+its safety checks; without a ROM the sample tables stay.
+
+The live cell, its trail on the grid and the point and trail on the surface
+come from W5's ``TableTracer`` (``hondalog.tuning.trace``), fed with RPM and
+MAP from the bus."""
 
 from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPolygonF
-from PySide6.QtWidgets import QFileDialog, QWidget
+from PySide6.QtGui import QColor, QCursor, QPainter, QPolygonF
+from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox, QWidget
+
+from ...tuning import AxisError, TableTracer
 
 from .. import paint, theme
 from ..controls import Button, Card, Segment
@@ -14,6 +26,9 @@ from ..scene3d import MapModel, MapScene
 from ..theme import T
 
 HEAD_W, HEAD_H, ROW_H = 60, 24, 24
+TRAIL_S = 7.0                   # how long the trail on the table and the surface lasts
+ROM_FILTER = "ROM images (*.bin *.rom *.BIN *.ROM);;All files (*)"
+DEFINITION_FILTER = "Definitions (*.xdf *.toml *.XDF);;All files (*)"
 
 
 class TableGrid(QWidget):
@@ -30,6 +45,7 @@ class TableGrid(QWidget):
         self.cur = (0, 0)               # (row = rpm index, col = map index)
         self.anchor = (0, 0)
         self.live: tuple | None = None
+        self.trail: np.ndarray | None = None    # (n_rpm, n_map) 0..1: where the engine has just been
         self._text: list = []
         self._heat: list = []
         self._changed = np.zeros((1, 1), dtype=bool)
@@ -69,9 +85,17 @@ class TableGrid(QWidget):
         self.update()
         self.moved.emit()
 
-    def set_live(self, cell) -> None:
-        if cell != self.live:
-            self.live = cell
+    def set_live(self, cell, trail: np.ndarray | None = None) -> None:
+        """The cell the engine is in and the tracer's fading heat for the
+        cells it has just been through (same shape as the values, 0..1)."""
+        if trail is not None:
+            trail = np.round(trail * 8) / 8         # eight steps: repaint only when a bar moves
+            if not trail.any():
+                trail = None
+        same = (trail is None and self.trail is None) or (
+            trail is not None and self.trail is not None and np.array_equal(trail, self.trail))
+        if cell != self.live or not same:
+            self.live, self.trail = cell, trail
             self.update()
 
     def cell_w(self) -> float:
@@ -112,12 +136,17 @@ class TableGrid(QWidget):
         cell, bold = T.font(13, 600, mono=True), T.font(13, 800, mono=True)
         ink = T.on_heat
         tri = QPolygonF([QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)])
+        trail = self.trail if self.trail is not None and self.trail.shape == (nr, nc) else None
         p.setFont(cell)
         for r in range(nr):
             heat, text, changed = self._heat[r], self._text[r], self._changed[r]
             for c in range(nc):
                 rect = self._rect(r, c)
                 p.fillRect(rect, heat[c])
+                if trail is not None and trail[r, c] > 0:
+                    # the trail: a bar along the bottom that shortens as the visit ages
+                    p.fillRect(QRectF(rect.x() + 2, rect.bottom() - 3,
+                                      (rect.width() - 4) * float(trail[r, c]), 3), ink)
                 p.setPen(ink)
                 if self.live == (r, c):
                     p.setFont(bold)
@@ -172,83 +201,157 @@ class ValueCard(Card):
                    paint.elide(mono, self.foot, w))
 
 
-class ChipCard(Card):
-    def __init__(self, parent=None):
-        super().__init__("Chip · P28 only", parent=parent)
-        self.text = ""
-        self._lines: list = []
-        self.save_btn = Button("Save .bin", parent=self)
-        self.write_btn = Button("Write to chip", parent=self)
-        self.write_btn.setEnabled(False)
+class RomCard(Card):
+    """The ROM: what is open, its checksum, and the file actions."""
 
-    def set_text(self, text: str) -> None:
-        if text != self.text:
-            self.text = text
+    def __init__(self, parent=None):
+        super().__init__("ROM · chip", parent=parent)
+        self.text = ""
+        self.alert = False              # the first line is a problem: draw it in the alarm colour
+        self._lines: list = []
+        self.open_btn = Button("Open ROM…", height=40, parent=self)
+        self.def_btn = Button("Definition…", height=40, parent=self)
+        self.save_btn = Button("Save .bin", height=40, parent=self)
+        self.burn_btn = Button("Burn image…", height=40, parent=self)
+        self.write_btn = Button("Write chip", height=40, parent=self)
+        self.write_btn.setToolTip("Write to chip: needs a P28 with a burner (minipro) or an emulator")
+        self.write_btn.setEnabled(False)
+        self.open_btn.setToolTip("Open a ROM image (.bin) with the definition loaded last")
+        self.def_btn.setToolTip("Load a definition: a TunerPro .xdf or a hondalog .toml. "
+                                "The open ROM is read again with it.")
+        self.burn_btn.setToolTip("Write the chip-ready image to a file. Refused when the "
+                                 "checksum or the signature is wrong.")
+
+    def set_text(self, text: str, alert: bool = False) -> None:
+        if (text, alert) != (self.text, self.alert):
+            self.text, self.alert = text, alert
             self._lines = []
             self.update()
 
     def resizeEvent(self, _event) -> None:
-        y = self.height() - 10 - 44
-        half = (self.width() - 20 - 8) // 2
-        self.save_btn.setGeometry(10, y, half, 44)
-        self.write_btn.setGeometry(10 + half + 8, y, self.width() - 20 - half - 8, 44)
+        w = self.width() - 20
+        half, third = (w - 6) // 2, (w - 12) // 3
+        y = self.height() - 10 - 40
+        self.save_btn.setGeometry(10, y, third, 40)
+        self.burn_btn.setGeometry(10 + third + 6, y, third, 40)
+        self.write_btn.setGeometry(10 + 2 * third + 12, y, w - 2 * third - 12, 40)
+        y -= 46
+        self.open_btn.setGeometry(10, y, half, 40)
+        self.def_btn.setGeometry(10 + half + 6, y, w - half - 6, 40)
+        self._lines = []
 
     def paint_body(self, p, x, y, w, h) -> None:
-        font = T.font(15, 700)
+        font = T.font(14, 700)
         if not self._lines:
-            self._lines = paint.wrap(font, self.text, w)
+            self._lines = [line for part in self.text.split("\n") for line in paint.wrap(font, part, w)]
         p.setFont(font)
-        p.setPen(T.fg)
-        room = int((h - 52) // 20)
+        room = max(1, int((self.open_btn.y() - y - 4) // 18))
         for i, line in enumerate(self._lines[:room]):
             if i == room - 1 and len(self._lines) > room:
                 line = paint.elide(font, line + " …", w)
-            p.drawText(QRectF(x, y + 20 * i, w, 20), Qt.AlignVCenter | Qt.AlignLeft, line)
+            p.setPen(T.alarm if self.alert and i == 0 else T.fg)
+            p.drawText(QRectF(x, y + 18 * i - 2, w, 18), Qt.AlignVCenter | Qt.AlignLeft, line)
 
 
 class TuneScreen(QWidget):
     def __init__(self, session, settings=None, parent=None):
         super().__init__(parent)
         self.session = session
+        self.settings = settings
         self.tm = session.tables
         self.infos = list(self.tm.tables())
         self.table = self.infos[0]
         self.seg = Segment([(i.id, i.name) for i in self.infos], self.table.id, parent=self)
         self.seg.picked.connect(self.set_table)
+        # a definition with more tables than fit a segment gets one button and a menu
+        self.pick_btn = Button("", "T", parent=self)
+        self.pick_btn.clicked.connect(self.table_menu)
         self.grid = TableGrid(self)
         self.grid.moved.connect(self._selection_changed)
         self.model = MapModel(self.tm.rpm_axis, self.tm.map_axis)
         self.model.logged = False
         self.scene = MapScene(self.model, dist=4.9, el=0.46,
-                              key_items=(("live", "live point"), ("sel", "selected cell")),
+                              key_items=(("live", "live point + trail"), ("sel", "selected cell")),
                               hint="", label_px=(13, 15), wire_skip=3, settings=settings,
                               parent=self)
-        self.dec_btn = Button("−", "-", parent=self)
-        self.inc_btn = Button("+", "=", parent=self)
+        self.dec_btn = Button("−", parent=self)
+        self.inc_btn = Button("+", parent=self)
         self.int_btn = Button("Interpolate", "I", parent=self)
         self.smo_btn = Button("Smooth", "S", parent=self)
         self.undo_btn = Button("Undo", "^Z", parent=self)
+        self.redo_btn = Button("Redo", parent=self)
+        self.redo_btn.setToolTip("Redo (Ctrl+Y)")
         self.dec_btn.clicked.connect(lambda: self.bump(-1))
         self.inc_btn.clicked.connect(lambda: self.bump(1))
         self.int_btn.clicked.connect(self.interpolate)
         self.smo_btn.clicked.connect(self.smooth)
         self.undo_btn.clicked.connect(self.undo)
+        self.redo_btn.clicked.connect(self.redo)
         self.sel_card = ValueCard("Selected cell", self)
-        self.live_card = ValueCard("Live cell", self)
-        self.chip = ChipCard(self)
-        self.chip.save_btn.clicked.connect(self.save)
-        for b in (self.dec_btn, self.inc_btn, self.int_btn, self.smo_btn, self.undo_btn):
-            b.setEnabled(self.tm.writable)
+        self.live_card = ValueCard("Live cell · interpolated", self)
+        self.chip = RomCard(self)
+        self.chip.open_btn.clicked.connect(lambda: self.open_rom())
+        self.chip.def_btn.clicked.connect(lambda: self.load_definition())
+        self.chip.save_btn.clicked.connect(lambda: self.save())
+        self.chip.burn_btn.clicked.connect(lambda: self.build_burn_image())
+        #: asks before unsaved edits are dropped; a test replaces it. (title, text) -> bool
+        self.confirm = self._confirm_box
+        self.message = ""               # the result of the last file action, shown in the ROM card
+        self._problem = False
+        self.tracer: TableTracer | None = None
         self._rev = -1
+        self._layout = getattr(self.tm, "layout", 0)
         self._gen = -1
+        self._make_tracer()
         self._load()
 
     # ---- model -> widgets ----
+
+    def _make_tracer(self) -> None:
+        """W5's tracer on the axes of the tables that are showing: the ROM
+        table's own when a ROM is open, the sample grid's otherwise."""
+        editor = getattr(self.tm, "editor", None)
+        try:
+            self.tracer = (TableTracer.for_table(editor, trail_seconds=TRAIL_S) if editor is not None
+                           else TableTracer(self.tm.rpm_axis, self.tm.map_axis, trail_seconds=TRAIL_S))
+        except AxisError:
+            self.tracer = None          # an axis that does not rise: no live cursor on this table
+        self.grid.set_live(None)
+        self.scene.set_track(None, ())
+
+    def _rebuild(self) -> None:
+        """The model holds other tables (a ROM or a definition was opened)."""
+        tm = self.tm
+        self._layout = getattr(tm, "layout", 0)
+        self.infos = list(tm.tables())
+        keep = next((i for i in self.infos if i.id == self.table.id), None)
+        self.table = keep or self.infos[0]
+        self.seg.set_options([(i.id, i.name) for i in self.infos], self.table.id)
+        self.seg.set_current(self.table.id)
+        self.grid.cur = self.grid.anchor = (0, 0)
+        self.model = MapModel(tm.rpm_axis, tm.map_axis)
+        self.model.logged = False
+        self.scene.set_model(self.model)
+        self._make_tracer()
+        self._load()
+        self.resizeEvent(None)
 
     def set_table(self, table_id: str) -> None:
         self.table = next(i for i in self.infos if i.id == table_id)
         self.seg.set_current(table_id)
         self._load()
+
+    def next_table(self) -> None:
+        ids = [i.id for i in self.infos]
+        self.set_table(ids[(ids.index(self.table.id) + 1) % len(ids)])
+
+    def table_menu(self) -> None:
+        menu = QMenu(self)
+        for info in self.infos:
+            action = menu.addAction(info.name, lambda tid=info.id: self.set_table(tid))
+            action.setCheckable(True)
+            action.setChecked(info.id == self.table.id)
+        menu.exec(QCursor.pos())
 
     def _load(self) -> None:
         tm, info = self.tm, self.table
@@ -262,13 +365,50 @@ class TuneScreen(QWidget):
         m.sel = (self.grid.cur[0], self.grid.cur[1])
         m.touch()
         self.scene.refresh()
-        n = int((np.abs(values - tm.base(info.id)) > 1e-6).sum())
-        self.chip.set_text((f"{n} cells changed, not written. " if n else "")
-                           + (tm.read_only_reason or
-                              "Save .bin writes the edited tables to a file."))
-        self.chip.write_btn.setEnabled(tm.can_write_chip())
+        self.pick_btn.set_text(f"{info.name}  ({self.infos.index(info) + 1} of {len(self.infos)})")
+        self._sync_rom_card()
         self._selection_changed()
         self._gen = -1
+
+    def _sync_rom_card(self) -> None:
+        """File, definition, checksum and what is unsaved, from the model."""
+        if getattr(self.tm, "layout", 0) != self._layout:
+            self._rebuild()                 # the tables changed under us: that ends here again
+            return
+        tm, info = self.tm, self.table
+        n = int((np.abs(tm.values(info.id) - tm.base(info.id)) > 1e-6).sum())
+        status = getattr(tm, "status", None)
+        state = status() if status is not None else None
+        lines = []
+        if self.message:
+            lines.append(self.message)
+        if state is not None and state["loaded"]:
+            lines.append(f"{state['rom']} · {state['definition']}")
+            lines.append(state["checksum"] + (" · not saved" if state["dirty"] else "")
+                         + (f" · {n} cells changed here" if n else ""))
+            lines += state["warnings"][:1]
+        else:
+            if state is not None and state["problem"] and not self.message:
+                lines.append(state["problem"])
+            if state is not None and state["rom"]:
+                lines.append(f"{state['rom']} needs its definition: Definition…")
+            if n:
+                lines.append(f"{n} cells changed, not written.")
+            lines.append(tm.read_only_reason or "Save .bin writes the edited tables to a file.")
+        alert = self._problem or bool(state is not None and state["problem"] and not self.message
+                                      and not state["loaded"])
+        self.chip.set_text("\n".join(lines), alert)
+        can_open = hasattr(tm, "open")
+        loaded = bool(state is not None and state["loaded"])
+        self.chip.open_btn.setEnabled(can_open)
+        self.chip.def_btn.setEnabled(can_open)
+        self.chip.save_btn.setEnabled(tm.writable)
+        self.chip.burn_btn.setEnabled(loaded)
+        self.chip.write_btn.setEnabled(tm.can_write_chip())
+        for b in (self.dec_btn, self.inc_btn, self.int_btn, self.smo_btn):
+            b.setEnabled(tm.writable)
+        self.undo_btn.setEnabled(tm.writable and bool(getattr(tm, "can_undo", True)))
+        self.redo_btn.setEnabled(bool(getattr(tm, "can_redo", False)))
 
     def _selection_changed(self) -> None:
         tm, info = self.tm, self.table
@@ -284,6 +424,10 @@ class TuneScreen(QWidget):
             self.model.touch()
             self.scene.refresh()
 
+    def _say(self, text: str, problem: bool = False) -> None:
+        self.message, self._problem = text, problem
+        self._sync_rom_card()
+
     # ---- edits (all through the TableModel) ----
 
     def bump(self, steps: float) -> None:
@@ -298,15 +442,116 @@ class TuneScreen(QWidget):
     def undo(self) -> None:
         self.tm.undo()
 
-    def save(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Save tables", "tables.bin", "Binary (*.bin)")
-        if path:
-            self.tm.save(path)
+    def redo(self) -> None:
+        redo = getattr(self.tm, "redo", None)
+        if redo is not None:
+            redo()
+
+    # ---- files (all through the TableModel, which is the RomSession) ----
+
+    def _confirm_box(self, title: str, text: str) -> bool:
+        box = QMessageBox(QMessageBox.Warning, title, text, QMessageBox.Cancel, self)
+        yes = box.addButton("Discard them", QMessageBox.DestructiveRole)
+        box.setDefaultButton(QMessageBox.Cancel)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def _may_replace(self, what: str) -> bool:
+        """Unsaved edits are about to go: ask."""
+        if not getattr(self.tm, "dirty", False):
+            return True
+        return self.confirm("Unsaved changes", f"The ROM has edits that are not saved.\n\n{what} "
+                                               "drops them. Save .bin first if you want them.")
+
+    def _folder(self, key: str) -> str:
+        return str(self.settings.value(f"tune/{key}", "")) if self.settings is not None else ""
+
+    def _remember(self, key: str, path) -> None:
+        if self.settings is not None:
+            self.settings.setValue(f"tune/{key}", str(path))
+
+    def open_rom(self, path=None) -> bool:
+        """Open ROM…: a ROM image with the definition that was loaded last
+        (the built-in demo definition until one is). True if it opened."""
+        if not hasattr(self.tm, "open") or not self._may_replace("Opening another ROM"):
+            return False
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Open a ROM image", self._folder("rom"), ROM_FILTER)
+            if not path:
+                return False
+        definition = getattr(self.tm, "definition_path", None) or self._folder("definition") or None
+        problem = self.tm.open(path, definition)
+        self._remember("rom", path)
+        if problem:
+            self._say(f"{problem}", problem=True)
+            return False
+        self._say(f"Opened {getattr(path, 'name', None) or str(path).rsplit('/', 1)[-1]}")
+        return True
+
+    def load_definition(self, path=None) -> bool:
+        """Definition…: a TunerPro .xdf or a hondalog .toml. The table list is
+        rebuilt from it; the open ROM is read again with it."""
+        if not hasattr(self.tm, "load_definition"):
+            return False
+        if getattr(self.tm, "loaded", False) and not self._may_replace("Loading another definition"):
+            return False
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Load a ROM definition", self._folder("definition"),
+                                                  DEFINITION_FILTER)
+            if not path:
+                return False
+        problem = self.tm.load_definition(path)
+        if problem:
+            self._say(problem, problem=True)
+            return False
+        self._remember("definition", path)
+        name = getattr(path, "name", None) or str(path).rsplit("/", 1)[-1]
+        self._say(f"Definition {name}: {len(self.tm.tables())} tables" if getattr(self.tm, "loaded", False)
+                  else f"Definition {name} loaded. Now Open ROM…")
+        return True
+
+    def save(self, path=None) -> bool:
+        """Save .bin: RomSession.save (never onto the opened ROM, checksum fixed, snapshot)."""
+        if not self.tm.writable:
+            return False
+        if path is None:
+            default = getattr(self.tm, "default_save_path", lambda: None)()
+            path, _ = QFileDialog.getSaveFileName(self, "Save tables", str(default or "tables.bin"),
+                                                  "Binary (*.bin)")
+            if not path:
+                return False
+        try:
+            text = self.tm.save(path)
+        except ValueError as exc:
+            self._say(f"Not saved: {exc}", problem=True)
+            return False
+        self._say(text or f"Saved {path}")
+        return True
+
+    def build_burn_image(self, path=None) -> bool:
+        """Burn image…: the chip-ready file, if the session's checks pass."""
+        build = getattr(self.tm, "burn_image", None)
+        if build is None or not getattr(self.tm, "loaded", False):
+            return False
+        if path is None:
+            default = getattr(self.tm, "default_save_path", lambda: None)()
+            suggestion = str(default.with_suffix(".chip.bin")) if default is not None else "chip.bin"
+            path, _ = QFileDialog.getSaveFileName(self, "Build the burn image", suggestion, "Binary (*.bin)")
+            if not path:
+                return False
+        try:
+            self._say(build(path))
+        except ValueError as exc:
+            self._say(str(exc), problem=True)
+            return False
+        return True
 
     # ---- frame ----
 
     def refresh(self, now: float) -> None:
-        if self.tm.revision != self._rev:
+        if getattr(self.tm, "layout", 0) != self._layout:
+            self._rebuild()                 # another ROM or definition: new table list and axes
+        elif self.tm.revision != self._rev:
             self._load()                    # surface follows an edit immediately
         self.scene.refresh()
         bus = self.session.bus
@@ -314,23 +559,31 @@ class TuneScreen(QWidget):
         if rpm is None or kpa is None or rpm.gen == self._gen:
             return
         self._gen = rpm.gen
-        info = self.table
-        if rpm.stale(now) or kpa.stale(now):
-            self.scene.set_live(None, None, now)
+        info, tracer = self.table, self.tracer
+        if tracer is None or rpm.stale(now) or kpa.stale(now):
+            if tracer is not None:
+                tracer.update(now, None, None)      # a gap: no dwell is counted across it
+            self.scene.set_track(None, ())
             self.grid.set_live(None)
             self.live_card.set("no live data", "---", info.units, "")
             return
-        self.scene.set_live(rpm.value, kpa.value, now)
-        _, _, _, i, j, value = self.model.locate(rpm.value, kpa.value)
-        self.grid.set_live((i, j))
+        # W5's tracer: where RPM and MAP fall on this table's axes, and where they have just been
+        pos = tracer.update(now, rpm.value, kpa.value)
+        row, col = pos.nearest                      # the tracer's rows are MAP, its columns RPM
+        self.grid.set_live((col, row), tracer.heat(now).T)
+        self.scene.set_track((pos.col, pos.row), tracer.trail(now))
+        values = self.tm.values(info.id)
+        value = sum(w * float(values[c, r]) for r, c, w in pos.cells)
         trim = 0.0
         for cid in ("stft", "ltft"):
             st = bus.channel(cid)
             if st is not None and st.value == st.value:
                 trim += st.value
+        # off the table the tracer holds the value of the edge cell: say so
+        where = "at edge · " if pos.clamped else ""
         self.live_card.set(f"{rpm.value:.0f} rpm × {kpa.value:.0f} kPa",
                            f"{value:.{info.decimals}f}".replace("-", "−"), info.units,
-                           f"interpolated · trim {'+' if trim > 0 else chr(0x2212) if trim < 0 else ''}"
+                           f"{where}trim {'+' if trim > 0 else chr(0x2212) if trim < 0 else ''}"
                            f"{abs(trim):.1f} %")
 
     def key(self, event) -> bool:
@@ -344,10 +597,18 @@ class TuneScreen(QWidget):
             self.grid.move(0, -1, shift)
         elif k == Qt.Key_Right:
             self.grid.move(0, 1, shift)
+        elif ctrl and (k == Qt.Key_Y or (shift and k == Qt.Key_Z)):
+            self.redo()
         elif ctrl and k == Qt.Key_Z:
             self.undo()
         elif ctrl and k == Qt.Key_S:
             self.save()
+        elif ctrl and k == Qt.Key_O:
+            self.open_rom()
+        elif ctrl and k == Qt.Key_D:
+            self.load_definition()
+        elif ctrl and k == Qt.Key_B:
+            self.build_burn_image()
         elif text in ("=", "+"):
             self.bump(5 if text == "+" else 1)
         elif text in ("-", "_"):
@@ -357,7 +618,7 @@ class TuneScreen(QWidget):
         elif k == Qt.Key_S:
             self.smooth()
         elif k == Qt.Key_T:
-            self.seg.cycle()
+            self.next_table()
         else:
             return False
         return True
@@ -367,21 +628,26 @@ class TuneScreen(QWidget):
     def resizeEvent(self, _event) -> None:
         w, h = self.width(), self.height()
         left = 560
+        many = len(self.infos) > 4          # more tables than a 560 px segment can name
+        self.seg.setVisible(not many)
+        self.pick_btn.setVisible(many)
         self.seg.setGeometry(8, 8, left, 44)
-        gh = HEAD_H + self.grid.values.shape[0] * ROW_H + 4
+        self.pick_btn.setGeometry(8, 8, left, 44)
+        rows = self.grid.values.shape[0]
+        gh = HEAD_H + rows * ROW_H + 4
         self.grid.setGeometry(8, 58, left, gh)
         x = 8
-        for b in (self.dec_btn, self.inc_btn, self.int_btn, self.smo_btn, self.undo_btn):
+        for b in (self.dec_btn, self.inc_btn, self.int_btn, self.smo_btn, self.undo_btn, self.redo_btn):
             bw = b.sizeHint().width()
             b.setGeometry(x, 58 + gh + 6, bw, 44)
-            x += bw + 8
+            x += bw + 6
         rx = 8 + left + 8
         rw = w - 8 - rx
         vh = 404
         self.scene.setGeometry(rx, 8, rw, vh)
         cy = 8 + vh + 8
         ch = h - 8 - cy
-        cw = (rw - 16) // 3
+        cw = 214                            # the two value cards; the ROM card takes the rest
         self.sel_card.setGeometry(rx, cy, cw, ch)
         self.live_card.setGeometry(rx + cw + 8, cy, cw, ch)
         self.chip.setGeometry(rx + 2 * cw + 16, cy, rw - 2 * cw - 16, ch)

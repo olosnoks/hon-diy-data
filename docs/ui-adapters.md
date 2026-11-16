@@ -58,15 +58,12 @@ Things the wired adapters add that the screens reach with `getattr` (so the
 demo objects need not have them): `ecu.link_text()`, `ecu.channel_rates()`,
 `ecu.first_contact(port)`, `ecu.set_expert_unlock(on)`, `mapper.set_expert(on)`,
 `mapper.rank_against(channel)`, `alarms.marks_itself`, `tables.open(rom,
-definition)`, `tables.editor`.
+definition)`, `tables.editor` and the rest of `RomTableModel` (see TableModel).
 
 What is not bound yet:
 
 - `mapper.rank_against()` (the correlation finder on the sweep history) has
   no button.
-- The Tune screen reads its table list once at start: a ROM is opened with
-  `--rom` / `--definition`, not from inside the app. `TableTracer` is not
-  used; the screen's own live cursor does that job.
 - Captures on the box's SD card are fetched with `hondalog-bb fetch`.
 
 ### ChannelSource / Connectable (W1, W2)
@@ -266,6 +263,29 @@ def undo(self) -> bool
 def save(self, path) -> None
 def can_write_chip(self) -> bool
 ```
+
+What `RomTableModel` adds, which the Tune screen reaches with `getattr` (the
+demo tables have none of it, and the buttons are then disabled):
+
+```python
+layout: int                                # bumps when tables() or the axes changed: the screen rebuilds
+def open(self, rom, definition=None) -> str            # '' or why not; the last definition is the default
+def load_definition(self, path) -> str                 # .xdf / .toml; reads the open ROM again with it
+rom_path, definition_path, loaded, dirty, can_undo, can_redo
+def redo(self) -> bool
+def status(self) -> dict                   # rom, definition, checksum (text), checksum_ok, dirty, warnings, problem
+def default_save_path(self) -> Path | None
+def save(self, path=None) -> str           # RomSession.save; ValueError with the reason when refused
+def burn_image(self, path, layout="doubled") -> str    # RomSession.burn_image; ValueError when refused
+editor                                     # the first table's TableEditor: axes for TableTracer and the histogram
+```
+
+The live cell, its trail on the grid and the point and trail on the surface
+are W5's `tuning.TableTracer` (`TableTracer.for_table(tables.editor)`, or on
+the sample grid's axes): `tracer.update(now, rpm, map)` once per new RPM
+sample, `pos.nearest` for the grid, `tracer.heat(now)` for the bars,
+`tracer.trail(now)` and the cursor's fractional index for
+`MapScene.set_track`. The Map 3D screen keeps `MapScene.set_live`.
 
 `cells` is a list of `(rpm_index, map_index)`. Bump `revision` on every
 change; the grid and the 3D surface reload on the next frame. Axis sizes are

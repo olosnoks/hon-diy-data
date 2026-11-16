@@ -1249,7 +1249,13 @@ class RomTableModel:
     tables it wraps (read-only samples), so the Tune and Map 3D screens always
     have something to show. With a ROM open: the RPM x load tables of the
     definition that share the first table's axes, edits through the session's
-    undo stack, ``save`` writes a ROM image with the checksum fixed.
+    undo and redo stacks, ``save`` writes a ROM image with the checksum fixed
+    (never onto the file that was opened), ``burn_image`` writes the chip
+    image only if it passes the session's safety checks.
+
+    ``open`` and ``load_definition`` can be called again at any time (the
+    Tune screen's "Open ROM…" and "Definition…"); ``layout`` bumps when the
+    list of tables or their axes changed, so the screen rebuilds.
     """
 
     def __init__(self, fallback=None, store_dir=None):
@@ -1263,22 +1269,56 @@ class RomTableModel:
         self._cache: dict[str, tuple[int, np.ndarray]] = {}
         self._revision = 0
         self.problem = ""
+        self.layout = 0                     # bumps when tables() or the axes changed
+        self.rom_path: Path | None = None   # the ROM that is open, or the one that still needs a definition
+        self.definition_path: Path | None = None    # None: the built-in demo definition
+        self._unsubscribe = None
 
     # -- loading --
 
     def open(self, rom_path, definition_path=None) -> str:
-        """Open a ROM with its definition (.toml or .xdf). Returns '' or the
-        reason it could not be used (the demo tables then stay)."""
+        """Open a ROM with its definition (.toml or .xdf; default: the one
+        loaded last, else the built-in demo definition). Returns '' or the
+        reason it could not be used: the tables that were showing stay, and
+        ``load_definition`` will try this ROM again."""
         from .. import tuning
         from ..tuning.demo import demo_definition
+        rom_path = Path(rom_path)
+        chosen = Path(definition_path) if definition_path else self.definition_path
         try:
-            definition = (tuning.load_definition(definition_path) if definition_path
-                          else demo_definition())
+            definition = tuning.load_definition(chosen) if chosen else demo_definition()
+        except Exception as exc:
+            self.problem = f"{Path(chosen).name if chosen else 'definition'}: {exc}"
+            return self.problem
+        try:
             session = tuning.RomSession.open(rom_path, definition, store_dir=self.store_dir)
         except Exception as exc:
-            self.problem = f"{Path(rom_path).name}: {exc}"
+            self.problem = f"{rom_path.name}: {exc}"
+            if self.session is None:
+                self.rom_path = rom_path        # waiting for the right definition
             return self.problem
-        return self.use(session)
+        problem = self.use(session)
+        if not problem:
+            self.rom_path, self.definition_path = rom_path, chosen
+        return problem
+
+    def load_definition(self, definition_path) -> str:
+        """Use another definition (.xdf or .toml). The ROM that is open (or
+        the one that could not be opened with the old definition) is read
+        again with it: the working copy's unsaved edits are dropped, so ask
+        first (``dirty``). Returns '' or the reason; on a failure nothing
+        changes."""
+        from .. import tuning
+        path = Path(definition_path)
+        try:
+            tuning.load_definition(path)
+        except Exception as exc:
+            self.problem = f"{path.name}: {exc}"
+            return self.problem
+        if self.rom_path is None:
+            self.definition_path, self.problem = path, ""
+            return ""
+        return self.open(self.rom_path, path)
 
     def use(self, session) -> str:
         editors, info, first = {}, [], None
@@ -1304,13 +1344,16 @@ class RomTableModel:
         if first is None:
             self.problem = "the definition has no RPM x load table with numeric axes"
             return self.problem
+        if self._unsubscribe is not None:
+            self._unsubscribe()             # the session that was open stops reporting here
         self.session, self.editor = session, first[0]
         self._editors, self._info = editors, info
         self._base = {tid: e.original_values("real").T.copy() for tid, e in editors.items()}
         self._cache.clear()
         self.problem = ""
         self._revision += 1
-        session.on_change(self._changed)
+        self.layout += 1
+        self._unsubscribe = session.on_change(self._changed)
         return ""
 
     def _changed(self, *_args) -> None:
@@ -1392,10 +1435,81 @@ class RomTableModel:
             return self._fallback.undo()
         return self.session.undo() is not None
 
-    def save(self, path) -> None:
+    def redo(self) -> bool:
+        return self.loaded and self.session.redo() is not None
+
+    @property
+    def can_undo(self) -> bool:
+        return self.session.can_undo if self.loaded else bool(getattr(self._fallback, "_undo", ()))
+
+    @property
+    def can_redo(self) -> bool:
+        return self.loaded and self.session.can_redo
+
+    @property
+    def dirty(self) -> bool:
+        """Edits that ``save`` has not written yet."""
+        return self.loaded and self.session.dirty
+
+    def status(self) -> dict[str, Any]:
+        """What the Tune screen's ROM card says: file, definition, checksum."""
         if not self.loaded:
-            return self._fallback.save(path)
-        self.session.save(path)
+            waiting = self.rom_path.name if self.rom_path is not None else ""
+            return {"loaded": False, "rom": waiting, "problem": self.problem,
+                    "definition": self.definition_path.name if self.definition_path else "",
+                    "checksum": "", "checksum_ok": True, "dirty": False, "warnings": []}
+        s = self.session
+        report = s.checksum()
+        word = {"ok": "checksum OK", "bad": "checksum wrong: fixed when you save",
+                "none": "checksum not checked"}.get(report.status, f"checksum {report.status}")
+        return {"loaded": True, "rom": s.rom.path.name if s.rom.path else s.name, "problem": self.problem,
+                "definition": s.definition.title or (self.definition_path.name if self.definition_path
+                                                     else "demo definition"),
+                "checksum": word, "checksum_ok": report.status != "bad", "dirty": s.dirty,
+                "warnings": list(s.warnings)}
+
+    def default_save_path(self) -> Path | None:
+        return self.session.default_save_path() if self.loaded else None
+
+    def save(self, path=None) -> str:
+        """Write the working copy through ``RomSession.save``: never onto the
+        ROM that was opened, checksum fixed, a snapshot kept. Returns a line
+        for the user; raises ValueError with the reason when it is refused."""
+        if not self.loaded:
+            self._fallback.save(path)
+            return f"Saved {Path(path).name}"
+        from ..tuning import RomError
+        try:
+            result = self.session.save(path)
+        except (RomError, OSError) as exc:
+            raise ValueError(str(exc)) from None
+        self._revision += 1
+        return (f"Saved {result.path.name}" + (", checksum fixed" if result.checksum_fixed else "")
+                + (f", snapshot {result.snapshot.name}" if result.snapshot else ""))
+
+    def burn_image(self, path, layout: str = "doubled") -> str:
+        """Write the chip-ready image of the working copy to ``path``. It is
+        built by ``RomSession.burn_image``, which refuses a wrong size, a
+        blank image, a wrong checksum or signature bytes that do not match
+        the definition; nothing is written then. Raises ValueError with the
+        reason."""
+        if not self.loaded:
+            raise ValueError("Open a ROM first: the sample tables are not a ROM")
+        from ..tuning import BurnRefused, RomError
+        target = Path(path)
+        source = self.session.source_path
+        try:
+            if source is not None and target.exists() and target.samefile(source):
+                raise ValueError(f"{target.name} is the ROM that is open; choose another name")
+            image = self.session.burn_image(layout=layout)
+            target.write_bytes(image.data)
+        except (BurnRefused, RomError) as exc:
+            raise ValueError(f"Not built: {exc}") from None
+        except OSError as exc:
+            raise ValueError(f"Could not write {target.name}: {exc}") from None
+        notes = f" ({'; '.join(image.warnings)})" if image.warnings else ""
+        return (f"Burn image {target.name}: {len(image.data)} bytes, {image.layout}, "
+                f"sha256 {image.image_sha256[:12]}{notes}")
 
     def can_write_chip(self) -> bool:
         if not self.loaded:
