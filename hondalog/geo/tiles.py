@@ -55,6 +55,8 @@ MIN_TTL_S = 60.0
 DEFAULT_CAP_MB = 300.0
 MAX_CONNECTIONS = 2
 TIMEOUT_S = 10.0
+#: a cache hit refreshes the file's time (for least-recently-used) at most this often
+TOUCH_S = 3600.0
 #: after a failed connection, wait this long before asking the network again
 OFFLINE_BACKOFF_S = 60.0
 
@@ -163,7 +165,6 @@ class TileCache:
         self.cap = int(cap_mb * 1e6)
         self._lock = threading.Lock()
         self._size: int | None = None
-        self._touched: set[TileKey] = set()
 
     def _paths(self, key: TileKey) -> tuple[Path, Path]:
         z, x, y = key
@@ -181,12 +182,11 @@ class TileCache:
             info = json.loads(meta.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             pass
-        if key not in self._touched:        # least recently *used*: a hit counts, once a session
-            self._touched.add(key)
-            try:
+        try:                                # least recently *used*: a hit counts (once an hour is enough)
+            if time.time() - png.stat().st_mtime > TOUCH_S:
                 os.utime(png)
-            except OSError:
-                pass
+        except OSError:
+            pass
         return CachedTile(data, float(info.get("expires", 0.0)), str(info.get("etag", "")),
                           str(info.get("last_modified", "")))
 
@@ -204,7 +204,6 @@ class TileCache:
         with self._lock:
             if self._size is not None:
                 self._size += len(tile.data) - old
-        self._touched.add(key)
         self.trim()
 
     def refresh(self, key: TileKey, expires: float, etag: str = "", last_modified: str = "") -> None:
@@ -281,7 +280,6 @@ class TileCache:
                     pass
         with self._lock:
             self._size = 0
-            self._touched.clear()
 
 
 # ---- the network ------------------------------------------------------------

@@ -148,9 +148,9 @@ def write_gps_drives(path: str | os.PathLike, drives: int = 4, duration_s: float
     for k in range(drives):
         where, frac = FIXTURE_STALLS[k % len(FIXTURE_STALLS)]
         a, b = loop.stretches[where]
-        start = (k * 1700.0) % loop.length_m
         target = a + (b - a) * frac
-        target += loop.length_m if target < start + 200.0 else 0.0
+        ahead = min(1500.0 + 900.0 * k, max(300.0, 6.0 * (duration_s - 90.0)))   # reached well inside the drive
+        start = target - ahead
         t_stall = route.time_at(loop, target, seed=seed + k, hz=gps_hz, start_m=start)
         t_stall = min(t_stall, duration_s - 60.0)
         extra = ((min(duration_s - 20.0, 120.0), "capture", "manual"),) if k == 1 else ()
