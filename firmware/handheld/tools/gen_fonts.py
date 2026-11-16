@@ -24,8 +24,8 @@ from fontTools.ttLib import TTFont
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = HERE.parent / "main" / "ui" / "fonts"
 
-# ASCII, plus-minus, degree, micro, middle dot, lambda, minus
-TEXT = "0x20-0x7E,0xB1,0xB0,0xB5,0xB7,0x3BB,0x2212"
+# ASCII, plus-minus, degree, micro, middle dot, lambda, minus, copyright (the map's attribution)
+TEXT = "0x20-0x7E,0xB1,0xB0,0xB5,0xB7,0x3BB,0x2212,0xA9"
 NUM = "0x20,0x2B,0x2D,0x2E,0x30-0x3A"        # space + - . 0-9 :
 NUM_FLAG = NUM + ",0x46,0x4E,0x4F"           # ... and F N O for ON / OFF
 
