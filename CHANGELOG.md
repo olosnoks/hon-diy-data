@@ -118,6 +118,12 @@ against the simulators and the host builds of the firmware cores.
   2.4.1 and `usb_host_ftdi_vcp` 2.1.1) or UART, power-cut-safe logging to
   SD, GPS, ISO 9141-2 fallback, deep sleep.
 - Laptop side: `hondalog-handheld export-map`, `import`, `info`.
+- Serial link to the laptop over the USB-C (CH340, COBS + CRC16 frames, 921600 baud
+  with fallback): live ECU reads, GPS, alarms and stalls stream to the app, which
+  records them as a normal drive (`--port cyd:`, "CYD (serial)" in the menu).
+  Two-way with the GPS on GPIO18: `hondalog-handheld sync` (resumable SD download),
+  `push-map`, `set-time`, `status`, `command`. One-way with `--gps-p1`.
+  `hondalog-cydsim` simulates the handheld for testing.
 - A build option for the GPS on header P1 (`--gps-p1`), and GPS sentence
   counters (`GPS OK/BAD`) on the Link screen.
 

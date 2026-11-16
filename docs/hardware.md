@@ -267,10 +267,10 @@ placements above rely on it. Measure it (bring-up step 3).
 #### Laptop link
 
 With the CYD in the car on its own, its drives come back to the laptop on
-the SD card ([Handheld](handheld.md#importing-drives)). A serial link over
-the USB-C socket is being added (coming:
-[firmware/handheld/SERIAL.md](../firmware/handheld/SERIAL.md), on another
-branch). It uses UART0, which is why the GPS should move off P1. Wi-Fi
+the SD card ([Handheld](handheld.md#importing-drives)). Plugged into the
+laptop, it also streams live over its USB-C socket
+([firmware/handheld/SERIAL.md](../firmware/handheld/SERIAL.md),
+[how to use it](handheld.md#talking-to-the-laptop-over-serial)). That link uses UART0, which is why the GPS should move off P1. Wi-Fi
 access-point mode is a possible later transport; running the radio may
 glitch the display, so it would be for downloading, not for driving.
 

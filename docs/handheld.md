@@ -172,9 +172,9 @@ P3 then carries three wires: GPS on pin 2, the K-line on pins 3 and 4. Pin 1
 ### The laptop link
 
 In the car on its own, the CYD keeps everything on its SD card, and the
-laptop [imports the card](#importing-drives) afterwards. A serial link over
-the USB-C socket is being added (coming: [SERIAL.md](../firmware/handheld/SERIAL.md));
-with the GPS still on P1 it can only send, never receive. Wi-Fi
+laptop [imports the card](#importing-drives) afterwards. Plugged into the laptop's USB, it also streams
+live over its USB-C socket ([SERIAL.md](../firmware/handheld/SERIAL.md)); with
+the GPS still on P1 that link can only send, never receive. Wi-Fi
 access-point mode may follow. Details: [Talking to the laptop over
 serial](#talking-to-the-laptop-over-serial).
 
@@ -511,23 +511,41 @@ when it fills.
 
 ## Talking to the laptop over serial
 
-> **Being added.** A serial link between the handheld and the laptop over
-> the CYD's USB-C socket is under development. Its commands and protocol are
-> documented in
-> [firmware/handheld/SERIAL.md](../firmware/handheld/SERIAL.md). Nothing
-> else on this page depends on it.
+Plug the CYD's USB-C into the laptop. The handheld streams every ECU read,
+GPS fix, alarm, marker and stall over its USB serial (CH340, 921600 baud,
+falling back to 460800 and 115200). The laptop decodes the reads with its own
+address map and records them as a normal drive (source `cyd`). The full
+protocol is in [firmware/handheld/SERIAL.md](../firmware/handheld/SERIAL.md).
 
-The roadmap for getting data to the laptop without pulling the card:
+| | normal build (GPS on GPIO18) | `--gps-p1` build (GPS on P1) |
+|---|---|---|
+| Live stream, GPS, alarms, stalls | yes | yes |
+| Commands, file sync, push map, set time | yes | no (one-way) |
 
-1. **USB serial**, being built now. It uses UART0, which is why the GPS
-   should move off P1 ([above](#gps-placement)): with the GPS on P1 the
-   link can only run one way.
-2. **Wi-Fi access-point mode**, a possible later transport. Known caveat:
-   running the radio can cause visible glitches on the display, so it may
-   end up as something you switch on to download, not something that runs
-   while driving.
+In the app, pick **CYD (serial)** in the connection menu, or run it from a
+terminal:
 
-Until then, the SD card is the way.
+```sh
+hondalog --port cyd: --connect          # finds /dev/hondalog-cyd or any CH340
+hondalog-log record --port cyd:         # record without the GUI
+hondalog-handheld status                # what the CYD reports
+hondalog-handheld sync                  # two-way only: copy SD drives into the database (resumable)
+hondalog-handheld push-map              # two-way only: send your address map
+hondalog-handheld set-time              # two-way only: set the CYD's clock from the laptop
+hondalog-cydsim --variant p1            # simulator, for trying it without hardware
+```
+
+The Link screen on the CYD shows the link state: `PC` (laptop answering),
+`NO PC`, `TX` (one-way, streaming) or `OFF`, plus frames sent and lost. If the
+app warns that the map hash differs, run `hondalog-handheld push-map` (two-way)
+or re-run `hondalog-handheld export-map` onto the card.
+
+Not yet verified on the real board: the CH340 at 921600, and whether the GPS
+still reads cleanly on P1 while a laptop is plugged in (watch GPS OK/BAD).
+
+Wi-Fi access-point mode is a possible later transport. Running the radio can
+glitch the display, so it may end up as a download mode rather than something
+that runs while driving.
 
 ## Troubleshooting
 
