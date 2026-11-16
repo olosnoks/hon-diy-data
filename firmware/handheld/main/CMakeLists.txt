@@ -8,7 +8,7 @@ else()
     set(core hhcore_stub)
 endif()
 
-set(reqs ${core} esp_lcd esp_driver_ledc esp_driver_gpio esp_timer nvs_flash)
+set(reqs ${core} hhmap esp_lcd esp_driver_ledc esp_driver_gpio esp_timer nvs_flash)
 # offline build (see ../CMakeLists.txt); otherwise main/idf_component.yml brings LVGL
 idf_build_get_property(lvgl_name HH_LVGL_COMPONENT)
 if(lvgl_name)
@@ -16,7 +16,7 @@ if(lvgl_name)
 endif()
 
 idf_component_register(
-    SRCS "main.c" "port/port_esp32.c" ${ui_srcs}
+    SRCS "main.c" "port/port_esp32.c" "port/port_map_esp32.c" ${ui_srcs}
     INCLUDE_DIRS "ui" "port" "../include"
     REQUIRES ${reqs}
 )

@@ -15,6 +15,7 @@
 #include "ui.h"
 #include "ui_data.h"
 #include "ui_input.h"
+#include "ui_map.h"
 #include "ui_perf.h"
 #include "ui_screens.h"
 #include "ui_shapes.h"
@@ -50,9 +51,9 @@ static struct {
     hh_snapshot_t snap;
 } st;
 
-/* ---- the press cycle: Gauges, Sensors 1..n, GPS, Link ---------------------- */
+/* ---- the press cycle: Gauges, Sensors 1..n, GPS, Map, Link ---------------------- */
 
-int ui_stops(void) { return 3 + ui_sensor_pages(); }
+int ui_stops(void) { return 4 + ui_sensor_pages(); }
 
 static ui_screen_id_t stop_screen(int stop, int *page)
 {
@@ -60,7 +61,8 @@ static ui_screen_id_t stop_screen(int stop, int *page)
     *page = 0;
     if (stop == 0) return UI_SCR_GAUGES;
     if (stop <= pages) { *page = stop - 1; return UI_SCR_SENSORS; }
-    return stop == pages + 1 ? UI_SCR_GPS : UI_SCR_LINK;
+    if (stop == pages + 1) return UI_SCR_GPS;
+    return stop == pages + 2 ? UI_SCR_MAP : UI_SCR_LINK;
 }
 
 static void show_stop(void)
@@ -150,6 +152,7 @@ void ui_create(bool night)
     memset(&st, 0, sizeof(st));
     st.acked_ch = -1;
     ui_theme_set(night);
+    ui_map_reset();
     build();
 }
 
@@ -317,6 +320,7 @@ static void on_data(void)
     hh_snapshot(&st.snap);
     const hh_snapshot_t *s = &st.snap;
     integrate_trip(s);
+    ui_map_track(s, st.now);
 
     bool blink_on = (st.now / 500) % 2 == 0;
     update_chips(s);
@@ -326,7 +330,7 @@ static void on_data(void)
     ui_derived_t d = {
         .trip_km = (float)st.trip_km,
         .trip_s = (uint32_t)((s->t_us - st.t_drive_us) / 1000000),
-        .acked = st.acked, .blink_on = blink_on,
+        .acked = st.acked, .blink_on = blink_on, .now_ms = st.now,
     };
     int page;
     ui_screen_update(stop_screen(st.stop, &page), s, &d);
@@ -362,7 +366,18 @@ static void on_button(ui_btn_event_t ev, bool back)
     st.t_press = st.now;
     if (dismiss_flash()) return;
     if (back) {
-        if (ev == UI_BTN_SHORT) step(-1);
+        int page;
+        if (stop_screen(st.stop, &page) == UI_SCR_MAP) {
+            /* on the map: a press steps the zoom, a hold steps back */
+            if (ev == UI_BTN_SHORT) {
+                ui_map_zoom_step();
+                st.t_data = st.now - UI_DATA_PERIOD_MS;
+            } else if (ev == UI_BTN_LONG || ev == UI_BTN_VLONG) {
+                step(-1);
+            }
+        } else if (ev == UI_BTN_SHORT) {
+            step(-1);
+        }
         return;
     }
     switch (ev) {

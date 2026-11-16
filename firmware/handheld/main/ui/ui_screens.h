@@ -1,5 +1,6 @@
-/* The four screens. Each builds itself into the 480 x 216 body and is told
- * about every snapshot; only one exists at a time.
+/* The screens. Each builds itself into the 480 x 216 body and is told
+ * about every snapshot; only one exists at a time. The Map screen lives in
+ * ui_map.c.
  */
 #ifndef UI_SCREENS_H
 #define UI_SCREENS_H
@@ -10,7 +11,7 @@
 
 #define UI_SENSORS_PER_PAGE 12     /* 3 columns x 4 rows */
 
-typedef enum { UI_SCR_GAUGES, UI_SCR_SENSORS, UI_SCR_GPS, UI_SCR_LINK, UI_SCR_COUNT } ui_screen_id_t;
+typedef enum { UI_SCR_GAUGES, UI_SCR_SENSORS, UI_SCR_GPS, UI_SCR_MAP, UI_SCR_LINK, UI_SCR_COUNT } ui_screen_id_t;
 
 /* What the UI works out itself from successive snapshots. */
 typedef struct {
@@ -18,6 +19,7 @@ typedef struct {
     uint32_t trip_s;        /* since this drive number was first seen */
     bool acked;             /* the top alarm was acknowledged: no more blinking */
     bool blink_on;          /* 1 Hz phase for unacknowledged alarms */
+    uint32_t now_ms;        /* the UI's clock */
 } ui_derived_t;
 
 int ui_sensor_pages(void);

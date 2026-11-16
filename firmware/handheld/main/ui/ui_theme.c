@@ -10,6 +10,7 @@ const ui_tokens_t UI_DAYLIGHT = {
     .warn = 0xFFD000, .on_warn = 0x000000,
     .alarm = 0xB00020, .on_alarm = 0xFFFFFF,
     .ok = 0x00572D, .unver = 0x7A3300,
+    .water = 0x5B8FC7,
 };
 
 const ui_tokens_t UI_NIGHT = {
@@ -20,6 +21,7 @@ const ui_tokens_t UI_NIGHT = {
     .warn = 0xFFC400, .on_warn = 0x000000,
     .alarm = 0xFF7A66, .on_alarm = 0x000000,
     .ok = 0x4ADE80, .unver = 0xFFB454,
+    .water = 0x2F6496,
 };
 
 static bool night;
@@ -40,6 +42,19 @@ int ui_theme_pairs(const ui_tokens_t *t, ui_pair_t *out, int max)
         {"bg on fg (inverted)", t->bg, t->fg},
         {"unver on panel", t->unver, t->panel}, {"unver on sunk", t->unver, t->sunk},
         {"ok on bg", t->ok, t->bg},           {"alarm on bg", t->alarm, t->bg},
+    };
+    int n = (int)(sizeof(pairs) / sizeof(pairs[0]));
+    if (n > max) n = max;
+    for (int i = 0; i < n; i++) out[i] = pairs[i];
+    return n;
+}
+
+int ui_map_pairs(const ui_tokens_t *t, ui_pair_t *out, int max)
+{
+    const ui_pair_t pairs[] = {
+        {"water on bg", t->water, t->bg},     {"road (fg) on water", t->fg, t->water},
+        {"road (fg) on bg", t->fg, t->bg},    {"rail (rule2) on bg", t->rule2, t->bg},
+        {"trail (accent) on bg", t->accent, t->bg}, {"stall pin (alarm) on bg", t->alarm, t->bg},
     };
     int n = (int)(sizeof(pairs) / sizeof(pairs[0]));
     if (n > max) n = max;
