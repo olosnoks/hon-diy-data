@@ -919,14 +919,18 @@ void hh_core_gps_bytes(hh_core_t *c, const uint8_t *data, size_t len)
     }
 }
 
-void hh_core_mark(hh_core_t *c)
+void hh_core_mark_at(hh_core_t *c, int64_t t_us)
 {
+    double t = now(c), at = (double)t_us / 1e6;
+    if (t_us <= 0 || at > t || at < t - 10.0) at = t;
     lock(c);
     c->markers++;
-    log_event(c, now(c), HH_EV_MARKER, 0, 0, (int32_t)c->markers, 0, 0);
+    log_event(c, at, HH_EV_MARKER, 0, 0, (int32_t)c->markers, 0, 0);
     c->snap.seq++;
     unlock(c);
 }
+
+void hh_core_mark(hh_core_t *c) { hh_core_mark_at(c, 0); }
 
 void hh_core_ack(hh_core_t *c)
 {

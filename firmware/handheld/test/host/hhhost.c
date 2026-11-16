@@ -334,3 +334,4 @@ void hhhost_text(hhhost_t *h, const char *what, char *out, size_t cap)
 void hhhost_mark(hhhost_t *h) { hh_core_mark(h->core); }
 void hhhost_ack(hhhost_t *h) { hh_core_ack(h->core); }
 void hhhost_request_dtc(hhhost_t *h) { hh_core_request_dtc(h->core); }
+void hhhost_mark_at(hhhost_t *h, int64_t t_us) { hh_core_mark_at(h->core, t_us); }

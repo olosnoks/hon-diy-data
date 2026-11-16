@@ -72,6 +72,11 @@ void hh_ack_alarm(void);
 void hh_core_start(void);               /* starts link, gps, logger tasks */
 
 /* ---- added ---- */
+/* A marker at an earlier moment: t_us is device time (the clock of
+ * hh_snapshot_t.t_us, esp_timer microseconds). The UI decides on release that
+ * a press was a MARK and passes the time the button went down. A time in the
+ * future or more than 10 s back is taken as "now". */
+void hh_mark_at(int64_t t_us);
 int16_t hh_channel_index(const char *name);     /* -1 = not in the map */
 void hh_request_dtc(void);              /* read stored trouble codes (ISO 9141-2 Mode 03, about 8 s without live data) */
 void hh_dtc_text(uint16_t code, char out[6]);   /* raw code -> "P0301" */

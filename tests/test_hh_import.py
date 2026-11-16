@@ -383,3 +383,24 @@ def test_info_cli(L, tmp_path, amap, capsys):
     assert "drive 1, boot 1" in out and f"map #{amap.version_hash}" in out and "ended: stopped" in out
     assert cli.main(["info", str(tmp_path / "nope.HHD")]) == 1
     assert datetime.now(timezone.utc).year >= 2026
+
+
+def test_a_marker_is_logged_where_the_button_went_down(L, tmp_path, amap):
+    """The UI knows a press was a MARK only on release (1 to 3 s later) and
+    passes the press time."""
+    card = _card(tmp_path, amap)
+    h = _handheld(L, card, cfg="prealloc_mb = 0\n")
+    h.run_until(10.0)
+    h.mark_at(8_400_000)                # pressed at 8.4 s, released now
+    h.mark_at(99_000_000)               # nonsense (the future): now
+    h.mark_at(-5)
+    h.run_until(30.0)
+    h.mark_at(1_000_000)                # too long ago to be a press: now
+    h.mark()
+    h.run_until(31.0)
+    h.close()
+    df = read_drive_file(h.drive(1))
+    marks = [(e.t_us / 1e6, e.value) for e in df.events if e.name == "marker"]
+    assert [n for _, n in marks] == [1, 2, 3, 4, 5]
+    assert marks[0][0] == pytest.approx(8.4, abs=1e-3)
+    assert all(10.0 <= t < 10.1 for t, _ in marks[1:3]) and all(30.0 <= t < 30.1 for t, _ in marks[3:])

@@ -60,6 +60,7 @@ def lib(build_dir: Path):
     L.hhhost_text.argtypes = [C.c_void_p, C.c_char_p, C.c_char_p, C.c_size_t]
     for name in ("hhhost_mark", "hhhost_ack", "hhhost_request_dtc"):
         getattr(L, name).argtypes = [C.c_void_p]
+    L.hhhost_mark_at.argtypes = [C.c_void_p, C.c_int64]
     L.hhhost_plan.argtypes = [C.c_int, U8P, U8P, DP, C.c_int, C.c_uint32, C.c_double, C.c_double,
                               U16P, U16P, DP, U8P, U8P, U8P, DP]
     L.hhhost_sched_new.restype = C.c_void_p
@@ -183,6 +184,9 @@ class Handheld:
 
     def mark(self) -> None:
         self.L.hhhost_mark(self.h)
+
+    def mark_at(self, t_us: int) -> None:
+        self.L.hhhost_mark_at(self.h, t_us)
 
     def ack(self) -> None:
         self.L.hhhost_ack(self.h)

@@ -587,6 +587,7 @@ void hh_core_set_storage(hh_core_t *c, int sd_ok, float free_mb);
 /* Any task. */
 void hh_core_snapshot(hh_core_t *c, hh_snapshot_t *out);
 void hh_core_mark(hh_core_t *c);
+void hh_core_mark_at(hh_core_t *c, int64_t t_us);      /* device us; out of range = now */
 void hh_core_ack(hh_core_t *c);
 void hh_core_request_dtc(hh_core_t *c);
 const hh_channel_info_t *hh_core_channels(const hh_core_t *c, uint16_t *n);
