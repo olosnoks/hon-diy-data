@@ -546,7 +546,10 @@ static void storage_task(void *arg)
         if (t < next_check) continue;
         next_check = t + 2000000;
         hh_core_set_storage(core, card != NULL, sd_free_mb());
-        if (cfg.sleep_after_s > 0
+        /* not while the laptop is talking (a map upload on the bench, no ECU): the card would be
+           unmounted under the upload and the link would go dead mid-file */
+        int laptop = hh_serial_last_rx_us && t - hh_serial_last_rx_us < 120 * 1000000LL;
+        if (cfg.sleep_after_s > 0 && !laptop
             && hh_core_idle_s(core) >= (double)cfg.sleep_after_s + (double)cfg.drive_gap_s) go_to_sleep();
     }
 }

@@ -143,6 +143,10 @@ against the simulators and the host builds of the firmware cores.
 
 ### Handheld
 
+- No deep sleep while the laptop is talking: the ECU-silent sleep
+  (`sleep_after_s` + `drive_gap_s`, 7 min by default) waits until the USB-C
+  link has been quiet for 2 min. On the bench with no car it used to unmount
+  the card and drop the link 7 min after boot, in the middle of a map upload.
 - Map upload survives a failed card write: the temporary file is kept and the
   upload stays active, the handheld logs the step and errno (`serfs` warning),
   and `put-map` / `cyd_debug.py --put-map` retry the chunk (up to 8 times)
