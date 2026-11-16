@@ -1,9 +1,14 @@
 # hondalog: KKL 409.1 K-line cable (FTDI FT232R, USB id 0403:6001).
 # Gives it a stable name, /dev/hondalog, and lets the dialout group open it.
 # Any other FT232R adapter you plug in gets the same name.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="hondalog", GROUP="dialout", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="hondalog", GROUP="dialout", MODE="0660", ENV{ID_MM_DEVICE_IGNORE}="1"
 # FTDI receive latency timer 16 ms -> 1 ms whenever an FTDI adapter is plugged in.
 # At 9600 baud the default costs up to 16 ms of dead time on every request.
 ACTION=="add", SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"
 # hondalog black box: ESP32-S3 built-in USB serial (303a:1001) -> /dev/hondalog-bb
 SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="hondalog-bb", GROUP="dialout", MODE="0660"
+# hondalog handheld (CYD): its USB-C socket is a CH340C (1a86:7523) -> /dev/hondalog-cyd.
+# ModemManager would probe it with AT commands (and toggle DTR/RTS, which can reset
+# the board): told to leave it alone. Any other CH340 adapter gets the same name.
+# brltty also claims 1a86:7523 (as a braille display); remove brltty if the port vanishes.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="hondalog-cyd", GROUP="dialout", MODE="0660", ENV{ID_MM_DEVICE_IGNORE}="1"
