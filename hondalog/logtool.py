@@ -3,7 +3,9 @@
     hondalog-log record  --port PORT [options]   record without the GUI (the app's live path)
     hondalog-log list    [-q TEXT]               drives and captures, newest first
     hondalog-log info    [DRIVE]                 what is in a drive (default: the newest)
-    hondalog-log export  DRIVE OUT [options]     .mlg .msl .csv .npz, or .db (a copy to hand on)
+    hondalog-log export  DRIVE OUT [options]     .mlg .msl .csv .npz, .db (a copy to hand on),
+                                                 .gpx .kml (the GPS track; --format gpx|kml)
+    hondalog-log stalls  [--geojson OUT] [...]   every stall with where it happened, grouped by place
     hondalog-log compare A B [options]           two drives, channel by channel
     hondalog-log import  FILE...                 old CSV / MSL / MLG -> new drives
     hondalog-log report  DRIVE [-o OUT.html]     one-page capture report
@@ -152,11 +154,50 @@ def _export(args: argparse.Namespace) -> int:
         filters = FilterSet()
         for i, text in enumerate(args.filter):
             filters.add(f"f{i}", text)
+    channels = args.channels.split(",") if args.channels else None
+    if args.channel:
+        channels = [args.channel] + [c for c in channels or [] if c != args.channel]
+    fmt = args.format
+    out_path = Path(args.out)
+    if fmt and not out_path.suffix:
+        out_path = out_path.with_suffix("." + fmt.lstrip("."))
     with _open(args, args.drive) as log:
-        out = export_log(log, args.out, channels=args.channels.split(",") if args.channels else None,
+        out = export_log(log, out_path, fmt, channels=channels,
                          hz=args.hz, filters=filters, t0=args.start, t1=args.end,
                          mlg_version=args.mlg_version, compact=args.compact)
     print(f"wrote {out}  ({out.stat().st_size} bytes)")
+    return 0
+
+
+def _stalls(args: argparse.Namespace) -> int:
+    """Every stall (or capture) with the GPS fix nearest its trigger, the
+    biggest group of them in one place, and optionally a GeoJSON file."""
+    from .geo import stalls as st
+    since = st.parse_date(args.since) if args.since else None
+    until = st.parse_date(args.until, end=True) if args.until else None
+    kinds = None if args.all else ("stall",)
+    pins = st.stall_pins(db.db_path(args.db), since=since, until=until, reason=args.reason, kinds=kinds)
+    if args.geojson:
+        if args.geojson == "-":
+            import json
+            print(json.dumps(st.geojson(pins, args.radius), indent=1, ensure_ascii=False))
+            return 0
+        out = st.write_geojson(pins, args.geojson)
+        print(f"wrote {out}  ({sum(1 for p in pins if p.located)} points"
+              + (f", {sum(1 for p in pins if not p.located)} without a fix left out)" if any(
+                  not p.located for p in pins) else ")"))
+    groups = st.clusters(pins, args.radius)
+    group_of = {i: g + 1 for g, members in enumerate(groups) for i in members if len(members) > 1}
+    if not args.quiet:
+        print(f"{'capture':<26} {'reason':<8} {'when':<19} {'lat':>10} {'lon':>11} {'km/h':>5} "
+              f"{'max 30 s':>8}  place")
+        for i, p in enumerate(pins):
+            where = (f"{p.lat:>10.5f} {p.lon:>11.5f}" if p.located else f"{'no fix':>10} {'':>11}")
+            speed = f"{p.speed_kmh:5.0f}" if p.speed_kmh is not None else "    -"
+            top = f"{p.max_speed_30s:8.0f}" if p.max_speed_30s is not None else "       -"
+            group = f"group {group_of[i]}" if i in group_of else ""
+            print(f"{p.name:<26} {p.reason:<8} {p.wall_time[:19]:<19} {where} {speed} {top}  {group}")
+        print(st.summary(pins, args.radius))
     return 0
 
 
@@ -345,7 +386,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--end", type=float)
     p.add_argument("--mlg-version", type=int, default=2, choices=(1, 2))
     p.add_argument("--compact", action="store_true", help="MLG: 16-bit scaled fields where they fit")
+    p.add_argument("--format", choices=[f.lstrip(".") for f in FORMATS],
+                   help="the format, whatever OUT ends in (gpx, kml: the GPS track)")
+    p.add_argument("--channel", help="GPX / KML: the channel that colours the track (default: speed)")
     p.set_defaults(fn=_export)
+
+    p = sub.add_parser("stalls", help="every stall with where it happened (GPS), grouped by place")
+    p.add_argument("--geojson", metavar="OUT", help="write the stalls as a GeoJSON FeatureCollection ('-': stdout)")
+    p.add_argument("--since", help="from this date (2026-11-01, or an ISO time)")
+    p.add_argument("--until", help="up to and including this date")
+    p.add_argument("--reason", help="one trigger reason: rpm, link, external, alarm, manual, ...")
+    p.add_argument("--all", action="store_true", help="every capture, not only stalls")
+    p.add_argument("--radius", type=float, default=150.0, help="metres that count as the same place (150)")
+    p.add_argument("-q", "--quiet", action="store_true", help="no table")
+    p.set_defaults(fn=_stalls)
 
     p = sub.add_parser("compare", help="two drives (or captures), channel by channel")
     p.add_argument("a")

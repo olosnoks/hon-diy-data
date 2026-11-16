@@ -6,7 +6,8 @@
 Formats: ``.mlg`` (MegaLogViewer binary, v2 by default), ``.msl``
 (MegaLogViewer text), ``.csv``, ``.npz`` (NumPy), ``.db`` (the drive, or a
 cut of it, copied into another hondalog database: all streams and raw bytes
-kept; the file is made if it is not there).
+kept; the file is made if it is not there), and the GPS track as ``.gpx``
+or ``.kml`` (``export.geo``: the first of ``channels`` colours the KML).
 
     export_capture("hondalog.db#stall_20261116_071455", "stall.mlg")
 
@@ -27,10 +28,10 @@ from ..data.model import Column, Table
 from ..data.db import DriveRef
 from ..data.reader import Log, open_log
 from ..data.store import merge_window, write_log
-from . import mlg, textlog
+from . import geo, mlg, textlog
 
 FORMATS = {".mlg": "MegaLogViewer binary (MLG v2)", ".msl": "MegaLogViewer text",
-           ".csv": "CSV", ".npz": "NumPy arrays", ".db": "hondalog database (SQLite)"}
+           ".csv": "CSV", ".npz": "NumPy arrays", ".db": "hondalog database (SQLite)", **geo.GEO_FORMATS}
 
 
 def export_table(log: Log, channels: Sequence[str] | None = None, *, hz: float | None = None,
@@ -68,6 +69,8 @@ def export_log(log: Log, path: str | os.PathLike, fmt: str | None = None, *,
     ext = "." + fmt.lstrip(".").lower() if fmt else path.suffix.lower()
     if ext not in FORMATS:
         raise ValueError(f"unknown export format {ext!r}; choose from {', '.join(FORMATS)}")
+    if ext in geo.GEO_FORMATS:
+        return geo.export_geo(log, path, ext, channel=channels[0] if channels else None, t0=t0, t1=t1)
     if ext == ".db":
         lo = log.t0 if t0 is None else t0
         hi = log.t1 if t1 is None else t1
@@ -105,4 +108,4 @@ def export_capture(capture: DriveRef | str | os.PathLike, path: str | os.PathLik
         return export_log(log, path, fmt, **options)
 
 
-__all__ = ["FORMATS", "export_capture", "export_log", "export_table", "mlg", "textlog"]
+__all__ = ["FORMATS", "export_capture", "export_log", "export_table", "geo", "mlg", "textlog"]
