@@ -19,6 +19,7 @@ hondalog-bb = "hondalog.blackbox.__main__:main"
 hondalog-bbsim = "hondalog.blackbox.sim:main"
 hondalog-tune = "hondalog.tuning.cli:main"
 hondalog-handheld = "hondalog.handheld.cli:main"
+hondalog-cydsim = "hondalog.handheld.cydsim:main"
 
 [tool.setuptools]
 packages = ["hondalog", "hondalog.ui", "hondalog.ui.screens", "hondalog.link", "hondalog.diag", "hondalog.expr",
