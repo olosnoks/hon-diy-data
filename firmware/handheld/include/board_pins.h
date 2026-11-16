@@ -114,6 +114,20 @@
 #define HH_GPS_RX               18   /* [C] P4/P3. GPS TX -> here. Free on the N board: touch IRQ only on R; on C it needs R17, not fitted */
 #define HH_GPS_TX               (-1) /* not wired. If the GPS must be configured, use 17 and give up HH_BTN_2 */
 
+/* Variant: GPS on header P1 (UART0, next to the USB-C) instead of P4.
+ * Build with -DHH_GPS_P1=1 and sdkconfig.gps_p1 (console off). GPIO44 is also
+ * the CH340C's TX through 100 ohm, so the GPS and the CH340 share the line:
+ * works only if the GPS module drives it hard enough. Watch GPS OK/BAD on the
+ * Link screen. Flashing over USB-C still works (esptool resets into the ROM). */
+#if defined(HH_GPS_P1) && HH_GPS_P1
+#undef  HH_GPS_UART_NUM
+#undef  HH_GPS_RX
+#undef  HH_GPS_TX
+#define HH_GPS_UART_NUM         0
+#define HH_GPS_RX               44   /* P1 pin 3, RX0 */
+#define HH_GPS_TX               (-1) /* P1 pin 2 (TX0) left idle: nothing is sent to the GPS */
+#endif
+
 /* ---- K-line plan A: KKL cable on the S3's own USB (host, full speed) ----- */
 #define HH_USBH_DM              19   /* [F] USB D-, fixed pad. [C] P3 (and P2 pin 1). Touch SDA on the C board only */
 #define HH_USBH_DP              20   /* [F] USB D+, fixed pad. [C] P3. Touch SCL on the C board only */

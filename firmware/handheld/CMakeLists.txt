@@ -9,6 +9,13 @@ endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
+# GPS on P1 (UART0) instead of P4:
+#   idf.py -B build-p1 -DHH_GPS_P1=1 -DSDKCONFIG=build-p1/sdkconfig \
+#          -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.gps_p1" build
+if(HH_GPS_P1)
+    idf_build_set_property(COMPILE_DEFINITIONS "HH_GPS_P1=1" APPEND)
+endif()
+
 if(HH_LVGL_DIR)
     # the component is named after its directory; main/CMakeLists.txt requires it by that name
     get_filename_component(hh_lvgl_name "${HH_LVGL_DIR}" NAME)

@@ -239,7 +239,7 @@ static void link_create(lv_obj_t *body)
     lnk.backend = row_create(body, GRID_X, GAP + 1 * rh, w, rh, "BACKEND", f, false);
     lnk.ecu     = row_create(body, GRID_X, GAP + 2 * rh, w, rh, "ECU", f, false);
     lnk.rate    = row_create(body, GRID_X, GAP + 3 * rh, w, rh, "RATE", f, false);
-    lnk.reads   = row_create(body, x2, GAP + 0 * rh, w, rh, "READS", f, false);
+    lnk.reads   = row_create(body, x2, GAP + 0 * rh, w, rh, "GPS OK/BAD", f, false);
     lnk.errors  = row_create(body, x2, GAP + 1 * rh, w, rh, "ERRORS", f, false);
     lnk.sd      = row_create(body, x2, GAP + 2 * rh, w, rh, "SD", f, true);
     lnk.log     = row_create(body, x2, GAP + 3 * rh, w, rh, "LOG", f, false);
@@ -274,7 +274,7 @@ static void link_update(const hh_snapshot_t *s, const ui_derived_t *d)
     snprintf(text, sizeof(text), "%s Hz", num);
     ui_set_text(lnk.rate.value, text);
 
-    snprintf(text, sizeof(text), "%u", (unsigned)s->link.reads);
+    snprintf(text, sizeof(text), "%u / %u", (unsigned)s->nmea.good, (unsigned)s->nmea.bad);
     ui_set_text(lnk.reads.value, text);
     uint32_t total = s->link.reads + s->link.errors;
     ui_fmt_float(num, sizeof(num), total ? 100.0f * (float)s->link.errors / (float)total : 0, 1);

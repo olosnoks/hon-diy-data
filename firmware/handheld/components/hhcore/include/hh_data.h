@@ -63,6 +63,7 @@ typedef struct {
     int64_t unix_us;            /* wall clock now, 0 = unknown */
     char status[40];            /* one line for a status bar: "USB cable not found", "no reply" ... */
     struct { uint8_t valid, n; uint16_t code[6]; int64_t t_us; } dtc;   /* last Mode 03 read; code = raw 2 bytes */
+    struct { uint32_t good, bad; } nmea;   /* GPS sentences that passed / failed their checksum since boot */
 } hh_snapshot_t;
 
 const hh_channel_info_t *hh_channels(uint16_t *n);

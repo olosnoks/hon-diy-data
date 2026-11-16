@@ -56,18 +56,22 @@ int hh_nmea_feed(hh_nmea_t *g, char c)
         if (g->n && g->n < sizeof(g->line) - 1) g->line[g->n++] = c;
         return 0;
     }
-    if (g->n < 8) { g->n = 0; return 0; }
+    if (g->n == 0) return 0;                        /* line end with no sentence open */
+    if (g->n < 8) { g->n = 0; g->bad++; return 0; }
     g->line[g->n] = 0;
     g->n = 0;
     char *star = strchr(g->line, '*');
-    if (!star) return 0;
+    if (!star) { g->bad++; return 0; }
     uint8_t sum = 0;
     for (char *p = g->line + 1; p < star; p++) sum ^= (uint8_t)*p;
     /* exactly two hex digits after '*', nothing else */
     char *endp;
-    if (strlen(star + 1) != 2 || !isxdigit((unsigned char)star[1]) || !isxdigit((unsigned char)star[2]))
+    if (strlen(star + 1) != 2 || !isxdigit((unsigned char)star[1]) || !isxdigit((unsigned char)star[2])) {
+        g->bad++;
         return 0;
-    if ((uint8_t)strtol(star + 1, &endp, 16) != sum || *endp) return 0;
+    }
+    if ((uint8_t)strtol(star + 1, &endp, 16) != sum || *endp) { g->bad++; return 0; }
+    g->good++;
     *star = 0;
     char *f[16];
     int nf = 0;

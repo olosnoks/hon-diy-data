@@ -4,6 +4,7 @@
 #   scripts/build-firmware.sh                 # host tests + build every firmware
 #   scripts/build-firmware.sh blackbox        # just one (blackbox | handheld)
 #   scripts/build-firmware.sh handheld --flash /dev/ttyUSB0   # build, then flash
+#   scripts/build-firmware.sh handheld --gps-p1   # GPS on header P1 (next to USB-C), console off
 #   scripts/build-firmware.sh --clean         # wipe build dirs first
 #
 # First run installs PlatformIO into ~/.hondalog-pio and downloads the ESP32-S3
@@ -29,12 +30,14 @@ LOGS="$ROOT/build-logs"
 TARGETS=()
 FLASH_PORT=""
 CLEAN=0
+GPS_P1=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     blackbox|handheld) TARGETS+=("$1") ;;
     --flash) FLASH_PORT="${2:?--flash needs a port, e.g. /dev/ttyUSB0}"; shift ;;
     --clean) CLEAN=1 ;;
+    --gps-p1) GPS_P1=1 ;;   # handheld: GPS on header P1 (UART0) instead of P4; serial console off
     -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -140,9 +143,13 @@ for t in "${TARGETS[@]}"; do
   log="$LOGS/$t-build.log"
   if [ -n "$IDF_ENV" ]; then
     bdir="$dir/build"
-    [ $CLEAN -eq 1 ] && rm -rf "$bdir"
     extra=()
     [ "$t" = handheld ] && [ -n "$LVGL" ] && extra+=("-DHH_LVGL_DIR=$LVGL")
+    if [ "$t" = handheld ] && [ $GPS_P1 -eq 1 ]; then
+      bdir="$dir/build-gps-p1"
+      extra+=("-DHH_GPS_P1=1" "-DSDKCONFIG=$bdir/sdkconfig" "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.gps_p1")
+    fi
+    [ $CLEAN -eq 1 ] && rm -rf "$bdir"
     if idf -C "$dir" -B "$bdir" "${extra[@]}" build >"$log" 2>&1; then
       bin=$(ls -S "$bdir"/*.bin 2>/dev/null | head -1)
       ok "built $(du -h "$bin" | cut -f1) -> ${bin#$ROOT/}"
@@ -159,13 +166,15 @@ for t in "${TARGETS[@]}"; do
     continue
   fi
   [ $CLEAN -eq 1 ] && rm -rf "$dir/.pio"
-  if "$PIO" run -d "$dir" >"$log" 2>&1; then
+  penv=()
+  [ "$t" = handheld ] && [ $GPS_P1 -eq 1 ] && penv=(-e esp32s3-gps-p1)
+  if "$PIO" run -d "$dir" "${penv[@]}" >"$log" 2>&1; then
     bin=$(ls "$dir"/.pio/build/*/firmware.bin 2>/dev/null | head -1)
     ok "built $(du -h "$bin" | cut -f1) -> ${bin#$ROOT/}"
     grep -E "^(RAM|Flash):" "$log" | sed 's/^/        /'
     if [ -n "$FLASH_PORT" ]; then
       log="$LOGS/$t-flash.log"
-      if "$PIO" run -d "$dir" -t upload --upload-port "$FLASH_PORT" >"$log" 2>&1; then ok "flashed to $FLASH_PORT"
+      if "$PIO" run -d "$dir" "${penv[@]}" -t upload --upload-port "$FLASH_PORT" >"$log" 2>&1; then ok "flashed to $FLASH_PORT"
       else bad "$t flash" "$log"; fi
     fi
   else

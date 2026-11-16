@@ -38,7 +38,7 @@ $(OUT)/lvgl/%.o: $(LVGL_DIR)/%.c lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_LVGL) -c -o $@ $<
 
-$(OUT)/ui/%.o: %.c lv_conf.h $(wildcard $(HH)/main/ui/*.h) $(wildcard $(HH)/components/hhcore_stub/include/*.h)
+$(OUT)/ui/%.o: %.c lv_conf.h $(wildcard $(HH)/main/ui/*.h) $(wildcard $(HH)/components/hhcore_stub/include/*.h) $(wildcard $(HH)/components/hhcore/include/*.h)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_UI) -c -o $@ $<
 

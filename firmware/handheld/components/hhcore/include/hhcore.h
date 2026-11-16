@@ -434,7 +434,7 @@ typedef struct HH_PACKED {
     uint16_t hdop_c;        /* HDOP x 100, 0 = unknown (reserved in the black box's record) */
 } hh_gps_t;                 /* 28 bytes, the black box's bb_gps_t */
 
-typedef struct { char line[96]; uint8_t n; hh_gps_t fix; } hh_nmea_t;
+typedef struct { char line[96]; uint8_t n; hh_gps_t fix; uint32_t good, bad; } hh_nmea_t;  /* good/bad: sentences that passed / failed the checksum or framing */
 int hh_nmea_feed(hh_nmea_t *g, char c);     /* 1 when an RMC sentence completed a fix update */
 
 /* ---- drive and capture files (FORMAT.md) ---------------------------------- */

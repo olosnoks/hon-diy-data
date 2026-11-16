@@ -989,6 +989,8 @@ void hh_core_snapshot(hh_core_t *c, hh_snapshot_t *out)
     s->gps.speed_kmh = c->gps.speed_cms * 0.036f;
     s->gps.heading = c->gps.course_cdeg / 100.0f;
     s->gps.hdop = c->gps.hdop_c ? c->gps.hdop_c / 100.0f : NAN;
+    s->nmea.good = c->nmea.good;
+    s->nmea.bad = c->nmea.bad;
     s->log.sd_ok = (uint8_t)(c->sd_ok && !c->sd_err);
     s->log.recording = (uint8_t)(c->drive_open && s->log.sd_ok);
     s->log.drive_no = c->drive_no;
