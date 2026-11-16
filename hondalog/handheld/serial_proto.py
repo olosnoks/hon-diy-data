@@ -8,6 +8,7 @@ COBS, CRC and deframer are ``hondalog.blackbox.format``'s, used as they are.
 
 from __future__ import annotations
 
+import re
 import struct
 from dataclasses import dataclass
 
@@ -24,17 +25,18 @@ BAUDS = (921600, 460800, 115200)        # tried in this order when the port stay
 
 # handheld -> laptop
 (SF_HELLO, SF_READ, SF_TICK, SF_LINK, SF_GPS, SF_EVENT, SF_STATS, SF_LOG, SF_ISO, SF_TIME_RSP, SF_ACK,
- SF_FILE_INFO, SF_FILE_DATA) = range(0x40, 0x4D)
+ SF_FILE_INFO, SF_FILE_DATA, SF_MAPUP) = range(0x40, 0x4E)
 # laptop -> handheld (two-way only)
 (SC_GET_HELLO, SC_TIME_REQ, SC_TIME_SET, SC_MARK, SC_ACK_ALARM, SC_DRIVE, SC_LIST_FILES, SC_READ_FILE,
- SC_PUT_BEGIN, SC_PUT_DATA, SC_PUT_END, SC_DTC) = range(0x60, 0x6C)
+ SC_PUT_BEGIN, SC_PUT_DATA, SC_PUT_END, SC_DTC, SC_MAPUP_OPEN, SC_MAPUP_WRITE, SC_MAPUP_STATUS,
+ SC_MAPUP_COMMIT) = range(0x60, 0x70)
 FRAME_NAMES = {SF_HELLO: "hello", SF_READ: "read", SF_TICK: "tick", SF_LINK: "link", SF_GPS: "gps",
                SF_EVENT: "event", SF_STATS: "stats", SF_LOG: "log", SF_ISO: "iso", SF_TIME_RSP: "time_rsp",
-               SF_ACK: "ack", SF_FILE_INFO: "file_info", SF_FILE_DATA: "file_data"}
+               SF_ACK: "ack", SF_FILE_INFO: "file_info", SF_FILE_DATA: "file_data", SF_MAPUP: "mapup"}
 
 VARIANT_DEFAULT, VARIANT_GPS_P1 = 0, 1
 VARIANTS = {VARIANT_DEFAULT: "default", VARIANT_GPS_P1: "gps-p1"}
-CAP_RX, CAP_FILES, CAP_PUT, CAP_LOG = 1, 2, 4, 8
+CAP_RX, CAP_FILES, CAP_PUT, CAP_LOG, CAP_MAPUP = 1, 2, 4, 8, 0x10
 F_DRIVE, F_CAPTURE, F_MAP, F_CFG = 1, 2, 3, 4
 FILE_KINDS = {F_DRIVE: "drive", F_CAPTURE: "capture", F_MAP: "map", F_CFG: "cfg"}
 OK, IGNORED, E_ARG, E_IO, E_CRC, E_STATE, E_REFUSED, E_BUSY, E_UNSUPPORTED, E_OFFSET = 0, 1, -1, -2, -3, -4, -5, -6, -7, -8
@@ -49,6 +51,10 @@ ST_SD_OK, ST_RECORDING, ST_GPS_FIX, ST_TIME, ST_ARMED, ST_CAPTURING, ST_HOST, ST
 FI_OPEN, FI_MORE = 1, 2
 FD_EOF, FD_BUSY = 1, 2
 NO_FILE = 0xFFFFFFFF
+MAPUP_CHUNK = MAX_PAYLOAD - 8            # most file bytes in one MAPUP_WRITE
+MAPUP_FINAL, MAPUP_ABORT = 1, 2         # MAPUP_COMMIT flags
+MAPUP_IDLE_S = 10.0                     # silent this long: the handheld's map reader gets its files back (the upload stays)
+MAPUP_SIZE_MAX = 128 << 20
 
 HELLO = struct.Struct("<4sBBH12s12s12s8s10sBBBBBBIIQqHH")       # 96
 READ = struct.Struct("<QBBH")                                   # 12, then len bytes
@@ -63,9 +69,15 @@ FILE_DATA = struct.Struct("<BBHIII")                            # 16, then data
 LIST = struct.Struct("<B3xI")                                   # 8
 READ_FILE = struct.Struct("<BxHII")                             # 12
 PUT_BEGIN = struct.Struct("<B3xII")                             # 12
+MAPUP_OPEN = struct.Struct("<BBxxII")                           # 12, then the name ("MAP/MAP.IDX")
+MAPUP_WRITE = struct.Struct("<II")                              # 8, then the data: offset, crc32 of the data
+MAPUP_COMMIT = struct.Struct("<B3x")                            # 4
+MAPUP_INFO = struct.Struct("<BxxxIII16s")                       # 32: state, got, size, crc32, name (answer to STATUS)
+MU_NONE, MU_OPEN, MU_PAUSED = 0, 1, 2
 assert HELLO.size == 96 and STATS.size == 96 and READ.size == 12 and TICK.size == 16 and LINK.size == 12
 assert ACK.size == 8 and FILE_INFO.size == 12 and FILE_DATA.size == 16 and LIST.size == 8
 assert READ_FILE.size == 12 and PUT_BEGIN.size == 12 and TIME_RSP.size == 24
+assert MAPUP_OPEN.size == 12 and MAPUP_WRITE.size == 8 and MAPUP_COMMIT.size == 4 and MAPUP_INFO.size == 32
 
 
 @dataclass
@@ -146,9 +158,18 @@ def pack_stats(**fields: int) -> bytes:
     return STATS.pack(*(int(fields.get(name, 0)) for name in STATS_FIELDS))
 
 
+_MAPUP_NAME = re.compile(r"MAP/[A-Z0-9_~$-]{1,8}(\.[A-Z0-9_~$-]{0,3})?")
+
+
+def mapup_name_ok(name: str) -> bool:
+    """A name the handheld takes for a MAP/ upload: ``MAP/`` and an 8.3 name in capitals. Nothing else in the
+    card, no folders, no ``..``; ``MAP/UPLOAD.TMP`` is the handheld's own."""
+    return _MAPUP_NAME.fullmatch(name) is not None and name != "MAP/UPLOAD.TMP"
+
+
 def status_text(status: int) -> str:
     return STATUS_TEXT.get(status, f"error {status}")
 
 
 __all__ = ["Deframer", "cobs_decode", "cobs_encode", "crc16", "frame_encode"] + [n for n in dir() if n.isupper()] + [
-    "Hello", "hash12", "parse_hello", "parse_stats", "pack_stats", "status_text"]
+    "Hello", "hash12", "mapup_name_ok", "parse_hello", "parse_stats", "pack_stats", "status_text"]
