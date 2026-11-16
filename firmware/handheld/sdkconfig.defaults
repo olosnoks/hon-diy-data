@@ -1,0 +1,49 @@
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# 8 MB octal PSRAM (the "R8" in N16R8) at 80 MHz holds the two frame buffers.
+# malloc() stays in internal RAM; PSRAM is asked for by name.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_CAPS_ALLOC=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# RGB panel. The frame buffers are in PSRAM and reach the LCD peripheral
+# through bounce buffers in internal RAM (main/port/port_esp32.c), so:
+#  - the LCD interrupt that refills them must run while the flash cache is off
+#    (an NVS write would otherwise freeze the picture for its duration);
+#  - if a refill is ever late, restart the DMA at the next VSYNC instead of
+#    leaving the picture shifted for good;
+#  - 64-byte data cache lines move PSRAM pixels faster.
+CONFIG_LCD_RGB_ISR_IRAM_SAFE=y
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+# Per-core busy time for the HH_UI_PERF overlay. Costs one timer read per
+# context switch.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+
+# LVGL 9.2 is configured here, not by an lv_conf.h. sim/lv_conf.h is the
+# simulator's copy of the same choices: keep the two in step.
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_USE_CLIB_MALLOC=y
+CONFIG_LV_USE_CLIB_STRING=y
+CONFIG_LV_USE_CLIB_SPRINTF=y
+CONFIG_LV_DEF_REFR_PERIOD=30
+CONFIG_LV_DPI_DEF=128
+CONFIG_LV_OS_NONE=y
+CONFIG_LV_USE_THEME_DEFAULT=n
+CONFIG_LV_USE_THEME_SIMPLE=n
+CONFIG_LV_USE_THEME_MONO=n
+
+# the chip's own brownout reset stays on (car supply)
+CONFIG_ESP_BROWNOUT_DET=y
