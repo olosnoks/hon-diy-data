@@ -17,7 +17,8 @@ anything electrical on this page as unverified until you have measured it.
   link, flashing
 - [Flashing](#flashing)
 - [SD card setup](#sd-card-setup)
-- [The screens](#the-screens)
+- [The road map](#the-road-map): building it, copying it to the card, attribution
+- [The screens](#the-screens), [the Map screen](#the-map-screen)
 - [Controls](#controls)
 - [Stalls, alarms and marks](#stalls-alarms-and-marks)
 - [Deep sleep](#deep-sleep)
@@ -308,6 +309,9 @@ that in every file.
 `hondalog-handheld info /media/you/CARD/HANDHELD.MAP` shows what is in a
 compiled map.
 
+The Map screen needs one more thing on the card, a `MAP` folder: see
+[The road map](#the-road-map).
+
 ### HANDHELD.CFG
 
 `key = value` lines; `#` starts a comment. Edit, save, restart the handheld.
@@ -330,6 +334,76 @@ A wrong or missing line falls back to its default.
 | `usb_latency_ms` | 1 | FTDI latency timer |
 | `utc_offset_min` | 0 | For the clock on the screen only; files are UTC |
 
+## The road map
+
+The Map screen draws an offline road map from a `MAP` folder in the root of
+the SD card: roads by class with route numbers (`I-55`, `US 49`), lakes and
+rivers, railways, towns and cities by size, fuel stations. The laptop makes
+it from OpenStreetMap extracts, once; the handheld never goes online.
+
+### Building it
+
+1. Download the extracts for your area from Geofabrik
+   (<https://download.geofabrik.de/north-america/us.html>), one `.osm.pbf`
+   per state. Around Jackson: Mississippi and Louisiana (the 100-mile circle
+   reaches both; add Arkansas for the small corner of it west of the river).
+   Do not fetch map tiles from tile.openstreetmap.org instead: bulk
+   downloading of tiles is against its usage policy.
+2. Build (needs pyosmium: `sudo apt install python3-pyosmium`, or
+   `pip install osmium`):
+
+   ```sh
+   hondalog-handheld map-build \
+       --pbf mississippi-latest.osm.pbf --pbf louisiana-latest.osm.pbf \
+       --center 32.2988,-90.1848 --radius-mi 100 \
+       --out /media/you/CARD
+   ```
+
+   That writes `MAP/` into the card. About 2 minutes and 1 GB of RAM on a
+   laptop for 100 miles around Jackson; the result is about 17 MB:
+
+   ```
+   /media/you/CARD/MAP: 17.3 MB (MAP.IDX 0.86 MB, MAP.DAT 16.4 MB) in 121 s
+     level 0:  63070 tiles of 1.024 km,   10.4 MB,   1902722 points (simplified to 2 m; drawn at 4 m/px)
+     level 1:   4940 tiles of 4.096 km,    4.7 MB,    971941 points (simplified to 5 m; drawn at 10 m/px)
+     level 2:   1256 tiles of 8.192 km,    0.9 MB,    190669 points (simplified to 12 m; drawn at 25 m/px)
+     level 3:     90 tiles of 32.768 km,    0.4 MB,     76892 points (simplified to 30 m; drawn at 60 m/px)
+   ```
+
+   | Option | Does |
+   |---|---|
+   | `--pbf FILE` | An extract; repeat for several. Roads across a state line are taken once |
+   | `--center LAT,LON` | Middle of the map |
+   | `--radius-mi N` | Radius in miles (default 100, at most 250) |
+   | `--out DIR` | The SD card (or any folder): `MAP/` is written into it |
+   | `--zip FILE` | Also write a zip holding the `MAP` folder, to unpack onto a card later |
+   | `--no-rail`, `--no-fuel` | Leave railways / fuel stations out |
+
+3. Or build it anywhere (`--out ~/maps --zip ~/maps/map.zip`) and copy the
+   `MAP` folder (or unzip the zip) into the root of the card, next to
+   `HANDHELD.MAP`:
+
+   ```
+   CARD/
+     HANDHELD.MAP   HANDHELD.CFG   DRIVES/   CAPTURES/
+     MAP/
+       MAP.IDX   MAP.DAT   README.TXT
+   ```
+
+`hondalog-handheld info /media/you/CARD` reads the map back and checks every
+tile. Rebuild when you want fresher roads: Geofabrik updates the extracts
+daily. The format is in
+[firmware/handheld/MAPFORMAT.md](../firmware/handheld/MAPFORMAT.md).
+
+### Attribution
+
+Map data © OpenStreetMap contributors, available under the Open Database
+License (<https://www.openstreetmap.org/copyright>). A `MAP` folder is a
+Produced Work of that database: the attribution is in its header and in
+`MAP/README.TXT`, and the Map screen shows "© OpenStreetMap contributors" in
+its corner at all times. Keep it there if you change the screen, and keep
+`README.TXT` with the map if you pass the folder on.
+
 ## The screens
 
 Every screen shares one frame: a top bar with the screen's name and four
@@ -341,16 +415,21 @@ bottom that says what the button does right now.
 | ![Gauges](../firmware/handheld/docs/screenshots/day-1-gauges.png) | ![Sensors page 1](../firmware/handheld/docs/screenshots/day-2-sensors-1.png) |
 | Five big values (RPM, speed, coolant, MAP, battery) and the stall catcher | Every channel, 12 to a page (3 x 4). More channels, more pages |
 
-| GPS trip | Link |
+| GPS trip | Map |
 |---|---|
-| ![GPS trip](../firmware/handheld/docs/screenshots/day-4-gps.png) | ![Link](../firmware/handheld/docs/screenshots/day-5-link.png) |
-| Speed, heading, position, fix and satellites, HDOP, trip time and distance, drive number | Link state, backend, ECU id, read rate, GPS OK/BAD, errors, SD card, log size, stall catcher, last stall |
+| ![GPS trip](../firmware/handheld/docs/screenshots/day-4-gps.png) | ![Map](../firmware/handheld/docs/screenshots/day-map-downtown.png) |
+| Speed, heading, position, fix and satellites, HDOP, trip time and distance, drive number | Offline road map centred on the car, the drive's trail, stall and marker pins ([below](#the-map-screen)) |
+
+| Link | |
+|---|---|
+| ![Link](../firmware/handheld/docs/screenshots/day-6-link.png) | |
+| Link state, backend, ECU id, read rate, GPS OK/BAD, errors, SD card, log size, stall catcher, last stall | |
 
 Night theme:
 
 ![Gauges, night](../firmware/handheld/docs/screenshots/night-1-gauges.png)
 
-The order is Gauges, the Sensors pages, GPS trip, Link, and round again.
+The order is Gauges, the Sensors pages, GPS trip, Map, Link, and round again.
 
 Things to know:
 
@@ -359,6 +438,61 @@ Things to know:
 - On the Link screen, **BACKEND** is a number: 0 is the KKL cable on USB
   host, 1 is the L9637D on the UART.
 - The link states are `OFF`, `CONNECTING`, `OK`, `ISO ONLY`, `ERROR`.
+
+### The Map screen
+
+| Downtown, 25 km/h (1/4) | I-55, 70 mph (4/4) |
+|---|---|
+| ![Map downtown](../firmware/handheld/docs/screenshots/day-map-downtown.png) | ![Map on I-55](../firmware/handheld/docs/screenshots/day-map-i55.png) |
+| ![Map downtown, night](../firmware/handheld/docs/screenshots/night-map-downtown.png) | ![Map on I-55, night](../firmware/handheld/docs/screenshots/night-map-i55.png) |
+
+North is up and the car is in the middle. Roads are black on white (white on
+black at night), wider and heavier the bigger the road; interstates have a
+light centre line at the closer zooms. Water is blue, railways are dashed
+grey lines, a fuel station is a small pump.
+
+| On the map | Means |
+|---|---|
+| Blue arrow | The car, moving, pointing where it is going |
+| Blue dot | The car, stopped (under 5 km/h) |
+| Hollow square | No GPS fix: the last position known |
+| Blue crumbs | This drive's trail (the last 12.8 km) |
+| Red octagon | A stall caught on this drive, where it happened |
+| Blue diamond | A MARK on this drive |
+| Boxed `I-55`, `US 51` | Route numbers, on the road |
+| Plain names | Street names (closest zoom), towns and cities |
+
+The trail and the pins start again with each drive.
+
+**Zoom** follows the speed: 1/4 below 30 km/h (a screen is 1.9 km across),
+2/4 from 30 (4.8 km), 3/4 from 60 (12 km), 4/4 from 90 km/h (29 km). It
+goes out after 2 s at a higher speed and back in after 6 s at a lower one,
+so a red light on the highway does not zoom in. The chip in the corner reads
+`AUTO 2/4`. With the optional second button, a short press on the Map
+screen steps the zoom: `FIXED 1/4` ... `FIXED 4/4`, then `AUTO` again; on
+this screen *holding* it 1 s steps back a screen.
+
+The scale bar (bottom left) is in miles.
+
+**No GPS fix.** A black band across the top says `NO GPS FIX`, the car is a
+hollow square, and the map stays at the last fix. After a power-up without a
+fix yet, it shows the position kept from the last drive (kept in the
+handheld's own memory when a drive ends), or Jackson if there has never been
+a fix.
+
+| No fix | No map on the card |
+|---|---|
+| ![No fix](../firmware/handheld/docs/screenshots/day-map-nofix.png) | ![No map](../firmware/handheld/docs/screenshots/day-map-nomap.png) |
+
+**No map.** Without `MAP/` on the card the screen says so and gives the
+`map-build` command. Past the map's edge a band says `OUTSIDE THE MAP`.
+
+**Speed.** The map is drawn off to the side, by a low-priority task on the
+core the data side uses, from tiles cached in the handheld's PSRAM: the
+screen never waits for the card. A new picture is drawn only when the car
+has moved 24 pixels from the middle of the last one (every 15 s or so in
+town, much less often on the highway), when the zoom or the theme changes,
+or when a pin is added. In between only the car moves.
 
 ### The GPS OK/BAD counter
 
@@ -400,7 +534,8 @@ pin: held at reset, the board enters the flashing mode and the screen stays
 dark. Power-cycle to recover.
 
 **Optional second button:** a momentary switch from GPIO17 (P3 pin 1) to
-GND. A short press steps *back* a screen. It does nothing else.
+GND. A short press steps *back* a screen. On the Map screen a short press
+steps the zoom instead, and a 1 s hold steps back.
 
 ## Stalls, alarms and marks
 
@@ -630,6 +765,12 @@ reset: the chip is in flashing mode. Release it and power-cycle.
 
 **`NO SD` / `NO CARD`.** FAT32, 32 GB or smaller, pushed fully in. Live data
 still works without a card; nothing is logged.
+
+**The Map screen says `NO MAP ON THE SD CARD`.** The `MAP` folder must be in
+the root of the card, holding `MAP.IDX` and `MAP.DAT` (not `MAP/MAP/...`, and
+not renamed). `hondalog-handheld info /media/you/CARD` checks it on the
+laptop. `THE MAP CANNOT BE READ` names what is wrong; build it again.
+The handheld looks for the card's map when it starts: restart after copying.
 
 **The laptop says a drive's map is unknown on import.** The card's
 `HANDHELD.MAP` is gone or was replaced. Give the map the drive was recorded

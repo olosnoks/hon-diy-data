@@ -78,7 +78,7 @@ The CYD handheld is a fourth device that reuses Track A's protocol code in C.
 | `hondalog-log` | Drives: record, list, export, compare, delete, SQL | [Data and SQL](data-and-sql.md) |
 | `hondalog-bb` | Black box: live values, fetch and read captures | [Stall hunting](stall-hunting.md) |
 | `hondalog-bbsim` | Fake black box on a pseudo-terminal | [Stall hunting](stall-hunting.md#try-it-with-no-hardware) |
-| `hondalog-handheld` | Handheld: write the map to the card, import drives | [Handheld](handheld.md) |
+| `hondalog-handheld` | Handheld: write the address map and the road map (`map-build`) to the card, import drives | [Handheld](handheld.md) |
 | `hondalog-tune` | ROM files: info, tables, diff, checksum, burn | [Tuning a P28](tuning-p28.md) |
 
 Every command prints its options with `--help`.
