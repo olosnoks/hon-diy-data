@@ -1,5 +1,8 @@
 """F5, raw tools and the memory mapper (HANDOFF 5.5): hex grid with change
-heat, byte inspector, hex console, and the host for the guided wizard."""
+heat, byte inspector, hex console, the host for the guided wizard, and the
+"Rank addresses" panel: W3's correlation finder on the sweep history (which
+addresses followed a channel, or moved steadily one way), with the result
+assigned to a channel through the map editor."""
 
 from __future__ import annotations
 
@@ -8,8 +11,8 @@ from datetime import datetime
 import numpy as np
 import pyqtgraph.functions as fn
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import QFileDialog, QWidget
+from PySide6.QtGui import QCursor, QPainter
+from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox, QWidget
 
 from ... import protocol
 from .. import paint
@@ -360,6 +363,238 @@ class WizardCard(Card):
                            Qt.AlignVCenter | Qt.AlignRight, HEX[v] if v >= 0 else "--")
 
 
+class RankCard(Card):
+    """Rank addresses: pick what to compare with, see what followed it, give
+    the best one to a channel. Every answer comes from the MapperSession
+    (``rank_references``, ``rank``, ``assign_targets``, ``assign``)."""
+
+    pickAddr = Signal(int)
+    ROW = 40
+    TOP = 8
+
+    def __init__(self, mapper, parent=None):
+        super().__init__("Rank addresses · what followed a signal", parent=parent)
+        self.mapper = mapper
+        self.refs: list = []
+        self.ref = None                 # the RankReference in use
+        self.rows: list = []
+        self.sel = 0
+        self.message = ""
+        self.ranked = False             # a ranking has been asked for (an empty list then means "nothing")
+        self.ref_btn = Button("", height=40, parent=self)
+        self.rank_btn = Button("Rank now", "G", height=40, parent=self)
+        self.assign_btn = Button("Assign to channel…", kind="primary", height=40, parent=self)
+        self.ref_btn.clicked.connect(self.reference_menu)
+        self.rank_btn.clicked.connect(self.rank)
+        self.assign_btn.clicked.connect(self.assign_menu)
+        self.ref_btn.setToolTip("What to rank against: a channel of the map (a proven one is "
+                                "the best reference), or a shape you make by hand")
+        #: asks before the map file is written; a test replaces it. (title, text) -> bool
+        self.confirm = self._confirm_box
+        self._lines: list = []
+        self._wrapped = ""
+        self.setCursor(Qt.PointingHandCursor)
+        self.reload()
+
+    # ---- what to rank against ----
+
+    def reload(self) -> None:
+        """The reference list again (the map was reloaded, or a channel verified)."""
+        self.refs = list(self.mapper.rank_references())
+        keys = [r.key for r in self.refs]
+        if self.ref is None or self.ref.key not in keys:
+            self.ref = self.refs[0] if self.refs else None
+        else:
+            self.ref = self.refs[keys.index(self.ref.key)]
+        for row in self.rows:               # an assignment changed who owns an address
+            info = self.mapper.mapped(row.addr)
+            row.mapped = info[0] if info else ""
+        self._sync()
+
+    def set_reference(self, key: str) -> None:
+        ref = next((r for r in self.refs if r.key == key), None)
+        if ref is not None and ref is not self.ref:
+            self.ref, self.rows, self.ranked, self.message = ref, [], False, ""
+            self._sync()
+
+    def reference_menu(self) -> None:
+        menu = QMenu(self)
+        menu.addAction("A channel of the map").setEnabled(False)
+        for ref in self.refs:
+            if ref.kind == "shape" and not any(a.text() == "A shape you make" for a in menu.actions()):
+                menu.addSeparator()
+                menu.addAction("A shape you make").setEnabled(False)
+            text = ref.label + ("   verified" if ref.verified else "   unverified" if ref.kind == "channel"
+                                else " while it sweeps")
+            action = menu.addAction(text, lambda k=ref.key: self.set_reference(k))
+            action.setCheckable(True)
+            action.setChecked(ref is self.ref)
+        menu.exec(QCursor.pos())
+
+    def instruction(self) -> str:
+        ref = self.ref
+        if ref is None:
+            return "Connect and sweep first: there is nothing to compare with yet."
+        if ref.kind == "shape":
+            way = "up" if ref.key.endswith("rise") else "down"
+            return (f"Clear changes (C), then move one thing steadily {way} while it sweeps "
+                    "(a slow pedal press, the engine warming). Then Rank now.")
+        proven = "" if ref.verified else " It is unverified itself: a weak reference."
+        return (f"Sweep while {ref.label} changes. The addresses that moved with it are listed; "
+                f"its own bytes are left out.{proven}")
+
+    # ---- ranking ----
+
+    def rank(self) -> None:
+        if self.ref is None:
+            return
+        self.rows = list(self.mapper.rank(self.ref.key, self.TOP))
+        self.ranked, self.sel = True, 0
+        self.message = "" if self.rows else self.mapper.console()
+        self._sync()
+        if self.rows:
+            self.pickAddr.emit(self.rows[0].addr)
+
+    def selected(self):
+        return self.rows[self.sel] if 0 <= self.sel < len(self.rows) else None
+
+    def _room(self) -> int:
+        return max(1, int((self.assign_btn.y() - 6 - self._rows_top()) // self.ROW))
+
+    def _rows_top(self) -> float:
+        return 30 + 46 + 46 + 22
+
+    def mousePressEvent(self, event) -> None:
+        i = int((event.position().y() - self._rows_top()) // self.ROW)
+        if 0 <= i < min(len(self.rows), self._room()):
+            self.sel = i
+            self.pickAddr.emit(self.rows[i].addr)
+            self._sync()
+
+    # ---- assigning ----
+
+    def _confirm_box(self, title: str, text: str) -> bool:
+        box = QMessageBox(QMessageBox.Question, title, text, QMessageBox.Cancel, self)
+        yes = box.addButton("Write it", QMessageBox.AcceptRole)
+        box.setDefaultButton(QMessageBox.Cancel)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def assign_menu(self) -> None:
+        row = self.selected()
+        if row is None:
+            return
+        menu = QMenu(self)
+        menu.addAction(f"Give {row.label} to").setEnabled(False)
+        for name, text in self.mapper.assign_targets():
+            menu.addAction(text, lambda n=name: self.assign(n))
+        menu.exec(QCursor.pos())
+
+    def assign(self, channel: str) -> bool:
+        """Write the selected address to ``channel`` through the map editor, after asking."""
+        row = self.selected()
+        if row is None:
+            return False
+        was = next((text for name, text in self.mapper.assign_targets() if name == channel), channel)
+        if not self.confirm("Assign to channel", f"{was}\n\nwill read {row.label} from now on. It is marked "
+                            "unverified and the map's version moves on. The formula is not changed."):
+            return False
+        self.message = self.mapper.assign(row, channel)
+        self.reload()
+        return True
+
+    # ---- widgets ----
+
+    def _sync(self) -> None:
+        ref = self.ref
+        self.ref_btn.set_text("Follows: " + (ref.label if ref is not None else "nothing yet")
+                              if ref is None or ref.kind == "channel" else ref.label)
+        available = self.mapper.available() and ref is not None
+        self.ref_btn.setEnabled(bool(self.refs))
+        self.rank_btn.setEnabled(available)
+        self.assign_btn.setEnabled(self.selected() is not None)
+        self._place()
+        self.update()
+
+    def _place(self) -> None:
+        w = self.width()
+        rw = self.rank_btn.sizeHint().width()
+        self.rank_btn.setGeometry(w - 10 - rw, 30, rw, 40)
+        self.ref_btn.setGeometry(10, 30, w - 20 - rw - 8, 40)
+        aw = self.assign_btn.sizeHint().width()
+        self.assign_btn.setGeometry(w - 10 - aw, self.height() - 10 - 40, aw, 40)
+
+    def resizeEvent(self, _event) -> None:
+        self._place()
+
+    def paint_body(self, p, x, y, w, h) -> None:
+        body = T.font(14, 600)
+        text = self.instruction()
+        if text != self._wrapped:
+            self._wrapped, self._lines = text, paint.wrap(body, text, w)[:2]
+        p.setFont(body)
+        p.setPen(T.fg)
+        for i, line in enumerate(self._lines):
+            p.drawText(QRectF(x, 76 + 19 * i, w, 19), Qt.AlignVCenter | Qt.AlignLeft, line)
+        ty = self._rows_top() - 22
+        head, mono, small = T.font(12, 700, mono=True), T.font(15, 700, mono=True), T.font(13, 600)
+        cols = (8, 122, 310, 392)
+        p.setFont(head)
+        for cx, title in zip(cols, ("ADDRESS", "FOLLOWS IT", "RANGE", "NOW")):
+            p.drawText(QRectF(x + cx, ty, 190, 20), Qt.AlignVCenter | Qt.AlignLeft, title)
+        p.drawText(QRectF(x, ty, w - 8, 20), Qt.AlignVCenter | Qt.AlignRight, "IN THE MAP AS")
+        p.fillRect(QRectF(x, ty + 20, w, 2), T.sunk)
+        rows = self.rows[:self._room()]
+        if not rows:
+            p.setFont(body)
+            p.setPen(T.fg2)
+            empty = (self.message or "Nothing moved with it in these sweeps.") if self.ranked else \
+                "Not ranked yet."
+            for i, line in enumerate(paint.wrap(body, empty, w - 16)[:3]):
+                p.drawText(QRectF(x + 8, ty + 28 + 19 * i, w - 16, 19), Qt.AlignVCenter | Qt.AlignLeft, line)
+        for n, row in enumerate(rows):
+            r = QRectF(x, ty + 22 + n * self.ROW, w, self.ROW)
+            on = n == self.sel
+            if on:
+                p.fillRect(r, T.fg)
+            p.fillRect(QRectF(x, r.bottom() - 2, w, 2), T.sunk)
+            ink, ground = (T.bg, T.fg) if on else (T.fg, T.panel)
+            p.setFont(mono)
+            p.setPen(ink)
+            line = QRectF(r.x(), r.y(), r.width(), self.ROW - 2)
+            p.drawText(line.adjusted(cols[0], 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, row.label)
+            paint.track(p, QRectF(x + cols[1], r.y() + 13, 118, 12), row.score, ink, ink,
+                        ground if on else T.sunk)
+            # the sign says which way the raw value runs against the reference
+            p.drawText(QRectF(x + cols[1] + 126, r.y(), 70, self.ROW - 2), Qt.AlignVCenter | Qt.AlignLeft,
+                       f"{row.score:.2f}{'↑' if row.r >= 0 else '↓'}")
+            p.drawText(QRectF(x + cols[2], r.y(), 90, self.ROW - 2), Qt.AlignVCenter | Qt.AlignLeft,
+                       f"{row.lo}–{row.hi}")
+            v = int(self.mapper.cur[row.addr])
+            p.drawText(QRectF(x + cols[3], r.y(), 40, self.ROW - 2), Qt.AlignVCenter | Qt.AlignLeft,
+                       HEX[v] if v >= 0 else "--")
+            p.setFont(small)
+            p.drawText(line.adjusted(cols[3] + 40, 0, -8, 0), Qt.AlignVCenter | Qt.AlignRight,
+                       paint.elide(small, row.mapped or "—", w - cols[3] - 56))
+        # the result of the last ranking or assignment, left of the button
+        if self.message and rows:
+            p.setFont(small)
+            p.setPen(T.fg)
+            room = self.assign_btn.x() - x - 12
+            for i, line in enumerate(paint.wrap(small, self.message, room)[:2]):
+                p.drawText(QRectF(x, self.assign_btn.y() + 2 + 18 * i, room, 18),
+                           Qt.AlignVCenter | Qt.AlignLeft, paint.elide(small, line, room))
+        else:
+            sel = self.selected()
+            if sel is not None and (sel.formula or sel.note):
+                p.setFont(small)
+                p.setPen(T.fg2)
+                room = self.assign_btn.x() - x - 12
+                hint = "; ".join(t for t in (f"fits {sel.formula}" if sel.formula else "", sel.note) if t)
+                p.drawText(QRectF(x, self.assign_btn.y(), room, 40), Qt.AlignVCenter | Qt.AlignLeft,
+                           paint.elide(small, hint, room))
+
+
 class ConsoleCard(Card):
     def __init__(self, parent=None):
         super().__init__("Hex console", parent=parent)
@@ -391,6 +626,17 @@ class RawScreen(QWidget):
         self.grid = HexGrid(self.mapper, self)
         self.inspector = ByteInspector(self.mapper, self)
         self.wizard = WizardCard(self.mapper, self)
+        # the correlation finder takes the wizard's place while it is in use
+        self.rank_btn = Button("Rank", "R", parent=self)
+        self.rank_btn.setCheckable(True)
+        self.rank_btn.setToolTip("Rank addresses: which bytes followed a channel, or a shape "
+                                 "you made, in the sweeps so far")
+        self.rank_btn.setVisible(hasattr(self.mapper, "rank"))
+        self.rank = RankCard(self.mapper, self) if hasattr(self.mapper, "rank") else None
+        if self.rank is not None:
+            self.rank.hide()
+            self.rank.pickAddr.connect(lambda addr: self.grid.select(addr))
+            self.rank_btn.clicked.connect(lambda: self.show_rank(self.rank_btn.isChecked()))
         self.console = ConsoleCard(self)
         self.tx = HexEdit(self.console)
         self.tx.setText("20 05 14 01")
@@ -415,7 +661,7 @@ class RawScreen(QWidget):
         self._rev = -1
         self._status = ""
         self._wiz_t = -1.0
-        self._map_version = -1
+        self._map_version: tuple | None = None
 
     # ---- actions ----
 
@@ -427,6 +673,16 @@ class RawScreen(QWidget):
     def toggle_sweep(self) -> None:
         self.mapper.set_sweeping(not self.mapper.sweeping)
         self._rev = -1
+
+    def show_rank(self, on: bool) -> None:
+        """R: the Rank addresses panel in the wizard's place, or the wizard back."""
+        if self.rank is None:
+            return
+        self.rank_btn.setChecked(on)
+        self.rank.setVisible(on)
+        self.wizard.setVisible(not on)
+        if on:
+            self.rank.reload()
 
     def send(self) -> None:
         try:
@@ -446,12 +702,15 @@ class RawScreen(QWidget):
 
     def refresh(self, now: float) -> None:
         m = self.mapper
-        if self.session.bus.version != self._map_version:
-            self._map_version = self.session.bus.version
+        version = (self.session.bus.version, getattr(m, "map_revision", 0))
+        if version != self._map_version:
+            self._map_version = version
             for a in range(256):
                 info = m.mapped(a)
                 self.grid.guess[a] = info is not None and not info[1]
             self._rev = -1
+            if self.rank is not None and self.rank.isVisible():
+                self.rank.reload()          # the map changed: other references, other "in the map as"
         if m.revision != self._rev:
             self._rev = m.revision
             self.sweep_btn.setChecked(m.sweeping)
@@ -466,6 +725,8 @@ class RawScreen(QWidget):
             self.console.set_rx(m.console())
             self.grid.update()
             self.inspector.sync()
+            if self.rank is not None and self.rank.isVisible():
+                self.rank._sync()           # "now" values, and Rank now once there is a link
             self.update()
         if now - self._wiz_t >= 0.2:
             self._wiz_t = now
@@ -486,9 +747,14 @@ class RawScreen(QWidget):
             self.toggle_sweep()
         elif k == Qt.Key_C:
             self.mapper.clear_changes()
-        elif k == Qt.Key_N:
+        elif k == Qt.Key_R and self.rank is not None:
+            self.show_rank(not self.rank.isVisible())
+        elif k == Qt.Key_G and self.rank is not None:
+            self.show_rank(True)
+            self.rank.rank()
+        elif k == Qt.Key_N and self.wizard.isVisible():
             self.wizard.go_next()
-        elif k == Qt.Key_B:
+        elif k == Qt.Key_B and self.wizard.isVisible():
             self.wizard.go_back()
         elif k in (Qt.Key_Return, Qt.Key_Enter):
             self.send()
@@ -502,7 +768,9 @@ class RawScreen(QWidget):
         w, h = self.width(), self.height()
         left = 772
         x = 8
-        for btn in (self.sweep_btn, self.clear_btn):
+        for btn in (self.sweep_btn, self.clear_btn, self.rank_btn):
+            if not btn.isVisibleTo(self):
+                continue
             bw = max(btn.sizeHint().width(), 120 if btn is self.sweep_btn else 0)
             btn.setGeometry(x, 8, bw, 44)
             x += bw + 8
@@ -527,6 +795,8 @@ class RawScreen(QWidget):
         rw = w - 8 - rx
         self.inspector.setGeometry(rx, 8, rw, 208)
         self.wizard.setGeometry(rx, 224, rw, h - 8 - 224)
+        if self.rank is not None:
+            self.rank.setGeometry(rx, 224, rw, h - 8 - 224)
 
     def retheme(self) -> None:
         self.tx.restyle()
@@ -537,8 +807,12 @@ class RawScreen(QWidget):
         mono = T.font(13, 700, mono=True)
         p.setFont(mono)
         p.setPen(T.fg)
-        p.drawText(QRectF(self._status_x, 8, self.export_btn.x() - self._status_x - 8, 44),
-                   Qt.AlignVCenter | Qt.AlignLeft, self._status)
+        room = self.export_btn.x() - self._status_x - 8
+        status = self._status
+        if paint.text_w(mono, status) > room:           # the Rank button took the room: drop the range
+            status = status.replace("0x00–0xFF · ", "")
+        p.drawText(QRectF(self._status_x, 8, room, 44), Qt.AlignVCenter | Qt.AlignLeft,
+                   paint.elide(mono, status, room))
         # legend
         y = self._legend_y
         x = 8.0

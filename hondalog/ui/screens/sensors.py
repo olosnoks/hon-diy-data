@@ -14,6 +14,7 @@ from ..theme import T
 from ..tiles import COMPACT, SENSOR, Tile
 
 COLS, GAP, PAD_X, PAD_Y, HEAD_H = 8, 6, 8, 6, 18
+SPARK_FRAMES = 30               # frames in which every tile redraws its sparkline once (1 s)
 
 
 class SensorsScreen(QWidget):
@@ -93,11 +94,13 @@ class SensorsScreen(QWidget):
             self._rebuild()
         alarms = self.session.alarms
         blink = (now % 1.0) < 0.5
-        # Values update at once; the 2 Hz sparkline redraws are spread over
-        # four frames so 32 polylines never land in one.
-        self._frame = phase = (self._frame + 1) % 4
+        # Values update at once. A sparkline covers 60 s in about 160 px: each
+        # tile strokes its own once a second (the bus samples it at 2 Hz), and
+        # the tiles take turns over SPARK_FRAMES frames, so one or two polylines
+        # land in a frame instead of ten. Stroking them was a tenth of a core.
+        self._frame = phase = (self._frame + 1) % SPARK_FRAMES
         for i, tile in enumerate(self.tiles):
-            tile.sync(now, alarms, blink, i % 4 == phase)
+            tile.sync(now, alarms, blink, i % SPARK_FRAMES == phase)
         if now - self._info_t >= 1.0:
             self._info_t = now
             info = {}

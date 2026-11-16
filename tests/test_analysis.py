@@ -444,6 +444,10 @@ def test_replay_session(synth):
     assert rows["rpm"].value == value_at(rpm, 100.0) and rows["rpm"].units == "rpm"
     assert rows["rpm"].stats.n == np.sum((rpm.t >= 100) & (rpm.t <= 160))
     assert rows["ect"].stats.delta == pytest.approx(10, abs=1.5)         # warms 1 degree per 6 s
+    quick = session.readouts(["ect"], full=False)[0].stats                # only A, B and the difference
+    assert (quick.a, quick.b, quick.delta, quick.rate) == (rows["ect"].stats.a, rows["ect"].stats.b,
+                                                           rows["ect"].stats.delta, rows["ect"].stats.rate)
+    assert np.isnan(quick.min) and np.isnan(quick.mean) and quick.n == 0
     session.clear_cursor_b()
     assert session.readouts(["rpm"])[0].stats is None and session.cursor_delta is None
     assert len(session.readouts()) == len(synth.channels)
@@ -466,6 +470,19 @@ def test_replay_session(synth):
     assert session.view[0] <= 25.0 <= session.view[1]    # the view follows the cursor
     assert session.jump_event(-1) is None and session.jump_event(+1) == pytest.approx(75.0)
 
+    # bookmarks: moments the viewer worked out itself join the log's events
+    session.add_event(50.0, "loss", "FP FEED")
+    session.add_event(60.0, "note", "look here")
+    assert [e.text for e in session.event_list()][:4] == ["MARK 1", "FP FEED", "look here", "MARK 2"]
+    assert [e.text for e in session.event_list("loss")] == ["FP FEED"]
+    assert [e.text for e in session.event_list("marker")][:2] == ["MARK 1", "MARK 2"]
+    session.set_cursor(25.0)
+    assert session.jump_event(+1) == pytest.approx(50.0) and session.jump_event(+1, "marker") == pytest.approx(75.0)
+    session.clear_events("note")
+    assert [e.kind for e in session.bookmarks] == ["loss"]
+    session.clear_events()
+    assert session.bookmarks == [] and session.event_list()[1].text == "MARK 2"
+
 
 def test_replay_overlay_and_pyramid():
     a, b = two_runs()
@@ -475,7 +492,14 @@ def test_replay_overlay_and_pyramid():
     over = session.overlay_trace("rpm")
     assert over.t[0] >= 7.0 - 0.2 and session.overlay_trace("nope") is None
     assert session.set_overlay(b, "crossing", channel="rpm", level=1e9) == 0     # falls back to start
+    assert session.align_overlay("marker") == pytest.approx(7.0)                 # line up again, same overlay
+    with pytest.raises(ValueError):
+        session.align_overlay("crossing", channel="rpm", level=1e9)
+    assert session.overlay.offset == pytest.approx(7.0)                          # a failed alignment changes nothing
+    assert session.shift_overlay(-0.5) == pytest.approx(6.5)
+    assert session.overlay_trace("rpm").t[0] >= 6.5 - 0.2
     assert session.set_overlay(None) == 0 and session.overlay is None
+    assert session.align_overlay("marker") == 0 and session.shift_overlay(1.0) == 0      # nothing laid over
     t = np.arange(300_000) / 1000.0
     long = ReplaySession(mem_log({"rail": np.sin(t)}, t, name="blackbox/rails"))
     env = long.trace("rail", 1000)

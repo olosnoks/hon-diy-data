@@ -3,10 +3,11 @@
 import os
 import types
 
+import numpy as np
 import pytest
 
 from hondalog import addressmap as am
-from hondalog.live import LivePipeline
+from hondalog.live import BLACKBOX_STREAM, LivePipeline, LiveSession, blackbox_key_on
 from hondalog.mapping import __main__ as cli
 
 
@@ -43,6 +44,53 @@ def test_pipeline_adds_math_and_raises_alarms():
     p.process(healthy(amap), 0.0)
     f = p.process(healthy(amap, rpm=1600.0, map=99.0), 0.1, changed={"rpm"})
     assert f.values["inj_duty"] == pytest.approx(3.2) and f.values["load"] == pytest.approx(31.68, abs=0.01)
+
+
+def test_blackbox_key_on():
+    assert blackbox_key_on({"bb_ig1_on": 1.0, "bb_ig1": 12.3})
+    assert blackbox_key_on({"bb_ig1_on": 0.0, "bb_ig1": 11.9})          # the rail, before the flag debounces
+    assert blackbox_key_on({"bb_ig1": 0.1, "bb_ecub": 12.0})            # IG1 sense lost, the ECU still powered
+    assert blackbox_key_on({"bb_ig1": 0.0, "bb_ecub": 0.0, "bb_rpm_tach": 640.0})   # coasting in gear
+    assert not blackbox_key_on({"bb_ig1_on": 0.0, "bb_ig1": 0.2, "bb_ecub": 0.1, "bb_vbat": 12.5,
+                                "bb_rpm_tach": 0.0, "bb_running": 0.0})  # parked: the battery alone is not "on"
+    assert not blackbox_key_on({}) and not blackbox_key_on({"bb_ig1": None, "bb_ecub": float("nan")})
+
+
+def test_live_session_records_the_black_box_while_the_ecu_is_dead(tmp_path):
+    """The live path: black box frames reach the recorder with the key state,
+    so they are kept through ECU silence with the key on and dropped once it
+    is off for drive_gap_s."""
+    from hondalog.data import open_log
+    session = LiveSession(am.load_default(), out_dir=tmp_path, drive_gap_s=10.0, fsync=False)
+    reader = types.SimpleNamespace(on_sample=None, on_event=None, hello=None)
+    session.attach_blackbox(reader)
+    rec = session.start_recording()
+
+    def box(t, key):
+        volts = 12.4 if key else 0.0
+        reader.on_sample(types.SimpleNamespace(t=t, link=True, values={
+            "bb_vbat": 12.6, "bb_ecub": volts - 0.2 if key else 0.0, "bb_pump": 0.0, "bb_ig1": volts,
+            "bb_ig1_on": 1.0 if key else 0.0, "bb_rpm_tach": 0.0, "bb_running": 0.0}))
+    for i in range(50):                                     # 5 s of ECU and box
+        rec.feed_read(i * 0.1, 0, b"\x0c\x80")
+        box(i * 0.1 + 0.05, True)
+    for i in range(50, 400):                                # the ECU is dead for 35 s; the key stays on
+        rec.feed_link(i * 0.1, False)
+        box(i * 0.1 + 0.05, True)
+    assert not rec.parked
+    for i in range(400, 520):                               # key off
+        rec.feed_link(i * 0.1, False)
+        box(i * 0.1 + 0.05, False)
+    assert rec.parked
+    for i in range(520, 600):
+        box(i * 0.1 + 0.05, False)                          # parked: dropped
+    session.stop_recording()
+    with open_log(rec.drives[0]) as log:
+        ig1 = log.series("bb_ig1")
+        assert len(rec.drives) == 1 and log.streams[BLACKBOX_STREAM].info.source == "blackbox"
+        assert ig1.t[-1] == pytest.approx(50.0, abs=0.11) and len(ig1) == pytest.approx(500, abs=2)
+        assert np.all(ig1.v[(ig1.t > 5) & (ig1.t < 40)] > 12)           # the dead stretch is all there
+        assert log.meta["end_reason"] == "key_off"
 
 
 @pytest.fixture
@@ -150,7 +198,9 @@ def test_ui_wiring_alarm_readout_and_finder(env):
             feed(i, ect=112.0)
         assert kinds == ["alarm"]
         top = session.alarms.active()[0]
-        assert top.severity == "alarm" and "Coolant 112" in top.limit_text and top.label == "COOLANT"
+        assert top.severity == "alarm" and top.label == "COOLANT"
+        assert "Coolant 234 °F" in top.limit_text and top.value_text == "234 °F"    # the screen: the owner's units
+        assert "Coolant 112 °C" in top.log_text                                     # the log: the map's
         assert session.alarms.state("ect") == "alarm" and session.alarms.unacked("ect")
         win.show_screen(ALARMS)
         win.frame()
@@ -164,7 +214,7 @@ def test_ui_wiring_alarm_readout_and_finder(env):
         import numpy as np
         from mapping_helpers import ram
         mapper = session.mapper
-        assert mapper.rank_against("rpm") == [] and "sweep continuously" in mapper.console()
+        assert mapper.rank_against("rpm") == [] and "0 sweeps so far" in mapper.console()
         for i in range(30):
             mapper._hist[:-1] = mapper._hist[1:]
             mapper._hist[-1] = ram(rpm=800 + 150 * (i % 9), noise=i)

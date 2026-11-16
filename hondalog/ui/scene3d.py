@@ -97,8 +97,18 @@ class MapModel:
 
     def locate(self, rpm: float, kpa: float):
         """Bilinear position on the surface: (x, y, z, i, j, value)."""
-        fx = float(np.clip(np.interp(rpm, self.rpm, np.arange(self.nx)), 0, self.nx - 1.001))
-        fy = float(np.clip(np.interp(kpa, self.map, np.arange(self.ny)), 0, self.ny - 1.001))
+        fx = float(np.interp(rpm, self.rpm, np.arange(self.nx)))
+        fy = float(np.interp(kpa, self.map, np.arange(self.ny)))
+        x, y, h, value = self.at_index(fx, fy)
+        ni = int(round(min(max(fx, 0.0), self.nx - 1.001)))
+        nj = int(round(min(max(fy, 0.0), self.ny - 1.001)))
+        return x, y, h, ni, nj, value
+
+    def at_index(self, fx: float, fy: float):
+        """The surface at a fractional cell index (column = RPM, row = MAP),
+        as ``tuning.TableTracer`` gives it: (x, y, z, value), bilinear."""
+        fx = float(np.clip(fx, 0, self.nx - 1.001))
+        fy = float(np.clip(fy, 0, self.ny - 1.001))
         i, j = int(fx), int(fy)
         a, b = fx - i, fy - j
 
@@ -111,7 +121,7 @@ class MapModel:
         ni, nj = int(round(fx)), int(round(fy))
         value = float(self.hits[nj, ni]) if self.mode == "hist" else float(
             lerp(np.nan_to_num(self.z)))
-        return x, y, h, ni, nj, value
+        return x, y, h, value
 
     def z_ticks(self):
         """Five (height 0..0.9, label) pairs for the Z axis."""
@@ -480,6 +490,38 @@ class MapScene(QWidget):
         if pos != self.live:
             self.live = pos
             self.view.live_changed()
+
+    def set_track(self, cursor, trail) -> None:
+        """The live point and its trail from a ``tuning.TableTracer``:
+        ``cursor`` is (col, row) as fractional cell indices or None, ``trail``
+        the tracer's ``trail()`` rows (col, row, age, alpha), oldest first.
+        The scene draws them; it keeps no history of its own for this."""
+        if cursor is None:
+            if self.live is not None or self.trail_n:
+                self.live, self.trail_n = None, 0
+                self.view.live_changed()
+            return
+        model = self.model
+        x, y, h, _ = model.at_index(cursor[0], cursor[1])
+        pos = (x, y, h + 0.03)
+        n = len(trail)
+        if n > 60:                              # the scene draws 60 spheres: thin an older, denser trail
+            trail = trail[np.linspace(0, n - 1, 60).astype(int)]
+            n = 60
+        for k in range(n):
+            tx, ty, th, _ = model.at_index(float(trail[k, 0]), float(trail[k, 1]))
+            self.trail[60 - n + k] = (tx, ty, th + 0.03)
+        changed = pos != self.live or n != self.trail_n
+        self.live, self.trail_n = pos, n
+        if changed or n:
+            self.view.live_changed()
+
+    def set_model(self, model: MapModel) -> None:
+        """Another table with other axes (a ROM was opened): start over."""
+        self.model = model
+        self.live, self.trail_n = None, 0
+        self._built_rev = -1
+        self.refresh()
 
     def refresh(self) -> None:
         """Rebuild geometry if the model or theme changed since the last build."""
@@ -900,7 +942,7 @@ class _FlatView(QWidget):
                        Qt.AlignVCenter | Qt.AlignRight, f"{model.map[j]:g}")
         p.setFont(title)
         p.drawText(QRectF(g.x(), g.bottom() + 26, g.width(), 22), Qt.AlignCenter, "RPM")
-        p.drawText(QRectF(4, g.y() - 24, 200, 20), Qt.AlignVCenter | Qt.AlignLeft,
+        p.drawText(QRectF(4, g.y() - 24, 420, 20), Qt.AlignVCenter | Qt.AlignLeft,
                    f"MAP kPa ↓   cells: {model.z_title()}")
         if model.mode == "stall":
             p.setRenderHint(QPainter.Antialiasing, True)

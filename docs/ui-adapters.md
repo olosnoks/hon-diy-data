@@ -58,17 +58,10 @@ Things the wired adapters add that the screens reach with `getattr` (so the
 demo objects need not have them): `ecu.link_text()`, `ecu.channel_rates()`,
 `ecu.first_contact(port)`, `ecu.set_expert_unlock(on)`, `mapper.set_expert(on)`,
 `mapper.rank_against(channel)`, `alarms.marks_itself`, `tables.open(rom,
-definition)`, `tables.editor`.
+definition)`, `tables.editor` and the rest of `RomTableModel` (see TableModel).
 
 What is not bound yet:
 
-- `ReplaySession` rides on `LogView.replay`, but the Replay screen still
-  draws from the `LogView` arrays with its own decimation and cursor code.
-- `mapper.rank_against()` (the correlation finder on the sweep history) has
-  no button.
-- The Tune screen reads its table list once at start: a ROM is opened with
-  `--rom` / `--definition`, not from inside the app. `TableTracer` is not
-  used; the screen's own live cursor does that job.
 - Captures on the box's SD card are fetched with `hondalog-bb fetch`.
 
 ### ChannelSource / Connectable (W1, W2)
@@ -159,6 +152,8 @@ def analyze(self, view) -> Forensics  # order of loss, "held up", reading, banne
 def recent(self, stalls_only=False) -> Sequence          # newest first
 def drives(self) -> Sequence[DriveRow]                   # the drive picker's list
 def import_file(self, path)                              # CSV / MSL / MLG -> a new drive
+def delete(self, ref, allow_keep=False) -> str           # a drive (all of it) or a capture (its entry)
+def set_keep(self, ref, keep) -> None                    # mark a drive keep
 ```
 
 There are no log files to browse any more: recordings are drives in
@@ -171,7 +166,31 @@ have `.name` (`drive_2026_11_16_0712`, `stall_20261116_071455`).
 Replay's Open button shows `ui/drivepicker.DrivePicker`: `drives()` as a
 list (each drive followed by its captures, then `.bbx` files), a search box
 over `DriveRow.text`, and "Import file", which calls `import_file` and opens
-what it returns.
+what it returns. "Delete…" (or Del) asks, then calls `delete(row.ref)`:
+`hondalog.data.retention.delete`, the code behind `hondalog-log rm` (a drive
+being recorded is refused, the freed pages go through the incremental
+vacuum). A row with `DriveRow.keep` asks a second time and passes
+`allow_keep=True`. "Keep" calls `set_keep`.
+
+**Replay and `ReplaySession`.** A `LogView` from the database carries W4's
+`ReplaySession` on the same log (`view.replay`), the log time of the view's
+zero (`view.origin`) and, per view id, the log's channel name and scale
+(`view.names`: the black box tach is `bb_rpm_tach / 30`). `ui/replaymodel.py`
+(`ReplayModel`, no Qt) is the layer between the two vocabularies; the Replay
+screen draws and reads only through it:
+
+| the screen | `ReplayModel` | `ReplaySession` |
+|---|---|---|
+| lane traces, one min/max pair per pixel column | `trace(id, columns)` | `trace` (`envelope` / `LodPyramid`) |
+| the window: zoom, pan, whole drive | `zoom`, `pan`, `set_window`, `show_all`, `reveal` | `zoom`, `set_view` |
+| cursors A and B, lane readouts and deltas | `set_cursor(t, "a"/"b")`, `readouts(ids, full=False)` | `set_cursor`, `readouts` |
+| `[` `]`, the Jump segment | `jump(±1)`, `events()`, `add_event` (order-of-loss rows) | `jump_event`, `event_list`, `add_event` |
+| Compare: a second drive in grey | `set_overlay(view, align)`, `align_overlay`, `nudge_overlay`, `overlay_trace` | `set_overlay`, `align_overlay`, `shift_overlay`, `overlay_trace` |
+
+A view without a log (the demo capture, a `.bbx` file) gets a session built
+from its arrays (`replaymodel.session_from_view`), so there is one code path.
+The live lanes (no file open) still read the bus history. The arrays in the
+`LogView` remain what `order_of_loss` and the lane scaling use.
 
 `LogView` holds per-channel time and value arrays (`t[id]`, `data[id]`), so
 1 kHz black-box channels and 10 Hz ECU channels sit in one view at their own
@@ -222,6 +241,24 @@ def wizard_back(self) -> None
 def wizard_retry(self) -> None
 ```
 
+The correlation finder (`RankCard`, R on the Raw tools screen) uses four
+more methods, on both shipped sessions:
+
+```python
+def rank_references(self) -> Sequence[RankReference]   # channels of the map (verified first), then the shapes
+def rank(self, reference_key, top=8) -> Sequence[RankRow]   # W3 correlate on sweep_recording(); [] + console() says why
+def assign_targets(self) -> Sequence[tuple[str, str]]  # (channel name, "label (name)  now 0x14")
+def assign(self, row: RankRow, channel) -> str         # mapedit.update_channel + reload; a line for the user
+map_revision: int                                      # bumps when mapped() would answer differently
+```
+
+`rank` is `correlate.rank_against_channel` for a channel key and
+`correlate.rank_shape` over the whole sweep history for `shape:rise` /
+`shape:fall`. `MappingSession.assign` writes addr, length and byte order
+through `mapping.mapedit.update_channel` (unverified, old evidence dropped,
+version bumped; the shipped map is refused) and reloads the map.
+`rank_against(channel)` remains as the short form.
+
 `WizardCard` is a host: it renders `WizardView` (five numbered steps, one
 instruction box, a target list or a candidate table, three buttons) and calls
 the four `wizard_*` methods. W3's wizard needs no UI change as long as it
@@ -243,11 +280,48 @@ def save(self, path) -> None
 def can_write_chip(self) -> bool
 ```
 
+What `RomTableModel` adds, which the Tune screen reaches with `getattr` (the
+demo tables have none of it, and the buttons are then disabled):
+
+```python
+layout: int                                # bumps when tables() or the axes changed: the screen rebuilds
+def open(self, rom, definition=None) -> str            # '' or why not; the last definition is the default
+def load_definition(self, path) -> str                 # .xdf / .toml; reads the open ROM again with it
+rom_path, definition_path, loaded, dirty, can_undo, can_redo
+def redo(self) -> bool
+def status(self) -> dict                   # rom, definition, checksum (text), checksum_ok, dirty, warnings, problem
+def default_save_path(self) -> Path | None
+def save(self, path=None) -> str           # RomSession.save; ValueError with the reason when refused
+def burn_image(self, path, layout="doubled") -> str    # RomSession.burn_image; ValueError when refused
+editor                                     # the first table's TableEditor: axes for TableTracer and the histogram
+```
+
+The live cell, its trail on the grid and the point and trail on the surface
+are W5's `tuning.TableTracer` (`TableTracer.for_table(tables.editor)`, or on
+the sample grid's axes): `tracer.update(now, rpm, map)` once per new RPM
+sample, `pos.nearest` for the grid, `tracer.heat(now)` for the bars,
+`tracer.trail(now)` and the cursor's fractional index for
+`MapScene.set_track`. The Map 3D screen keeps `MapScene.set_live`.
+
 `cells` is a list of `(rpm_index, map_index)`. Bump `revision` on every
 change; the grid and the 3D surface reload on the next frame. Axis sizes are
 read from the model, so a real P28 table that is not 20 x 10 works without a
 UI change (rows are 24 px: more than 20 RPM rows needs a scroll or a smaller
 row, which is not built).
+
+## Display units
+
+`hondalog/ui/units.py` holds one `U` object (like the theme's `T`). The bus,
+the recorder, the database and the exports stay in the address map's units;
+a widget converts when it draws: `U.spec(spec)` is the channel as shown (unit,
+range, limits, decimals), `U.text(spec, v)` / `U.with_unit(spec, v)` format a
+bus value, `U.limit(spec, v)` a limit, `U.convert_text(text)` an alarm rule's
+own message. `U.revision` bumps on a change; `Tile.sync` compares it. The
+shell loads `units/<quantity>` from QSettings (default: the `US` preset, MAP
+in kPa) and `Shell.settings_menu` is the Settings > Units menu. An
+`AlarmEvent` carries `log_text`, the limit in the map's units, for the marker
+that goes into the log. Before the shell has loaded its settings `U.prefs` is
+None and nothing is converted.
 
 ## Demo mode
 

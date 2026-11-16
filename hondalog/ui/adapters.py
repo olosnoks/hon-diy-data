@@ -85,6 +85,7 @@ class AlarmEvent:
     t_start: float              # bus time
     t_end: float | None = None  # None while active
     acked: bool = False
+    log_text: str = ""          # limit_text in the map's own units, for a marker in the log
 
 
 @dataclass
@@ -183,6 +184,13 @@ class LogView:
     trigger_t: float | None = None              # stall time, None for plain logs
     align_residual_ms: float | None = None      # ECU vs black-box alignment
     live: bool = False
+    #: ``hondalog.analysis.ReplaySession`` on the log this view was read from
+    #: (None: the Replay screen builds one from the arrays above), with
+    #: ``origin`` = the log time of this view's zero and ``names`` = view id
+    #: -> (log channel name, scale) where the two differ
+    replay: object = None
+    origin: float = 0.0
+    names: dict = field(default_factory=dict)
 
     def span(self) -> tuple[float, float]:
         lo = min((float(t[0]) for t in self.t.values() if len(t)), default=0.0)
@@ -225,6 +233,8 @@ class DriveRow:
     stalls: int = 0
     notes: str = ""
     text: str = ""              # what a search looks through
+    keep: bool = False          # the drive is marked keep: deleting it asks twice
+    captures: int = 0           # captures inside a drive (deleted with it)
 
 
 @runtime_checkable
@@ -246,6 +256,15 @@ class LogReader(Protocol):
     def import_file(self, path):
         """Read a CSV / MSL / MLG file into the database as a new drive.
         Returns what ``read`` takes to open it."""
+
+    def delete(self, ref, allow_keep: bool = False) -> str:
+        """Delete a drive with everything recorded in it, or one capture
+        (only its entry; the drive stays). ``ref`` is a ``DriveRow.ref``.
+        Returns a line for the user. Raises ValueError with a message when it
+        cannot be done; a drive marked keep goes only with ``allow_keep``."""
+
+    def set_keep(self, ref, keep: bool) -> None:
+        """Mark a drive keep (or not): retention leaves it alone and deleting it asks twice."""
 
 
 # ---- observed map (Map 3D) --------------------------------------------------
@@ -278,6 +297,33 @@ class Candidate:
     score: float                # 0..1, how closely the byte followed the stimulus
     lo: int
     hi: int
+
+
+@dataclass
+class RankRow:
+    """One line of the correlation finder's answer: an address, read one way,
+    and how closely it followed the reference."""
+    addr: int
+    width: int = 1              # bytes
+    endian: str = "big"
+    inverse: bool = False       # compared as 1/x
+    label: str = ""             # "0x14 u8", "0x00 u16be 1/x"
+    score: float = 0.0          # 0..1
+    r: float = 0.0              # Pearson: positive = moves the same way as the reference
+    formula: str = ""           # least-squares fit to the reference, as map formula text
+    lo: int = 0                 # raw range seen in the sweeps
+    hi: int = 0
+    mapped: str = ""            # the channel the map already has on this address
+    note: str = ""              # "barely moves (2 counts)"
+
+
+@dataclass
+class RankReference:
+    """Something to rank addresses against: a channel of the map, or a shape."""
+    key: str                    # channel name, or "shape:rise" / "shape:fall"
+    label: str                  # "RPM", "Rises steadily"
+    kind: str = "channel"       # "channel" or "shape"
+    verified: bool = False      # a channel whose address has been proven
 
 
 @dataclass
@@ -345,6 +391,13 @@ class MapperSession(Protocol):
     def wizard_back(self) -> None: ...
 
     def wizard_retry(self) -> None: ...
+
+    # The correlation finder ("Rank addresses"). Both shipped sessions have
+    # it; the screen reaches these four with getattr.
+    #   rank_references() -> Sequence[RankReference]     what can be ranked against
+    #   rank(reference_key, top=8) -> Sequence[RankRow]  best first; console() says why when it is empty
+    #   assign_targets() -> Sequence[tuple[str, str]]    (channel name, "label  now 0x12") to assign to
+    #   assign(row, channel_name) -> str                 write it through the map editor; a line for the user
 
 
 # ---- tuning tables ----------------------------------------------------------

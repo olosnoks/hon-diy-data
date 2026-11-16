@@ -31,6 +31,16 @@ def synth(synth_path):
         yield log
 
 
+@pytest.fixture(autouse=True)
+def _base_units():
+    """Display units are one process-wide object (like the theme): a test
+    that starts the app sets them to the user's. Put them back."""
+    yield
+    module = sys.modules.get("hondalog.ui.units")
+    if module is not None:
+        module.U.set(None)
+
+
 @pytest.fixture(scope="session")
 def app():
     """One QApplication for the whole run (pytest-qt's qapp if it is there)."""
@@ -55,7 +65,7 @@ def settings(tmp_path):
 @pytest.fixture
 def shell(app, settings):
     """The whole app on frozen demo data at 1366x768."""
-    from hondalog.ui import theme
+    from hondalog.ui import theme, units
     from hondalog.ui.main_window import Shell
     from hondalog.ui.session import build_session
     session = build_session(demo=True, demo_clock=lambda: 100.0)
@@ -70,6 +80,7 @@ def shell(app, settings):
     win.deleteLater()
     app.processEvents()
     theme.T.set("daylight")
+    units.U.set(None)                       # back to "as the address map has them"
 
 
 def spin(app, win, frames=2):

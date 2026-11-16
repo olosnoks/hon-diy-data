@@ -77,9 +77,17 @@ Rules that hold along it:
 - **Raw bytes.** Every K-line read is stored with the bytes the ECU sent,
   so `data.redecode` can decode an old drive with a corrected map.
 - **Drives.** A recording session is one or more drives on one clock. A
-  drive ends when recording stops or when the ECU has been silent for
-  `drive_gap_s` (120 s: key off); the next answer starts a new one. A drive
-  does not end while a capture window is open.
+  drive ends when recording stops or when nothing has shown the car to be
+  switched on for `drive_gap_s` (120 s): the ECU silent, and the black box
+  (if there is one) not seeing the key on. While the box sees IG1, ECU +B or
+  the engine turning (`live.blackbox_key_on`) the drive stays open and its
+  frames are recorded although the ECU is dead; that stall is one drive, not
+  an ECU drive and a "black box only" one cut at the 120 s mark. The next
+  sign of life starts a new drive: the ECU answering, or the key coming on
+  with the ECU still silent (`started_by` in the drive's meta). Between
+  drives nothing is recorded. `end_reason` is `key_off` when the box saw the
+  key go off, `link_lost` when only the ECU's silence is known. A drive does
+  not end while a capture window is open.
 - **One trigger path.** Stall rules, user rules, alarms with the `capture`
   action (`triggers.alarm_rule`), the manual button and a black box trigger
   (`Recorder.external_trigger`) all open a window in the same engine; firings
@@ -189,6 +197,7 @@ data.open_log(DriveRef | "db#name" | name | .csv | .msl | .mlg) -> Log
     data.redecode(log, amap) -> data.write_log(log, db) -> a new drive
 data.Library(db)            drives and captures from SQL, search, notes and tags
 data.RetentionPolicy        delete old drives, then incremental vacuum
+data.retention.delete       one drive or one capture by name (hondalog-log rm, the drive picker)
 blackbox.open_event(.bbx) -> the box's 1 kHz capture merged with the drive
                              that was being recorded (found by wall time in
                              `drives`; aligned by epoch_unix, else markers, else RPM)
@@ -216,7 +225,7 @@ one 33 ms timer. Details: `docs/ui-adapters.md`.
 | `hondalog-sim` | `hondalog.sim` | fake ECU on a pty, with faults |
 | `hondalog-firstcontact` | `hondalog.diag.firstcontact` | first time on the car: adapter, echo, protocol, block size, timing, ISO |
 | `hondalog-map` | `hondalog.mapping.__main__` | status, guided verification, address finder, map diff / hash / upgrade |
-| `hondalog-log` | `hondalog.logtool` | record (headless), list, info, export, compare, import, report, redecode, prune, vacuum, sql |
+| `hondalog-log` | `hondalog.logtool` | record (headless), list, info, export, compare, import, report, redecode, prune, rm, keep, vacuum, sql |
 | `hondalog-bb` | `hondalog.blackbox.__main__` | black box: live, list, fetch, info, csv, config, selftest, cal |
 | `hondalog-bbsim` | `hondalog.blackbox.sim` | fake black box on a pty |
 | `hondalog-tune` | `hondalog.tuning.cli` | ROM files: info, list, show, diff, convert, burn-image, burn |

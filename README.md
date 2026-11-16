@@ -63,6 +63,11 @@ open (`--rom`), the cells are the fuel table's own cells.
 |---|---|
 | ![Replay](docs/screenshots/replay-daylight.png) | ![mockup](docs/mockups/replay-stall-forensics.png) |
 
+Two cursors (A and B, with the change of every lane between them) and a
+second stall laid over the first in grey:
+
+![Replay: two cursors and a second drive](docs/screenshots/replay-compare-daylight.png)
+
 A stall caught on the simulated ECU, banner and capture opened in Replay:
 
 ![Stall banner](docs/screenshots/sim-stall-banner.png)
@@ -76,11 +81,21 @@ A stall caught on the simulated ECU, banner and capture opened in Replay:
 
 ![Raw tools on the simulated ECU](docs/screenshots/sim-rawtools.png)
 
+Rank addresses (R): what followed the throttle in the sweeps so far, ready
+to be assigned to a channel:
+
+![Rank addresses](docs/screenshots/rawtools-rank-daylight.png)
+
 ### Tuning table editor (chipped P28)
 
 | app | mockup |
 |---|---|
 | ![Tune](docs/screenshots/tune-daylight.png) | ![mockup](docs/mockups/tune-table-p28.png) |
+
+With a ROM opened from the app: the definition's own tables and axes, the
+live cell with its trail on the table and the surface, the ROM card:
+
+![Tune with a ROM open](docs/screenshots/tune-rom-daylight.png)
 
 ### Status bar and alarm states
 
@@ -218,7 +233,11 @@ bytes the ECU sent. It is committed every half second, so a crash or a dead
 laptop battery costs at most the last second: the next start shows that
 drive as "crashed", with everything up to the last commit in it. A drive
 ends when you stop recording or when the ECU has been silent for two minutes
-(key off); the next answer starts a new drive. Logs from 0.1.0 (`.csv`) and
+(key off); the next answer starts a new drive. With the black box connected
+the drive stays open, and the box keeps being recorded, for as long as it sees
+the key on (IG1, ECU +B or the engine turning): a stall with the key on and the
+ECU dead is all in one drive, and turning the key on with the ECU still dead
+starts one. Logs from 0.1.0 (`.csv`) and
 MegaLogViewer files are read in with "Import file" or `hondalog-log import`.
 
 **Stall catcher.** While recording, once RPM has been above 400:
@@ -249,10 +268,21 @@ been verified on the car yet.
 **Replay (F4).** O opens the drive picker: every drive, its stall captures
 under it, black box captures (`.bbx`), a search box over names, notes and
 markers, and "Import file" for an old `.csv` or a MegaLogViewer
-`.msl`/`.mlg`. With nothing open it follows live data. Stacked lanes with one cursor: click or drag, arrows step 0.1 s
-(Shift 1 s), `[` and `]` jump between events, P plays, `+` and `-` zoom, D
-drops a second cursor for a time difference. For a stall capture the right
-side lists what left its normal range first.
+`.msl`/`.mlg`. With nothing open it follows live data. Stacked lanes with one
+cursor: click or drag, arrows step 0.1 s (Shift 1 s), `[` and `]` jump between
+events (markers, triggers, alarms and, for a stall, each signal that fell), P
+plays. `+` and `-` zoom around the cursor and the mouse wheel around the
+pointer; Ctrl+arrows, Shift+wheel or a drag with the right button pan; `0`
+shows the whole drive. However long the drive, a lane is drawn as one min/max
+pair per pixel column, so an hour of 1 kHz black box data scrolls like a
+minute and a dropout one sample long still shows. D drops a second cursor (B)
+where the first is, Shift+click moves it: the header then shows the time
+between the two and every lane how much it changed. C lays a second drive or
+capture over the first in grey ("Compare"): two stalls are lined up on the
+stall, anything else on the first sample; C again (or A) picks what to line
+them up on (first sample, first marker, the stall, RPM rising through 400),
+`,` and `.` slide it by 0.1 s (`<` `>` by 1 s), Shift+C removes it. For a
+stall capture the right side lists what left its normal range first.
 
 **Raw tools (F5).** S sweeps all 256 bytes and keeps going. Yellow = changed
 in the last sweep, underlined = changed earlier, dashed = in the address
@@ -266,11 +296,38 @@ it tells you what to do, judges the recorded data, and on a pass writes
 `status = "verified"` and the evidence into your address map. When the
 check fails it lists the addresses that did behave as expected.
 
-**Tune (F6).** Table grid with a 3D surface beside it. Start with
-`hondalog --rom tuned.bin --definition p28.toml` (or `.xdf`) to edit a ROM:
-edits go through the ROM session's undo, "Save .bin" writes a new image
-with the checksum fixed, and the live cursor follows RPM and MAP. Without
-a ROM, or if it cannot be read, the read-only sample tables are shown.
+R shows **Rank addresses** in the wizard's place: the correlation finder on
+the sweeps so far. Pick what to compare with: a channel of the map (a
+verified one is the best reference; its own bytes are left out), or a shape
+you make by hand ("rises steadily": clear with C, press the pedal slowly or
+let the engine warm while it sweeps). G ranks: each address as a byte and as
+a 16-bit value in both byte orders, how closely it followed (and which way
+it runs), the range it covered, its value now and the channel the map
+already has there. A click selects the byte in the grid. "Assign to
+channel…" asks, then writes the address, length and byte order into your map
+through the map editor: the channel becomes unverified, evidence for the old
+address is dropped, the map version moves on, and the formula is left for
+you to check with the guided check.
+
+**Tune (F6).** Table grid with a 3D surface beside it. "Definition…" loads
+a ROM definition (a TunerPro `.xdf` or a hondalog `.toml`) and "Open ROM…" a
+ROM image; the table list, the grid and the surface are rebuilt from them
+(more than four tables: one button with a menu, T steps through them). The
+definition is remembered for the next ROM, and loading another one reads the
+open ROM again with it. `hondalog --rom tuned.bin --definition p28.toml`
+does the same from the command line. The ROM card says which file and
+definition are open, whether the checksum is right and whether there are
+unsaved edits; opening something else with unsaved edits asks first. Edits
+go through the ROM session: Undo (Ctrl+Z) and Redo (Ctrl+Y), "Save .bin"
+(Ctrl+S) writes a new image with the checksum fixed and never overwrites the
+ROM that was opened, and "Burn image…" writes the chip-ready 64 KB file only
+if the session's checks pass (size, not blank, checksum, signature): save
+first, because an edit makes the checksum wrong. While the engine runs the
+table shows where it is: the live cell is outlined, the cells it has been
+through in the last 7 s carry a bar that shortens as the visit ages, and the
+surface has the point and its trail (W5's `TableTracer`, on the table's own
+axes); "at edge" means RPM or MAP is off the table. Without a ROM, or if it
+cannot be read, the read-only sample tables are shown.
 
 **Alarms (F7).** The shape key, the live alarm list and the limits. The
 alarms are the `[[alarm]]` rules in the address map; the black box rails
@@ -388,8 +445,17 @@ a marker and `"capture"` saves a capture around it, like a stall.
 Trigger rules (`hondalog/triggers/`) use the same expressions, including
 the ones with history: `when = "rate(rpm) < -1500 and rpm > 300"`.
 
-Temperatures are in °C, pressure in kPa, speed in km/h in the map and in logs.
-`hondalog/units.py` converts for display (°F, psi, inHg, mph, AFR).
+**Units.** Temperatures are in °C, pressure in kPa, speed in km/h in the map,
+in the database and in every export, whatever the screen shows. The screen
+converts for display: the default is US units (mph, °F, gal/h), with MAP and
+baro left in kPa because that is what Honda tables and tuning guides use.
+Click the ECU chip, then Settings > Units, to pick a preset (US, Metric) or
+one quantity at a time (speed, temperature, pressure in kPa / psi / inHg /
+bar, AFR or lambda, fuel flow, distance). The choice is remembered. It applies
+to the tiles, the Drive view, the Replay readouts, alarm texts and the limits
+table; volts, %, ms and rpm have nothing to convert. The axes of Map 3D and
+Tune are the tables' own breakpoints and stay in kPa. A marker that an alarm
+drops into the log is written in the map's units.
 
 ## Troubleshooting
 
@@ -461,9 +527,18 @@ hondalog-log import  old_log.csv          # 0.1.0 CSV, MSL or MLG -> a new drive
 hondalog-log report  stall_20261116_071455   # one-page HTML report
 hondalog-log redecode DRIVE               # decode the raw bytes with your current map -> a new drive
 hondalog-log prune   --days 90 --yes      # delete old drives (those with captures or notes are kept)
+hondalog-log rm      DRIVE_OR_CAPTURE     # delete one by name; asks first (--yes: do not ask)
+hondalog-log keep    DRIVE [--off]        # mark a drive keep: prune skips it, rm asks a second time
 hondalog-log vacuum  [--full]             # give freed space back to the disk, check the file
 hondalog-log sql     "SELECT ..."         # run a query; without one, the sqlite3 shell
 ```
+
+`rm` on a drive removes everything recorded in it, its captures included, and
+gives the space back to the disk (`--full` rewrites the file compactly). On a
+capture it removes only the capture's entry: the drive and its data stay. A
+drive that is being recorded is refused. A drive marked keep asks you to type
+its name (`--force` skips that question; `--yes` alone does not). The drive
+picker in the app (Replay, O) has the same Delete and a Keep button.
 
 DRIVE is a drive name (`drive_2026_11_16_0712`), a capture name
 (`stall_20261116_071455`), `last`, `other.db#drive_...` for a drive in another
@@ -584,9 +659,19 @@ named `bb_...`.
 **Build and flash** (needs internet for the first build):
 
 ```sh
-pip install platformio
-cd firmware/blackbox && pio run -t upload
+scripts/build-firmware.sh blackbox                        # host tests, then the build
+scripts/build-firmware.sh blackbox --flash /dev/ttyACM0   # ... and flash it
 ```
+
+The script installs PlatformIO into `~/.hondalog-pio` the first time. If
+ESP-IDF 5.3 is already on the machine, name the script that sets it up and
+PlatformIO is left out: `HH_IDF_ENV=~/esp/esp-idf/export.sh
+scripts/build-firmware.sh blackbox` (it runs `. $HH_IDF_ENV && idf.py -B build
+build` in `firmware/blackbox`). For the handheld it also runs the PC simulator
+checks (`make -C firmware/handheld/sim lvgl test`, needs `libpng-dev`, which
+the script installs) when that folder is in the checkout. Logs go to
+`build-logs/`. By hand: `pip install platformio; cd firmware/blackbox && pio
+run -t upload`.
 
 **Other commands:** `hondalog-bb list`, `config [--set key=value] [--save]`,
 `selftest`, `csv FILE`, `cal RAIL --low METER SHOWN --high METER SHOWN`.
@@ -713,7 +798,8 @@ same model in-process, with ISO 9141-2.
 ## ROM tuning tools (chipped P28)
 
 `hondalog/tuning/` edits ROM files for the chipped OBD1 P28. The Tune screen
-edits tables (`hondalog --rom FILE --definition FILE`); the command
+edits tables ("Open ROM…" and "Definition…", or `hondalog --rom FILE
+--definition FILE`); the command
 `hondalog-tune` covers the file work:
 
 ```sh

@@ -461,5 +461,79 @@ def test_drive_picker_lists_searches_and_imports(app, tmp_path):
 
     empty = DrivePicker(wired.DriveReader(directory=tmp_path / "nowhere"))
     assert empty.tree.topLevelItemCount() == 0 and "No drives recorded yet" in empty.empty.text()
+    assert not empty.delete_btn.isEnabled() and not empty.keep_btn.isEnabled()
     for dialog in (picker, empty):
         dialog.deleteLater()
+
+
+def test_drive_picker_deletes_a_drive_or_a_capture_after_asking(app, tmp_path):
+    """Delete in the picker: one question that says what goes, a second one
+    for a drive marked keep, and the same code path as ``hondalog-log rm``."""
+    from datetime import datetime
+    from hondalog.data import Column, db, new_drive
+    from hondalog.ui.drivepicker import DrivePicker
+    database = tmp_path / "hondalog.db"
+    for day in (10, 11, 12):
+        started = datetime(2026, 11, day, 7, 12).timestamp()
+        with new_drive(database, {"started_unix": started, "epoch_unix": started}) as w:
+            w.add_stream("ecu/00+2", [Column("rpm", units="rpm")], source="ecu", raw_len=2)
+            for i in range(3000 if day == 10 else 300):
+                w.append("ecu/00+2", i * 0.1, [800.0], b"\x00\x00")
+            if day == 12:
+                w.capture("stall", 20.0, 5.0, 25.0, reason="rpm", message="rpm dropped to 0",
+                          wall=datetime(2026, 11, 12, 7, 12, 20))
+    (tmp_path / "ev000007.bbx").write_bytes(b"not read here")
+    logs = wired.DriveReader(directory=tmp_path)
+    picker = DrivePicker(logs)
+    asked: list[tuple[str, str]] = []
+    answer = [False]
+    picker.confirm = lambda title, text: (asked.append((title, text)), answer[0])[1]
+
+    def names():
+        return [picker.tree.topLevelItem(i).text(0).strip() for i in range(picker.tree.topLevelItemCount())]
+
+    def pick(name):
+        picker.tree.setCurrentItem(picker.tree.topLevelItem(names().index(name)))
+
+    # "no" deletes nothing
+    pick("drive_2026_11_10_0712")
+    assert picker.delete_btn.isEnabled() and not picker.delete_current()
+    assert "Delete drive_2026_11_10_0712?" in asked[-1][1] and "cannot be undone" in asked[-1][1]
+    assert len(names()) == 5
+
+    # a capture: only its entry
+    answer[0] = True
+    pick("stall_20261112_071220")
+    assert picker.delete_current() and "stall_20261112_071220" not in names()
+    assert "Only the capture's entry goes" in asked[-1][1] and "untouched" in picker.empty.text()
+    assert "drive_2026_11_12_0712" in names() and logs.read("drive_2026_11_12_0712").span()[1] > 29
+
+    # a drive: gone from the list and the file, the space given back
+    size = db.file_size(database)
+    pick("drive_2026_11_10_0712")
+    assert picker.delete_current() and "drive_2026_11_10_0712" not in names()
+    assert db.file_size(database) < size and "Deleted drive_2026_11_10_0712" in picker.empty.text()
+    with pytest.raises(ValueError):
+        logs.read("drive_2026_11_10_0712")
+
+    # keep: the button marks it, and deleting asks a second time
+    pick("drive_2026_11_11_0712")
+    assert picker.keep_btn.isEnabled() and not picker.keep_btn.isChecked()
+    picker.set_keep(True)
+    assert picker.current_row().name == "drive_2026_11_11_0712" and picker.current_row().keep
+    assert picker.keep_btn.isChecked() and "keep" in picker.tree.currentItem().text(3)
+    asked.clear()
+    replies = iter([True, False])
+    picker.confirm = lambda title, text: (asked.append((title, text)), next(replies))[1]
+    assert not picker.delete_current() and "drive_2026_11_11_0712" in names()
+    assert [title for title, _ in asked] == ["Delete", "Marked keep"]
+    picker.confirm = lambda title, text: True
+    assert picker.delete_current() and names() == ["drive_2026_11_12_0712", "ev000007.bbx"]
+
+    # a .bbx file is not in the database: no delete, no keep
+    pick("ev000007.bbx")
+    assert not picker.delete_btn.isEnabled() and not picker.keep_btn.isEnabled()
+    assert not picker.delete_current()
+    with pytest.raises(ValueError, match="a file, not a drive"):
+        logs.delete(tmp_path / "ev000007.bbx")
+    picker.deleteLater()

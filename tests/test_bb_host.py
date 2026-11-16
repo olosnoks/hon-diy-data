@@ -3,6 +3,7 @@ reader, clock sync, alignment with the ECU log, and the replay importer."""
 
 import io
 import os
+import struct
 import threading
 import time
 from datetime import datetime
@@ -424,3 +425,62 @@ def test_bench_event_on_both_paths_lines_up_within_20ms(tmp_path):
     assert log.meta["bb_ecu_log"] == str(rec.path)
     drop_us = next(us for us, sig, what in timeline(log.blackbox) if sig == "ecub" and what == "fell below 6 V")
     assert abs(float(log.alignment.to_ecu_s(drop_us)) - t_fail) < 0.020
+
+
+# ---- the cheap model the app runs next to a simulated ECU -------------------
+
+@pytest.mark.parametrize("fault,code", [("main_relay", F.R_ECUB_DROP), ("igniter", F.R_TACH_STOP),
+                                        ("fuel_pump", F.R_PUMP_DROP), ("key_off", F.R_IG1_DROP),
+                                        ("battery", F.R_VBAT_DIP)])
+def test_one_reading_per_ms_model_keeps_every_fault(fault, code, tmp_path):
+    """``Car(sub=1)`` gives the box one ADC reading per millisecond instead of
+    five. The rails, the pulses and the triggers must come out the same."""
+    cfg = Config()
+    cfg.set("pre_s", 5)
+    cfg.set("post_s", 3)
+    cheap = SimDevice(Car(fault, 6.0, sub=1), cfg, out_dir=tmp_path / "cheap")
+    full = SimDevice(Car(fault, 6.0), cfg, out_dir=tmp_path / "full")
+    for dev in (cheap, full):
+        dev.advance(5.5)
+    for a, b in zip(cheap.core.latest[1][0], full.core.latest[1][0]):
+        assert abs(a - b) < 120                                 # the same rails within the noise (mV)
+    assert abs(cheap.core.latest[1][3] - full.core.latest[1][3]) <= 30      # tach rpm
+    assert cheap.core.latest[1][1][0] * 100 <= cheap.core.latest[1][0][0]   # min <= mean, 100 mV steps
+    for dev in (cheap, full):
+        dev.advance(11.0)
+    names = lambda dev: [e.code for e in dev.core.events if 1 <= e.code <= F.R_MAX_TRIGGER]  # noqa: E731
+    assert code in names(cheap) and code in names(full)
+    assert len(cheap.core.finished) == len(full.core.finished) == 1
+    assert diagnose(read_event(cheap.core.finished[0])).cause == diagnose(read_event(full.core.finished[0])).cause
+
+
+def test_car_refuses_an_unknown_sub_rate():
+    with pytest.raises(ValueError):
+        Car(None, sub=3)
+
+
+def test_sim_port_sleeps_until_a_frame_is_due_and_wakes_for_a_reply():
+    """A read on the simulated port blocks like one on the real port: it does
+    not spin every 2 ms, and a reply to something written from another thread
+    is handed over at once, not at the next live frame."""
+    dev = SimDevice(Car(None, sub=1))
+    port = SimPort(dev)
+    port.open()
+    port.read(0.05)
+    calls = []
+    real = dev.advance
+    dev.advance = lambda t: (calls.append(t), real(t))[1]
+    got = b""
+    end = time.monotonic() + 0.5
+    while time.monotonic() < end:
+        got += port.read(0.05)
+    frames = [f for f in F.Deframer().feed(got) if f[0] == F.F_LIVE]
+    assert 20 <= len(frames) <= 27                              # 50 Hz for half a second
+    assert len(calls) < 80                                      # was 250: one wake-up per frame, not per 2 ms
+
+    dev.rx(F.frame_encode(F.F_LIVE_RATE, struct.pack("<H", 0), 0))      # no live frames: nothing is due
+    port.read(0.01)
+    threading.Timer(0.05, lambda: dev.rx(F.frame_encode(F.F_GET_HELLO, b"", 1))).start()
+    start = time.monotonic()
+    reply = port.read(1.0)
+    assert reply and time.monotonic() - start < 0.5

@@ -15,6 +15,8 @@ No widgets in here. See docs/ui-adapters.md.
 
 from __future__ import annotations
 
+import collections
+
 import math
 import threading
 import time
@@ -32,6 +34,7 @@ from ..protocol import ProtocolError
 from ..transport import BUILTIN_SIM, SIM_SYMLINK, list_ports, make_transport
 from . import adapters as ad
 from .bus import ChannelBus, ChannelSpec
+from .units import U
 
 # ---- display details the 0.1.0 address map does not carry -------------------
 
@@ -397,17 +400,21 @@ class LimitAlarms:
         self.revision = 0
 
     @staticmethod
-    def _check(spec: ChannelSpec, v: float):
+    def _check(spec: ChannelSpec, v: float, shown: bool = True):
+        """(level, text). ``shown``: the limit in the display unit; False: in
+        the channel's own unit (what goes into the log)."""
+        def text(word: str, bound: float) -> str:
+            return f"{word} {U.limit(spec, bound)}" if shown else f"{word} {bound:g} {spec.units}".strip()
         if spec.alarm_lo is not None and v < spec.alarm_lo:
-            return "alarm", f"below {spec.alarm_lo:g} {spec.units}".strip()
+            return "alarm", text("below", spec.alarm_lo)
         if spec.alarm_hi is not None and v > spec.alarm_hi:
             if spec.is_flag:
                 return "alarm", "is ON"
-            return "alarm", f"above {spec.alarm_hi:g} {spec.units}".strip()
+            return "alarm", text("above", spec.alarm_hi)
         if spec.warn_lo is not None and v < spec.warn_lo:
-            return "warn", f"below {spec.warn_lo:g} {spec.units}".strip()
+            return "warn", text("below", spec.warn_lo)
         if spec.warn_hi is not None and v > spec.warn_hi:
-            return "warn", f"above {spec.warn_hi:g} {spec.units}".strip()
+            return "warn", text("above", spec.warn_hi)
         return "", ""
 
     def evaluate(self, bus: ChannelBus, now: float):
@@ -439,8 +446,8 @@ class LimitAlarms:
             if level:
                 rec.event = ad.AlarmEvent(
                     spec.id, "BLACK BOX" if spec.source == "BB" else spec.source,
-                    spec.label.upper(), level,
-                    f"{spec.format(state.value)} {spec.units}".strip(), limit, now)
+                    spec.label.upper(), level, U.with_unit(spec, state.value), limit, now,
+                    log_text=self._check(spec, state.value, shown=False)[1])
                 if level == "alarm":
                     started.append(rec.event)
             self.revision += 1
@@ -474,11 +481,15 @@ class LimitAlarms:
             s = state.spec
             if s.is_flag:
                 continue
+            shown = U.spec(s)                   # the limits in the display unit
+
             def lim(lo, hi):
-                parts = [f"<{lo:g}" if lo is not None else "", f">{hi:g}" if hi is not None else ""]
+                parts = [f"<{round(lo, 2):g}" if lo is not None else "",
+                         f">{round(hi, 2):g}" if hi is not None else ""]
                 return " ".join(x for x in parts if x).replace("-", "\u2212")
-            warn, alarm = lim(s.warn_lo, s.warn_hi), lim(s.alarm_lo, s.alarm_hi)
-            rows.append(ad.LimitRow(("BB " if s.source == "BB" else "") + s.label,
+            warn, alarm = lim(shown.warn_lo, shown.warn_hi), lim(shown.alarm_lo, shown.alarm_hi)
+            unit = f" {shown.units}" if shown.units != s.units else ""
+            rows.append(ad.LimitRow(("BB " if s.source == "BB" else "") + s.label + unit,
                                     warn or "—", alarm or "—"))
         return rows
 
@@ -580,6 +591,12 @@ class CsvLogReader:
     def import_file(self, path):
         return Path(path)                   # the demo has no database: the file is opened as it is
 
+    def delete(self, ref, allow_keep: bool = False) -> str:
+        raise ValueError("the demo has no database: there is nothing to delete")
+
+    def set_keep(self, ref, keep: bool) -> None:
+        raise ValueError("the demo has no database")
+
 
 def order_of_loss(view: ad.LogView, pre_s: float = 30.0, hold_s: float = 0.2) -> ad.Forensics:
     """For each channel, the first time it leaves its normal band in the pre_s
@@ -617,13 +634,13 @@ def order_of_loss(view: ad.LogView, pre_s: float = 30.0, hold_s: float = 0.2) ->
         if hit is None:
             held.append(spec.label)
             continue
-        was = spec.format(float(np.median(base)))
+        was = U.text(spec, float(np.median(base)))
         if spec.is_flag:
             what = "dropped to OFF" if v[hit] < 0.5 else "went ON"
         elif v[hit] < lo:
-            what = f"fell below {spec.format(lo)} {spec.units} (was {was})"
+            what = f"fell below {U.with_unit(spec, lo)} (was {was})"
         else:
-            what = f"rose above {spec.format(hi)} {spec.units} (was {was})"
+            what = f"rose above {U.with_unit(spec, hi)} (was {was})"
         rows.append(ad.LossRow(float(rel[hit]), cid, tag, what))
     rows.sort(key=lambda r: r.t)
     out = ad.Forensics(loss=rows + [ad.LossRow(0.0, "", "STALL", "trigger")])
@@ -792,6 +809,8 @@ class PollerMapper:
         self.sweeping = False
         self.revision = 0
         self._hist = np.full((self.HIST, 256), -1, dtype=np.int16)
+        self._sweep_t: collections.deque = collections.deque(maxlen=self.HIST)     # when each row was finished
+        self.map_revision = 0           # bumps when mapped() would answer differently
         self._pending: list = []
         self._left = 0
         self._t0 = 0.0
@@ -871,6 +890,7 @@ class PollerMapper:
             self.sweep_s = time.monotonic() - self._t0
             self._hist[:-1] = self._hist[1:]
             self._hist[-1] = self.cur
+            self._sweep_t.append(time.monotonic())
             if self._step == 2:
                 self._trace.append((time.monotonic(), self.cur.copy()))
             self.revision += 1
@@ -884,8 +904,96 @@ class PollerMapper:
         self.minv[:], self.maxv[:] = 255, 0
         self.minv[known] = self.maxv[known] = self.cur[known]
         self._hist[:] = -1
+        self._sweep_t.clear()
         self.sweeps = 0
         self.revision += 1
+
+    # -- the correlation finder on the sweep history ("Rank addresses") --
+
+    SHAPES = (("shape:rise", "Rises steadily"), ("shape:fall", "Falls steadily"))
+    MIN_SWEEPS = 5
+
+    def sweep_recording(self):
+        """The grid's sweep history as a W3 ``SweepRecording`` (oldest first)."""
+        from ..mapping.sweeps import from_rows
+        rows = [row for row in self._hist if (row >= 0).any()]
+        return from_rows(rows, list(self._sweep_t)[-len(rows):] if rows else [])
+
+    def _reference_channels(self) -> list:
+        """(name, label, verified) of the channels that can serve as a reference."""
+        amap = getattr(self.ecu, "amap", None)
+        if amap is None:
+            return []
+        return [(c.name, c.label, bool(c.verified)) for c in amap.channels if c.kind == "value"]
+
+    def rank_references(self) -> list[ad.RankReference]:
+        """What addresses can be ranked against: the map's channels (proven
+        ones first: a reference is only as good as its own address) and the
+        two shapes the user can make by hand."""
+        chans = sorted(self._reference_channels(), key=lambda c: not c[2])
+        return ([ad.RankReference(name, label, "channel", verified) for name, label, verified in chans]
+                + [ad.RankReference(key, label, "shape") for key, label in self.SHAPES])
+
+    def _rank_channel(self, rec, name: str, top: int) -> list:
+        from ..mapping import correlate
+        return correlate.rank_against_channel(rec, self.ecu.amap, name, top=top)
+
+    def rank(self, reference: str, top: int = 8) -> list[ad.RankRow]:
+        """W3's correlation finder on the sweeps so far. ``reference`` is a
+        channel name (which other addresses moved with it?) or "shape:rise" /
+        "shape:fall" (which addresses moved steadily one way since the changes
+        were cleared?). Best first; when the list is empty ``console()`` says why."""
+        from ..mapping import correlate
+        rec = self.sweep_recording()
+        if len(rec) < self.MIN_SWEEPS:
+            self._console = (f"{len(rec)} sweeps so far: sweep for a few seconds while the "
+                             "signal changes, then rank")
+            self.revision += 1
+            return []
+        try:
+            if reference.startswith("shape:"):
+                t = rec.t
+                # rho comes back positive when the raw value moves the way the shape says
+                matches = correlate.rank_shape(rec, reference.split(":", 1)[1], float(t[0]), float(t[-1]),
+                                               top=top)
+            else:
+                matches = self._rank_channel(rec, reference, top)
+        except (addressmap.MapError, KeyError, ValueError) as exc:
+            self._console = f"!! {exc.args[0] if exc.args else exc}"
+            self.revision += 1
+            return []
+        rows = []
+        for m in matches:
+            c = m.candidate
+            info = self.mapped(c.addr)
+            span = range(c.addr, min(256, c.addr + c.width))
+            shape = reference.startswith("shape:")   # a fit to a made-up ramp is no formula
+            rows.append(ad.RankRow(
+                c.addr, c.width, c.endian, c.inverse, c.label, float(m.score),
+                float(m.rho if shape else m.r), "" if shape else m.formula,
+                int(min(self.minv[a] for a in span)), int(max(self.maxv[a] for a in span)),
+                info[0] if info else "", "; ".join(m.notes)))
+        self._console = ("  ·  ".join(f"{r.label} {r.score:.2f}" for r in rows[:4])
+                         or "nothing moved with it in these sweeps")
+        self.revision += 1
+        return rows
+
+    def rank_against(self, channel: str, top: int = 5) -> list[ad.Candidate]:
+        """The short form: (address, score, range) of what follows a channel."""
+        return [ad.Candidate(r.addr, r.score, r.lo, r.hi) for r in self.rank(channel, top)]
+
+    def assign_targets(self) -> list[tuple[str, str]]:
+        """(channel name, text) of the channels a ranked address can be given to."""
+        amap = getattr(self.ecu, "amap", None)
+        if amap is None:
+            return []
+        return [(c.name, f"{c.label} ({c.name})  now 0x{c.addr:02X}" + ("" if not c.verified else "  verified"))
+                for c in amap.channels]
+
+    def assign(self, row: ad.RankRow, channel: str) -> str:
+        """Give the ranked address to a channel of the map. Here: not possible
+        (no map file behind this session). Returns a line for the user."""
+        return "This session has no address map file to write to"
 
     def history(self, addr: int) -> np.ndarray:
         col = self._hist[:, addr]
@@ -1102,6 +1210,45 @@ class DemoMapper(PollerMapper):
         from types import SimpleNamespace as Ch
         return [Ch(label="Speed", name="vss", addr=0x02), Ch(label="MAP", name="map", addr=0x12),
                 Ch(label="O2", name="o2", addr=0x15), Ch(label="Coolant", name="ect", addr=0x10)]
+
+    # the finder in the demo: its made-up map is the dictionary above
+    _DEMO_LABELS = {"rpm": "RPM", "vss": "Speed", "ect": "Coolant", "iat": "Intake air", "map": "MAP",
+                    "tps": "Throttle", "o2": "O2", "batt": "Battery", "stft": "Short trim",
+                    "ltft": "Long trim", "inj": "Injector", "ign": "Ignition", "iacv": "Idle valve"}
+
+    def _channel_bytes(self, name: str) -> list[int]:
+        return sorted(a for a, (n, _) in self.demo_map.items() if n == name)
+
+    def _reference_channels(self) -> list:
+        names = dict.fromkeys(n for n, _ in self.demo_map.values())
+        return [(n, self._DEMO_LABELS.get(n, n), all(v for m, v in self.demo_map.values() if m == n))
+                for n in names]
+
+    def _rank_channel(self, rec, name: str, top: int) -> list:
+        from ..mapping import correlate
+        addrs = self._channel_bytes(name)
+        if not addrs:
+            raise KeyError(f"no channel named {name!r}")
+        mem, times = rec.data
+        value = sum(mem[:, a].astype(float) * 256 ** (len(addrs) - 1 - k) for k, a in enumerate(addrs))
+        return correlate.rank(rec, times[:, addrs[0]], value, top=top, exclude=addrs)
+
+    def assign_targets(self) -> list[tuple[str, str]]:
+        out = []
+        for name, label, verified in self._reference_channels():
+            addr = self._channel_bytes(name)[0]
+            out.append((name, f"{label} ({name})  now 0x{addr:02X}" + ("  verified" if verified else "")))
+        return out
+
+    def assign(self, row: ad.RankRow, channel: str) -> str:
+        if not self._channel_bytes(channel):
+            return f"no channel named {channel!r}"
+        self.demo_map = {a: v for a, v in self.demo_map.items() if v[0] != channel}
+        for k in range(row.width):
+            self.demo_map[row.addr + k] = (channel, False)
+        self.map_revision += 1
+        self.revision += 1
+        return f"{channel} now reads {row.label} (demo map, unverified)"
 
     def _start_sweep(self) -> None:
         self._t0 = time.monotonic()

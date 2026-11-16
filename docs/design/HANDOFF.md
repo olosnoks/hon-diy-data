@@ -427,7 +427,16 @@ Replay
 | [ / ] | Previous / next event (marks, losses, stall) |
 | P | Play / pause |
 | + / - | Zoom the time axis around the cursor |
+| 0 | The whole drive |
+| Ctrl+Left / Ctrl+Right | Pan a quarter of the window |
+| Wheel / Shift+wheel / right drag | Zoom around the pointer / pan / pan |
 | Click or drag in the plot | Move the cursor |
+| D / Shift+click | Second cursor (B) at the cursor / where clicked; readouts show A minus B |
+| C | Compare: lay a second drive over this one (again: what to line up on) |
+| A | Next alignment (first sample, first marker, stall, RPM through 400) |
+| , . / < > | Slide the second drive 0.1 s / 1 s |
+| Shift+C | Remove the second drive |
+| O / L | Open the drive picker / back to live |
 
 Raw tools
 | Key | Action |
@@ -436,6 +445,8 @@ Raw tools
 | S | Sweep on / off |
 | C | Clear changes |
 | N / B | Wizard next / back |
+| R | Rank addresses panel in the wizard's place (again: the wizard back) |
+| G | Rank now |
 | Enter | Send the hex console line |
 
 Tune
@@ -445,13 +456,16 @@ Tune
 | = / - | Raise / lower (fuel 0.05 ms, ignition 0.5 degrees; Shift: x5) |
 | I / S | Interpolate / smooth the selection |
 | T | Next table |
-| Ctrl+Z / Ctrl+S | Undo / save .bin |
+| Ctrl+Z / Ctrl+Y / Ctrl+S | Undo / redo (also Ctrl+Shift+Z) / save .bin |
+| Ctrl+O / Ctrl+D / Ctrl+B | Open ROM… / Definition… / Burn image… |
 
 ---
 
 ## 8. Things to confirm with the owner
 - Units. The mockups keep the app defaults (km/h, degrees C, kPa). The
-  address map already allows mph and degrees F per channel.
+  address map already allows mph and degrees F per channel. Settled: the
+  owner's default is US (mph, degrees F), MAP stays in kPa, volts as they
+  are; Settings > Units changes it (`hondalog/ui/units.py`, display only).
 - Alarm limits shown are placeholders (coolant warn 100 / alarm 108 C,
   battery warn below 12.8 / alarm below 11.5 V, black-box rails alarm below
   11 V, trims warn at 12 to 15 %).

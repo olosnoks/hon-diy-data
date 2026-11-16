@@ -128,6 +128,91 @@ def test_tile_repaints_only_when_something_visible_changed(shell, app):
         Tile.paintEvent = original
 
 
+def test_a_50_hz_tile_redraws_its_value_ten_times_a_second(app):
+    """The black box publishes at 50 Hz. Its tiles redraw the value at 10 Hz;
+    a channel that arrives slower than the frame timer is drawn at once."""
+    from hondalog.ui.bus import ChannelBus, ChannelSpec
+    bus = ChannelBus()
+    fast = bus.register(ChannelSpec("fpv", "FP feed", "V", 2, 0, 16, source="BB"))
+    slow = bus.register(ChannelSpec("ect", "Coolant", "°C", 0, -40, 140))
+    tiles = {"fpv": Tile(fast), "ect": Tile(slow)}
+    for tile in tiles.values():
+        tile.resize(163, 142)
+    shown = {"fpv": [], "ect": []}
+    t, frame = 0.0, 0
+    while t < 2.0:                          # 60 frames; fpv gets a new value every 20 ms
+        while fast.t < t:
+            bus.publish({"fpv": 12.0 + 0.01 * fast.gen}, t=fast.t + 0.02 if fast.gen else 0.0)
+        if frame % 6 == 0:                  # ect: 5 Hz
+            bus.publish({"ect": 80.0 + frame}, t=t)
+        for cid, tile in tiles.items():
+            before = tile._text
+            tile.sync(t)
+            if tile._text != before:
+                shown[cid].append(t)
+        t += 1 / 30
+        frame += 1
+    assert 17 <= len(shown["fpv"]) <= 22                    # about 10 Hz, not 30
+    assert len(shown["ect"]) == 10                          # every one of its updates, the frame it came
+    assert tiles["fpv"]._text == fast.spec.format(fast.value) or abs(
+        float(tiles["fpv"]._text) - fast.value) < 0.06      # never more than 0.1 s behind
+
+
+@pytest.mark.parametrize("kind", ["value", "flag", "warn", "alarm", "drive"])
+def test_a_tile_repainted_band_by_band_equals_one_painted_whole(app, kind):
+    """A new value repaints the value band, a new sparkline sample the
+    sparkline band. What is on screen after any run of such partial repaints
+    must be exactly what one full repaint gives."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QPixmap, QRegion
+    from hondalog.ui.bus import ChannelBus, ChannelSpec
+    from hondalog.ui.tiles import DRIVE
+
+    class Alarms:
+        def state(self, _cid):
+            return {"warn": "warn", "alarm": "alarm"}.get(kind, "")
+
+        def unacked(self, _cid):
+            return False
+    bus = ChannelBus()
+    spec = (ChannelSpec("vtec", "VTEC", kind="flag") if kind == "flag"
+            else ChannelSpec("ect", "Coolant", "°C", 1, -40, 140, verified=True))
+    state = bus.register(spec)
+    tile = Tile(state, DRIVE if kind == "drive" else SENSOR)
+    tile.resize(328, 312) if kind == "drive" else tile.resize(163, 142)
+    screen = QPixmap(tile.size())
+    updates = []
+    real = tile.update
+    tile.update = lambda *a: (updates.append(a), real(*a))[1]
+
+    def step(t, value):
+        """One frame: publish, sync, and paint only what the tile asked for."""
+        bus.publish({spec.id: value}, t=t)
+        bus.tick(t)
+        updates.clear()
+        tile.sync(t, Alarms())
+        for args in updates:
+            region = QRegion(tile.rect()) if not args else QRegion(*[int(a) for a in args])
+            tile.render(screen, region.boundingRect().topLeft(), region)
+        return list(updates)
+
+    def values(i):
+        return float(i % 2) if kind == "flag" else 60.0 + 30.0 * abs(((i * 7) % 20) - 10) / 10.0
+
+    first = step(0.0, values(0))
+    assert first == [()]                                    # the first frame paints the whole tile
+    bands = set()
+    for i in range(1, 90):                                  # 9 s: values at 10 Hz, sparkline samples at 2 Hz
+        for args in step(i * 0.1, values(i)):
+            assert args, "after the first frame only bands are repainted"
+            bands.add((args[1], args[3]))
+    assert len(bands) >= 2                                  # the value band and the sparkline band, apart
+    assert all(top >= 2 + tile.m.header_h for top, _ in bands)      # the header is never among them
+    whole = QPixmap(tile.size())
+    tile.render(whole, QPoint(), QRegion(tile.rect()))
+    assert screen.toImage() == whole.toImage()
+
+
 def test_function_keys_switch_screens_and_f9_toggles_theme(active, app, settings):
     win = active
     for i, k in enumerate((Qt.Key_F1, Qt.Key_F2, Qt.Key_F3, Qt.Key_F4, Qt.Key_F5, Qt.Key_F6,

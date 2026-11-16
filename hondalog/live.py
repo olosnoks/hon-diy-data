@@ -4,7 +4,8 @@ everything recorded and watched by the triggers.
     Poller --on_block--> LiveSession --feed_read------------> Recorder (hondalog.db, raw bytes)
            --on_sample->   LivePipeline (math + alarms) ----> Recorder ("math" stream,
                                                               alarm events, captures)
-    BlackboxReader ---->   on the poller's t0 --------------> Recorder ("blackbox/live")
+    BlackboxReader ---->   on the poller's t0 --------------> Recorder ("blackbox/live";
+                                                              key on keeps the drive open)
                            frames (deque), on_frame --------> UI / CLI
 
 ``LivePipeline`` is the per-sample step on its own (no I/O, no threads):
@@ -50,6 +51,22 @@ if TYPE_CHECKING:
 
 MATH_STREAM = "math"
 BLACKBOX_STREAM = "blackbox/live"
+#: a rail above this is "on" for the purpose of keeping a drive open (volts)
+KEY_ON_V = 6.0
+
+
+def blackbox_key_on(values: Mapping[str, float | None]) -> bool:
+    """True while the black box sees the car switched on: IG1 (its own
+    debounced flag, or the rail itself), the ECU's supply, or the engine
+    turning. The recorder keeps the drive open on this while the ECU is
+    silent, so a stall with the key on and the ECU dead stays in one drive.
+    With the key off (or the rail inputs not wired) it is False and the
+    drive ends as it does without a black box."""
+    def above(name: str, level: float) -> bool:
+        value = values.get(name)
+        return value is not None and value == value and value >= level
+    return (above("bb_ig1_on", 0.5) or above("bb_ig1", KEY_ON_V) or above("bb_ecub", KEY_ON_V)
+            or above("bb_running", 0.5) or above("bb_rpm_tach", 1.0))
 
 
 @dataclass
@@ -348,8 +365,10 @@ class LiveSession:
                 from .blackbox.channels import LIVE_NAMES, bb_channel
                 from .logger import column_for
                 self._bb_columns = [column_for(bb_channel(n)) for n in LIVE_NAMES]
+            # alive: with the key on the drive stays open (or one starts) although
+            # the ECU is silent; with the key off the frame is dropped between drives
             recorder.feed_values(BLACKBOX_STREAM, sample.t, sample.values, source="blackbox",
-                                 columns=self._bb_columns)
+                                 columns=self._bb_columns, alive=blackbox_key_on(sample.values))
         if self.on_blackbox is not None:
             self.on_blackbox(sample)
 

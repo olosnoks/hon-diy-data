@@ -49,6 +49,7 @@ from ..transport import CommandBlocked
 from . import adapters as ad
 from . import backends as be
 from .bus import ChannelBus, ChannelSpec
+from .units import U
 
 # ---- names ------------------------------------------------------------------
 
@@ -388,7 +389,9 @@ class BlackboxSource:
         if port == BBSIM_PREFIX:
             # next to a simulated ECU: a simulated box in a car that is already running
             from ..blackbox import Car, SimDevice, SimPort
-            target = SimPort(SimDevice(Car(None, key_on_at=0.0, crank_at=0.02, start_at=0.1)))
+            # one ADC reading per millisecond instead of five: this box only feeds
+            # the screen, and the full model cost more CPU than the UI next to it
+            target = SimPort(SimDevice(Car(None, key_on_at=0.0, crank_at=0.02, start_at=0.1, sub=1)))
         try:
             self.reader = ecu.live.open_blackbox(target)
         except Exception as exc:            # a missing box must never stop the ECU link
@@ -465,11 +468,13 @@ class PipelineAlarms:
         spec = state.spec if state is not None else None
         rule = next((r for r in self.engine.rules if r.name == ev.name), None)
         label = (spec.label if spec is not None else (rule.label if rule else ev.name)).upper()
-        value = (f"{spec.format(ev.value)} {spec.units}".strip()
-                 if spec is not None and ev.value is not None else "")
+        value = U.with_unit(spec, ev.value) if spec is not None and ev.value is not None else ""
+        tail = " (unverified channel)" if ev.unverified else ""
+        # the rule's own words carry the map's units ("Coolant 110 °C"): the
+        # screen gets them converted, the log keeps them as they are
         return ad.AlarmEvent(ev.channel or ev.name, spec.source if spec is not None else "ECU",
                              label, "alarm" if ev.severity == CRITICAL else "warn", value,
-                             ev.message + (" (unverified channel)" if ev.unverified else ""), now)
+                             U.convert_text(ev.message) + tail, now, log_text=ev.message + tail)
 
     def evaluate(self, bus: ChannelBus, now: float):
         started = []
@@ -527,7 +532,14 @@ class PipelineAlarms:
     def limits(self):
         rows = []
         for rule in self.engine.rules:
-            def lim(lo, hi, rule=rule):
+            ch = self.ecu.amap.channel(rule.channel) if rule.channel else None
+            base = ChannelSpec(rule.channel or rule.name, units=ch.units if ch is not None else "")
+            scale, offset = U.scale(base)
+            unit = f" {U.spec(base).units}" if scale != 1.0 or offset else ""
+
+            def lim(lo, hi, rule=rule, scale=scale, offset=offset):
+                lo = None if lo is None else round(lo * scale + offset, 2)
+                hi = None if hi is None else round(hi * scale + offset, 2)
                 parts = [f"<{lo:g}" if lo is not None else "", f">{hi:g}" if hi is not None else ""]
                 if rule.rate_low is not None or rule.rate_high is not None:
                     parts.append("rate")
@@ -536,7 +548,7 @@ class PipelineAlarms:
                 return " ".join(x for x in parts if x).replace("-", "−") or "—"
             text = lim(rule.low, rule.high)
             critical = rule.severity == CRITICAL
-            rows.append(ad.LimitRow(rule.label[:1].upper() + rule.label[1:],
+            rows.append(ad.LimitRow(rule.label[:1].upper() + rule.label[1:] + unit,
                                     "—" if critical else text, text if critical else "—"))
         return rows + list(self._extra.limits())
 
@@ -730,6 +742,7 @@ class DriveReader:
                 if not spec.mapped or cid in view.data:
                     continue
                 view.specs[cid] = spec
+                view.names[cid] = (name, scale)
                 view.t[cid] = np.asarray(series.t, dtype=float) - origin
                 view.data[cid] = np.asarray(series.v, dtype=float) * scale
             for mt, text in log.markers:
@@ -738,8 +751,10 @@ class DriveReader:
             if BLACKBOX_STREAM in log.streams and log.meta.get("blackbox_clock_rtt_us") is not None:
                 # both sources were stamped on one clock; half the sync round trip is the bound
                 view.align_residual_ms = float(log.meta["blackbox_clock_rtt_us"]) / 2000.0
-            view.replay = ReplaySession(log)        # type: ignore[attr-defined]
-            view.origin = origin                    # type: ignore[attr-defined]
+            # W4's replay session on the same log: the Replay screen draws its
+            # envelopes and reads its cursors (ui/replaymodel.py maps ids and times)
+            view.replay = ReplaySession(log)
+            view.origin = origin
         return view
 
     def _read_bbx(self, path: Path) -> ad.LogView:
@@ -814,7 +829,8 @@ class DriveReader:
             for e in mine:
                 text = " ".join([e.name, e.kind, e.status, e.notes, e.trigger, *e.tags, *e.markers]).lower()
                 rows.append(ad.DriveRow(e.ref, e.name, e.kind, e.started[:19].replace("T", " "), e.duration,
-                                        e.status, e.stalls, e.trigger if e.kind != "drive" else e.notes, text))
+                                        e.status, e.stalls, e.trigger if e.kind != "drive" else e.notes, text,
+                                        keep=e.keep, captures=e.captures))
         for mtime, path in sorted(self._bbx(), reverse=True):
             stamp = datetime.fromtimestamp(mtime).isoformat(" ", "seconds")
             rows.append(ad.DriveRow(path, path.name, "file", stamp, text=path.name.lower()))
@@ -829,6 +845,32 @@ class DriveReader:
             if log.ref is not None:
                 return log.ref              # already a drive (another database): open it there
             return write_log(log, self.database, {"imported_from": str(path)})
+
+
+    def delete(self, ref, allow_keep: bool = False) -> str:
+        """One drive (all of it) or one capture (its entry), through the same
+        code as ``hondalog-log rm``: refused while it is being recorded, a
+        keep drive only with ``allow_keep``, freed pages vacuumed."""
+        from ..data import retention
+        if not isinstance(ref, DriveRef):
+            raise ValueError(f"{getattr(ref, 'name', ref)} is a file, not a drive: delete it in the file manager")
+        before = self.database.stat().st_size if self.database.exists() else 0
+        try:
+            entry = retention.delete(ref, allow_keep=allow_keep)
+        except OSError as exc:
+            raise ValueError(f"could not delete {ref.name}: {exc}") from None
+        if entry.kind != "drive":
+            return f"Deleted capture {entry.name}; {ref.drive} is untouched"
+        freed = max(0, before - (self.database.stat().st_size if self.database.exists() else 0))
+        return f"Deleted {entry.name}" + (f", {freed / 1e6:.1f} MB freed" if freed else "")
+
+    def set_keep(self, ref, keep: bool) -> None:
+        if not isinstance(ref, DriveRef):
+            raise ValueError("only a drive can be marked keep")
+        try:
+            Library(ref.db).set_notes(ref.drive_ref, keep=keep)
+        except OSError as exc:
+            raise ValueError(str(exc)) from None
 
 
 # ---- observed map -----------------------------------------------------------
@@ -967,36 +1009,36 @@ class MappingSession(be.PollerMapper):
         self._matches: dict[int, Any] = {}
         self._message = ""
         self._channel = ""
-        self._sweep_t: collections.deque = collections.deque(maxlen=self.HIST)
 
-    # -- the correlation finder on the sweep history --
+    # -- the correlation finder: the base class ranks; here the result is written to the map file --
 
-    def sweep_recording(self):
-        """The grid's sweep history as a W3 ``SweepRecording`` (oldest first)."""
-        from ..mapping.sweeps import from_rows
-        rows = [row for row in self._hist if (row >= 0).any()]
-        return from_rows(rows, list(self._sweep_t)[-len(rows):] if rows else [])
-
-    def rank_against(self, channel: str, top: int = 5) -> list[ad.Candidate]:
-        """Which other bytes follow a channel (ideally a verified one) in the
-        sweeps so far: W3's correlation finder. Needs a few sweeps in which
-        the channel moved."""
-        rec = self.sweep_recording()
-        if len(rec) < 5:
-            self._console = "sweep continuously for a few seconds first, then rank"
-            self.revision += 1
-            return []
+    def assign(self, row: ad.RankRow, channel: str) -> str:
+        """Give a ranked address to a channel: its addr, length and byte order
+        go into the user's map file through W3's map editor
+        (``mapedit.update_channel``), which resets the channel to unverified,
+        drops evidence that described the old address and bumps the map
+        version. The formula is left alone. Returns a line for the user."""
+        amap = self.ecu.amap
+        ch = amap.channel(channel)
+        path = Path(amap.path) if amap.path else None
+        if ch is None:
+            return f"No channel named {channel!r} in the map"
+        if path is None or path == addressmap.DEFAULT_MAP:
+            return "The shipped map is read-only; your copy is made on first connect."
+        fields: dict[str, Any] = {"addr": row.addr, "length": row.width}
+        if row.width > 1:
+            fields["endian"] = row.endian
+        if (ch.addr, ch.length) == (row.addr, row.width) and (row.width == 1 or ch.endian == row.endian):
+            return f"{channel} already reads {row.label}: nothing to write"
         try:
-            matches = correlate.rank_against_channel(rec, self.ecu.amap, channel, top=top)
-        except addressmap.MapError as exc:
-            self._console = f"!! {exc}"
-            self.revision += 1
-            return []
-        self._console = "  ·  ".join(f"{m.candidate.label} {m.score:.2f}" for m in matches) \
-            or f"nothing follows {channel}"
+            mapedit.update_channel(path, channel, amap.variant or None, **fields)
+        except (addressmap.MapError, OSError, ValueError) as exc:
+            return f"Not written: {exc}"
+        self.ecu.reload_map()
+        self.map_revision += 1
         self.revision += 1
-        return [ad.Candidate(m.candidate.addr, float(m.score), int(self.minv[m.candidate.addr]),
-                             int(self.maxv[m.candidate.addr])) for m in matches]
+        return (f"{channel} now reads {row.label} in {path.name} (was 0x{ch.addr:02X}); it is "
+                "unverified. Reconnect, then prove it with the guided check.")
 
     # -- console: W1's guard --
 
@@ -1029,7 +1071,6 @@ class MappingSession(be.PollerMapper):
         super()._chunk(addr, fut)
         if self.sweeps == before:
             return
-        self._sweep_t.append(time.monotonic())
         session = self._session
         if session is not None and session.state == "running":
             session.add_sweep(self.cur)
@@ -1178,10 +1219,6 @@ class MappingSession(be.PollerMapper):
             self.ecu.reload_map()
         self._step = 4
 
-    def clear_changes(self) -> None:
-        super().clear_changes()
-        self._sweep_t.clear()
-
     def wizard_back(self) -> None:
         self._step, self._session = 0, None
         self.revision += 1
@@ -1207,7 +1244,13 @@ class RomTableModel:
     tables it wraps (read-only samples), so the Tune and Map 3D screens always
     have something to show. With a ROM open: the RPM x load tables of the
     definition that share the first table's axes, edits through the session's
-    undo stack, ``save`` writes a ROM image with the checksum fixed.
+    undo and redo stacks, ``save`` writes a ROM image with the checksum fixed
+    (never onto the file that was opened), ``burn_image`` writes the chip
+    image only if it passes the session's safety checks.
+
+    ``open`` and ``load_definition`` can be called again at any time (the
+    Tune screen's "Open ROM…" and "Definition…"); ``layout`` bumps when the
+    list of tables or their axes changed, so the screen rebuilds.
     """
 
     def __init__(self, fallback=None, store_dir=None):
@@ -1221,22 +1264,56 @@ class RomTableModel:
         self._cache: dict[str, tuple[int, np.ndarray]] = {}
         self._revision = 0
         self.problem = ""
+        self.layout = 0                     # bumps when tables() or the axes changed
+        self.rom_path: Path | None = None   # the ROM that is open, or the one that still needs a definition
+        self.definition_path: Path | None = None    # None: the built-in demo definition
+        self._unsubscribe = None
 
     # -- loading --
 
     def open(self, rom_path, definition_path=None) -> str:
-        """Open a ROM with its definition (.toml or .xdf). Returns '' or the
-        reason it could not be used (the demo tables then stay)."""
+        """Open a ROM with its definition (.toml or .xdf; default: the one
+        loaded last, else the built-in demo definition). Returns '' or the
+        reason it could not be used: the tables that were showing stay, and
+        ``load_definition`` will try this ROM again."""
         from .. import tuning
         from ..tuning.demo import demo_definition
+        rom_path = Path(rom_path)
+        chosen = Path(definition_path) if definition_path else self.definition_path
         try:
-            definition = (tuning.load_definition(definition_path) if definition_path
-                          else demo_definition())
+            definition = tuning.load_definition(chosen) if chosen else demo_definition()
+        except Exception as exc:
+            self.problem = f"{Path(chosen).name if chosen else 'definition'}: {exc}"
+            return self.problem
+        try:
             session = tuning.RomSession.open(rom_path, definition, store_dir=self.store_dir)
         except Exception as exc:
-            self.problem = f"{Path(rom_path).name}: {exc}"
+            self.problem = f"{rom_path.name}: {exc}"
+            if self.session is None:
+                self.rom_path = rom_path        # waiting for the right definition
             return self.problem
-        return self.use(session)
+        problem = self.use(session)
+        if not problem:
+            self.rom_path, self.definition_path = rom_path, chosen
+        return problem
+
+    def load_definition(self, definition_path) -> str:
+        """Use another definition (.xdf or .toml). The ROM that is open (or
+        the one that could not be opened with the old definition) is read
+        again with it: the working copy's unsaved edits are dropped, so ask
+        first (``dirty``). Returns '' or the reason; on a failure nothing
+        changes."""
+        from .. import tuning
+        path = Path(definition_path)
+        try:
+            tuning.load_definition(path)
+        except Exception as exc:
+            self.problem = f"{path.name}: {exc}"
+            return self.problem
+        if self.rom_path is None:
+            self.definition_path, self.problem = path, ""
+            return ""
+        return self.open(self.rom_path, path)
 
     def use(self, session) -> str:
         editors, info, first = {}, [], None
@@ -1262,13 +1339,16 @@ class RomTableModel:
         if first is None:
             self.problem = "the definition has no RPM x load table with numeric axes"
             return self.problem
+        if self._unsubscribe is not None:
+            self._unsubscribe()             # the session that was open stops reporting here
         self.session, self.editor = session, first[0]
         self._editors, self._info = editors, info
         self._base = {tid: e.original_values("real").T.copy() for tid, e in editors.items()}
         self._cache.clear()
         self.problem = ""
         self._revision += 1
-        session.on_change(self._changed)
+        self.layout += 1
+        self._unsubscribe = session.on_change(self._changed)
         return ""
 
     def _changed(self, *_args) -> None:
@@ -1350,10 +1430,81 @@ class RomTableModel:
             return self._fallback.undo()
         return self.session.undo() is not None
 
-    def save(self, path) -> None:
+    def redo(self) -> bool:
+        return self.loaded and self.session.redo() is not None
+
+    @property
+    def can_undo(self) -> bool:
+        return self.session.can_undo if self.loaded else bool(getattr(self._fallback, "_undo", ()))
+
+    @property
+    def can_redo(self) -> bool:
+        return self.loaded and self.session.can_redo
+
+    @property
+    def dirty(self) -> bool:
+        """Edits that ``save`` has not written yet."""
+        return self.loaded and self.session.dirty
+
+    def status(self) -> dict[str, Any]:
+        """What the Tune screen's ROM card says: file, definition, checksum."""
         if not self.loaded:
-            return self._fallback.save(path)
-        self.session.save(path)
+            waiting = self.rom_path.name if self.rom_path is not None else ""
+            return {"loaded": False, "rom": waiting, "problem": self.problem,
+                    "definition": self.definition_path.name if self.definition_path else "",
+                    "checksum": "", "checksum_ok": True, "dirty": False, "warnings": []}
+        s = self.session
+        report = s.checksum()
+        word = {"ok": "checksum OK", "bad": "checksum wrong: fixed when you save",
+                "none": "checksum not checked"}.get(report.status, f"checksum {report.status}")
+        return {"loaded": True, "rom": s.rom.path.name if s.rom.path else s.name, "problem": self.problem,
+                "definition": s.definition.title or (self.definition_path.name if self.definition_path
+                                                     else "demo definition"),
+                "checksum": word, "checksum_ok": report.status != "bad", "dirty": s.dirty,
+                "warnings": list(s.warnings)}
+
+    def default_save_path(self) -> Path | None:
+        return self.session.default_save_path() if self.loaded else None
+
+    def save(self, path=None) -> str:
+        """Write the working copy through ``RomSession.save``: never onto the
+        ROM that was opened, checksum fixed, a snapshot kept. Returns a line
+        for the user; raises ValueError with the reason when it is refused."""
+        if not self.loaded:
+            self._fallback.save(path)
+            return f"Saved {Path(path).name}"
+        from ..tuning import RomError
+        try:
+            result = self.session.save(path)
+        except (RomError, OSError) as exc:
+            raise ValueError(str(exc)) from None
+        self._revision += 1
+        return (f"Saved {result.path.name}" + (", checksum fixed" if result.checksum_fixed else "")
+                + (f", snapshot {result.snapshot.name}" if result.snapshot else ""))
+
+    def burn_image(self, path, layout: str = "doubled") -> str:
+        """Write the chip-ready image of the working copy to ``path``. It is
+        built by ``RomSession.burn_image``, which refuses a wrong size, a
+        blank image, a wrong checksum or signature bytes that do not match
+        the definition; nothing is written then. Raises ValueError with the
+        reason."""
+        if not self.loaded:
+            raise ValueError("Open a ROM first: the sample tables are not a ROM")
+        from ..tuning import BurnRefused, RomError
+        target = Path(path)
+        source = self.session.source_path
+        try:
+            if source is not None and target.exists() and target.samefile(source):
+                raise ValueError(f"{target.name} is the ROM that is open; choose another name")
+            image = self.session.burn_image(layout=layout)
+            target.write_bytes(image.data)
+        except (BurnRefused, RomError) as exc:
+            raise ValueError(f"Not built: {exc}") from None
+        except OSError as exc:
+            raise ValueError(f"Could not write {target.name}: {exc}") from None
+        notes = f" ({'; '.join(image.warnings)})" if image.warnings else ""
+        return (f"Burn image {target.name}: {len(image.data)} bytes, {image.layout}, "
+                f"sha256 {image.image_sha256[:12]}{notes}")
 
     def can_write_chip(self) -> bool:
         if not self.loaded:

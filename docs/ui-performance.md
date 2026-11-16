@@ -27,37 +27,60 @@ W2's simulated black box at 50 Hz. Per screen it reports:
 ## Measured here (not on the T430)
 
 Intel Xeon 2.1 GHz, 2 cores, PySide6 / pyqtgraph, Qt offscreen platform,
-1366x768, Daylight, 8 s per screen, after the backends were bound
-(`ui/wired.py`): W1 link at true rates (fast class about 17 Hz, each read
-published on arrival), W3 math channels and alarms on the poller thread,
-W4 recorder writing a drive with raw bytes into SQLite, W2's simulated black box
-at 50 Hz, 41 tiles (24 ECU + 8 black box + 9 math).
+1366x768, Daylight, 8 s per screen, with the backends bound (`ui/wired.py`):
+W1 link at true rates (fast class about 17 Hz, each read published on
+arrival), W3 math channels and alarms on the poller thread, W4 recorder
+writing a drive with raw bytes into SQLite, W2's simulated black box at
+50 Hz, 41 tiles (24 ECU + 8 black box + 9 math).
 
 | Screen | fps | min fps | frame p50 / p95 / max (ms) | CPU % | latency p50 / p95 / max (ms) |
 |---|---|---|---|---|---|
-| Sensors, 41 tiles | 30.3 | 29.5 | 3.4 / 9.5 / 14.8 | 23.8 | 4.3 / 14.5 / 16.7 |
-| Drive | 30.3 | 29.5 | 1.8 / 6.3 / 9.7 | 16.5 | 3.6 / 15.2 / 17.7 |
-| Map 3D (2D fallback) | 30.3 | 29.5 | 4.0 / 8.4 / 13.9 | 21.6 | 4.8 / 14.5 / 16.0 |
-| Map 3D, orbiting | 30.3 | 28.4 | 2.6 / 6.1 / 9.9 | 31.6 | 6.0 / 14.3 / 16.9 |
-| Replay, live lanes following the bus | 30.3 | 29.5 | 0.2 / 20.7 / 33.8 | 26.9 | 5.2 / 14.0 / 17.2 |
-| Replay, playing a file | 30.3 | 29.4 | 4.5 / 7.7 / 20.7 | 24.5 | 3.2 / 14.4 / 17.1 |
-| Raw tools, sweeping | 30.3 | 29.5 | 0.3 / 4.8 / 22.4 | 16.3 | 7.8 / 17.9 / 20.4 |
-| Tune (2D fallback) | 30.3 | 29.4 | 2.9 / 7.1 / 12.7 | 19.4 | 4.5 / 14.4 / 17.4 |
-| Alarms | 30.3 | 28.8 | 0.2 / 3.6 / 11.0 | 13.9 | 5.4 / 14.5 / 16.2 |
-| Sensors again (traces full) | 30.3 | 29.5 | 4.0 / 13.5 / 20.0 | 27.2 | 6.0 / 14.7 / 16.0 |
+| Sensors, 41 tiles | 30.3 | 29.4 | 2.1 / 3.8 / 5.4 | 12.8 | 1.6 / 13.7 / 17.9 |
+| Drive | 30.3 | 29.5 | 1.3 / 4.6 / 10.6 | 11.5 | 3.5 / 15.0 / 16.9 |
+| Map 3D (2D fallback) | 30.3 | 29.5 | 3.5 / 6.4 / 9.4 | 15.4 | 5.2 / 14.5 / 17.1 |
+| Map 3D, orbiting | 30.3 | 28.3 | 2.9 / 6.1 / 12.2 | 31.0 | 5.3 / 13.8 / 17.0 |
+| Replay, live lanes following the bus | 30.3 | 29.5 | 0.2 / 17.8 / 25.6 | 21.0 | 4.5 / 10.4 / 15.4 |
+| Replay, playing a file | 30.3 | 29.4 | 4.7 / 7.5 / 10.4 | 21.7 | 2.4 / 15.0 / 16.9 |
+| Raw tools, sweeping | 30.3 | 29.5 | 0.3 / 5.3 / 14.5 | 11.3 | 8.2 / 17.8 / 20.0 |
+| Tune (2D fallback) | 30.3 | 29.5 | 3.7 / 6.5 / 10.1 | 15.5 | 3.6 / 14.1 / 15.9 |
+| Alarms | 30.3 | 29.6 | 0.1 / 2.4 / 5.2 | 8.7 | 5.0 / 13.9 / 17.0 |
+| Sensors again (traces full) | 30.3 | 29.5 | 2.9 / 4.9 / 6.9 | 16.0 | 3.6 / 15.0 / 18.7 |
 
-Peak RSS 171 MB. No link errors. All four targets are met.
+Peak RSS 177 MB. No link errors. All targets are met, including the one the
+bench now checks for the screen that is up all day: all sensors at or under
+20 % of a core with the simulated black box running. From run to run on
+this (shared) machine Sensors is 12 to 17 % and "Sensors again" 15 to 19.5 %.
 
-Against the numbers before the backends were bound (stand-in sources,
-32 tiles): frame rate and frame times are unchanged, latency is lower (the
-link stamps each read itself, and reads are published one by one instead of
-once per sweep), and CPU is higher: Sensors went from 20 % to between 21 and
-30 % from run to run. Most of that is the simulated black box, which is now
-W2's real simulator: a 1 kHz model of the box running in this process, where
-the stand-in was a few lines at 50 Hz. `tools/bench_ui.py --no-blackbox`
-leaves it out: Sensors is then 13 to 15 % and Drive 10 %. With a real box
-that model's cost is not on the laptop; the 50 Hz frames and eight more
-live tiles are.
+"Sensors again" is the honest number for that screen: after a minute the
+sparklines are full, and stroking 41 of them is real work. Before this was
+looked at, the same run gave 23.7 % (Sensors) and 29.7 % (Sensors again),
+with a frame p95 of 9.5 and 14.6 ms. Where it went, measured per thread
+(`/proc/self/task`) and with cProfile on the UI thread:
+
+| What | Before | After |
+|---|---|---|
+| black box thread: W2's 1 kHz model of the box, in this process | 6.1 % | 2.6 to 3.1 % |
+| ... of that, the model itself, per simulated millisecond | 38 us | 12.6 us |
+| UI thread, sparklines full | about 16 % | 8.4 to 9.6 % |
+| tile paint calls per second | about 290 | about 160, most of them one band |
+
+- The simulated black box next to a simulated ECU now runs the cheap model
+  (`Car(sub=1)`: one ADC reading per millisecond instead of five, the filter
+  steps in closed form), and its in-process port blocks until a frame is due
+  instead of waking every 2 ms. `hondalog-bbsim`, `bbsim:` and the real box
+  are untouched: the full model is still what the firmware's tests run on.
+- A tile whose channel arrives faster than the frame timer (the box at
+  50 Hz) redraws its value 10 times a second, not 30.
+- A tile is repainted in bands: a new value repaints the value and gauge, a
+  new sparkline sample the sparkline and footer, and the header (label,
+  marker) only when the state changes.
+- Each tile strokes its sparkline once a second (the bus samples it at
+  2 Hz), the tiles taking turns over 30 frames.
+- A channel that is read again with the same number costs a comparison.
+
+`tools/bench_ui.py --no-blackbox` leaves the simulated box out: Sensors is
+then 11 to 12 % and Drive 9 %. With a real box the model's cost is not on
+the laptop; the 50 Hz frames and eight more live tiles are.
 
 Latency is dominated by waiting for the next 33 ms frame; the UI adds no
 queue of its own.
@@ -90,13 +113,18 @@ small, but it has not been measured. If it is not small, `hondalog --no-gl`
 
 - No per-sample signals. Sources publish into `ChannelBus`; one 33 ms timer
   reads it.
-- A tile repaints only when its text, gauge pixel, state or trace changed.
-  Its strings, fonts, pens and the sparkline polygon are prepared outside
-  `paintEvent`; the trace is stroked into a pixmap at 2 Hz and blitted.
-- The 2 Hz sparkline redraws are spread over four frames.
-- Replay puts all 13 traces in one ViewBox. A file view is stroked once and
-  cached, so moving the cursor only blits a strip. A live view draws each
-  trace as two 1 px lines, which is several times faster than a stroked
-  2 px line.
+- A tile repaints only when its text, gauge pixel, state or trace changed,
+  and then only the band that did. Its strings, fonts, pens and the
+  sparkline polygon are prepared outside `paintEvent`; the trace is stroked
+  into a pixmap once a second and blitted.
+- The sparkline redraws are spread over 30 frames: one or two per frame.
+- Replay puts all 13 traces in one ViewBox. A file view is the replay
+  session's min/max envelope for the visible window (at most two points per
+  pixel column, however long the drive), stroked once and cached, so moving
+  the cursor only blits a strip and only zooming or panning draws anew. A
+  live view draws each trace as two 1 px lines, which is several times
+  faster than a stroked 2 px line.
+- The tune grid repaints the cells whose outline or trail bar changed, not
+  the table.
 - The 3D view repaints on demand: when data or the camera changed.
 - MSAA steps down 4x, 2x, off when 30 frames in a row take over 12 ms.
