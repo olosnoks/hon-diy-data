@@ -20,6 +20,8 @@ Over the handheld's USB-C cable (firmware/handheld/SERIAL.md; PORT is
         copy the card's drives to the laptop and import them (resumable)
     hondalog-handheld push-map [--port PORT] [--map TOML] [--cfg FILE]
         send HANDHELD.MAP (and HANDHELD.CFG); used from the next power-up
+    hondalog-handheld put-map DIR [--port PORT]
+        copy a MAP folder (map-build's output) into the card's MAP/ over the cable (resumable, verified)
     hondalog-handheld set-time [--port PORT]
         set the handheld's clock from this computer's (when it has no GPS time)
     hondalog-handheld command mark|ack-alarm|dtc|drive-stop|drive-start [--port PORT]
@@ -179,8 +181,11 @@ def _status(args: argparse.Namespace) -> int:
         print(f"  link: {'two-way' if h.two_way else 'TX only (the GPS has the receive pin)'}, {h.baud} baud, "
               f"link revision {h.rev}")
         print(f"  ECU link: {P.LINK_NAMES.get(h.link_state, h.link_state)}; ECU id {h.ecu_id.hex(' ') or '-'}")
-        print(f"  clock: {'set' if h.flags & 2 else 'not set'}{' (GPS)' if h.flags & 4 else ''}; "
-              f"SD card: {'ok' if h.flags & 8 else 'none'}")
+        print(f"  clock: {'set' if h.flags & 2 else 'not set'}{' (GPS)' if h.flags & 4 else ''}"
+              f"{' (pulse: PPS)' if h.clock_from_pps else ''}; SD card: {'ok' if h.flags & 8 else 'none'}")
+        if st and st.get("time_source"):
+            print(f"  time: {P.time_text(st['time_source'], st.get('time_err_us', 0))} "
+                  f"({P.TS_NAMES.get(st['time_source'], '?')})")
         if st:
             print(f"  K-line: {st['reads']} reads, {st['errors']} errors, {st['timeouts']} timeouts, "
                   f"{st['hz_c'] / 100:.1f} Hz")
@@ -234,6 +239,36 @@ def _push_map(args: argparse.Namespace) -> int:
                                          if skipped else ""))
     finally:
         cyd.close()
+    return 0
+
+
+def _put_map(args: argparse.Namespace) -> int:
+    import time as _time
+    t0 = _time.monotonic()
+    state = {"pct": -1, "name": ""}
+    tty = sys.stdout.isatty()
+
+    def progress(name: str, done: int, size: int, all_done: int, all_total: int) -> None:
+        pct = 100 * all_done // max(1, all_total)
+        if tty:
+            width = 30
+            fill = width * all_done // max(1, all_total)
+            rate = all_done / max(0.001, _time.monotonic() - t0) / 1000
+            print(f"\r  {name:<10} [{'#' * fill}{'.' * (width - fill)}] {pct:3d}%  {rate:5.1f} kB/s", end="", flush=True)
+        elif name != state["name"] or pct >= state["pct"] + 10:
+            state.update(pct=pct, name=name)
+            print(f"  {name}: {pct}% of the set", flush=True)
+
+    cyd = _client(args)
+    try:
+        names = cyd.put_map(args.dir, progress)
+    finally:
+        cyd.close()
+    if tty:
+        print()
+    secs = _time.monotonic() - t0
+    print(f"MAP/ on the handheld: {', '.join(names)} sent and verified in {secs:.0f} s; the Map screen uses it "
+          "straight away")
     return 0
 
 
@@ -381,6 +416,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--variant")
     p.add_argument("--cfg", help="also send this file as HANDHELD.CFG")
     p.set_defaults(fn=_push_map)
+
+    p = sub.add_parser("put-map", help="copy a MAP folder into the handheld's SD card over its USB-C cable")
+    p.add_argument("dir", help="the MAP folder (MAP.IDX, MAP.DAT, README.TXT) or the card folder that holds it")
+    p.add_argument("--port", default="cyd:", help=port_help)
+    p.set_defaults(fn=_put_map)
 
     p = sub.add_parser("set-time", help="set the handheld's clock from this computer's")
     p.add_argument("--port", default="cyd:", help=port_help)

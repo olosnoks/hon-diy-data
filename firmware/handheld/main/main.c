@@ -11,6 +11,7 @@
 
 #include "hh_data.h"
 #include "port.h"
+#include "ui_mapsvc.h"
 
 void app_main(void)
 {
@@ -22,5 +23,6 @@ void app_main(void)
     if (err != ESP_OK) ESP_LOGW("main", "no NVS (%s): the theme choice will not be kept", esp_err_to_name(err));
 
     hh_core_start();
+    hh_serial_port_set_map_hold(mapsvc_hold);       /* a MAP/ upload over USB-C closes the map's files first */
     ui_port_start();
 }

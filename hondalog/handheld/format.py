@@ -57,6 +57,9 @@ FILE_HDR = struct.Struct("<IHHIIBBBBIQq12s8s12s12s10sBBIB3sQI8sI")     # 128
 BLOCK_HDR = struct.Struct("<IBBHIIQ")                                   # 24
 FK_DRIVE, FK_CAPTURE = 1, 2
 HF_TIME_VALID, HF_TIME_GPS, HF_PREALLOC, HF_BUILTIN_MAP = 1, 2, 4, 8
+# TIME record sources: 1 GPS sentences, 2 the clock as it was, 3 set by the laptop, 4 GPS + PPS
+TIME_GPS, TIME_CLOCK, TIME_HOST, TIME_PPS = 1, 2, 3, 4
+TIME_FROM_GPS = (TIME_GPS, TIME_PPS)
 
 B_READS, B_GPS, B_EVENTS, B_CONFIG, B_ISO, B_NAMES, B_CAPTURE, B_TIME, B_END = 1, 2, 3, 4, 5, 6, 7, 8, 0x7F
 BLOCK_NAMES = {B_READS: "reads", B_GPS: "gps", B_EVENTS: "events", B_CONFIG: "config", B_ISO: "iso",
@@ -68,7 +71,7 @@ REC_ISO = struct.Struct("<IBBBB")           # dt_us, mode, pid, len, flags; then
 REC_GPS = struct.Struct("<QiiIHHBBH")       # 28
 REC_EVENT = struct.Struct("<QBBHi")         # 16; the last word is a float for some codes
 REC_CAPTURE = struct.Struct("<QQQBBHI")     # 32
-REC_TIME = struct.Struct("<QqB7s")          # 24
+REC_TIME = struct.Struct("<QqB7s")          # 24 (source 4 also has u16 err_us at byte 18 and i32 drift_ppb at 20; FORMAT.md)
 REC_END = struct.Struct("<IIIIQ")           # 24
 
 (EV_MARKER, EV_LINK_UP, EV_LINK_DOWN, EV_ALARM_RAISED, EV_ALARM_CLEARED, EV_ALARM_ACK, EV_STALL,

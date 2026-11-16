@@ -31,6 +31,8 @@ typedef struct {
 
 /* link.state */
 enum { HH_LINK_OFF = 0, HH_LINK_CONNECTING = 1, HH_LINK_OK = 2, HH_LINK_ISO_ONLY = 3, HH_LINK_ERROR = 4 };
+/* time_source */
+enum { HH_TS_NONE = 0, HH_TS_NMEA = 1, HH_TS_PPS = 2, HH_TS_HOST = 3 };
 /* link.backend */
 enum { HH_BACKEND_USB = 0, HH_BACKEND_UART = 1 };
 
@@ -67,6 +69,11 @@ typedef struct {
     /* The link to the laptop on the USB-C port (SERIAL.md). mode: 0 off, 1 tx-only (GPS on P1), 2 two-way.
      * host: 1 = the laptop was heard within 3 s (two-way only; tx-only cannot know). frames sent, frames dropped. */
     struct { uint8_t mode, host; uint32_t frames, dropped; } pc;
+    /* Where unix_us comes from: 0 none, 1 GPS sentences only (about +-1 s), 2 GPS pulse (PPS: err_us is the estimate),
+     * 3 set by the laptop. time_t_us is the device time (esp_timer us) that unix_us is for. */
+    uint8_t time_source;
+    uint32_t time_err_us;
+    int64_t time_t_us;
 } hh_snapshot_t;
 
 const hh_channel_info_t *hh_channels(uint16_t *n);
@@ -74,6 +81,9 @@ void hh_snapshot(hh_snapshot_t *out);   /* lock-protected copy, cheap, safe at 3
 void hh_mark(void);                     /* button long-press: marker */
 void hh_ack_alarm(void);
 void hh_core_start(void);               /* starts link, gps, logger tasks */
+/* The map reader's side of a MAP/ upload over the USB-C link: hold(1) closes MAP/MAP.IDX and MAP/MAP.DAT and keeps
+ * the reader off the folder (returns 0 when they are closed), hold(0) lets it open them again. Call after hh_core_start. */
+void hh_serial_port_set_map_hold(int (*hold)(int on));
 int  hh_display_rotation(void);         /* 0 or 180, from HANDHELD.CFG `rotate`; valid after hh_core_start */
 
 /* ---- added ---- */

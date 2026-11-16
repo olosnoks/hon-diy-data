@@ -681,7 +681,7 @@ class MapView(_View):
         self.log = label("", dim=True, wrap=True)
         lay.addWidget(self.log)
         lay.addStretch(1)
-        self.note = label("The big file goes first, each file replaces the old one only when it arrived whole, and an "
+        self.note = label("Sent over the fast binary link, each file is checked before it replaces the old one, and an "
                           "interrupted upload carries on from what the handheld already holds when you press Upload "
                           "again. The Map screen reads the new map the next time it opens.", dim=True, wrap=True)
         lay.addWidget(self.note)
@@ -730,8 +730,7 @@ class MapView(_View):
         self.sync_enabled()
 
     def on_disconnected(self) -> None:
-        self.running = False
-        self.sync_enabled()
+        self.sync_enabled()   # a running upload reports its own end (the port is released while it runs)
 
     def upload(self) -> None:
         if not self.files or self.running:
@@ -744,9 +743,7 @@ class MapView(_View):
         state = {"start": None, "name": ""}
         retries: list[str] = []
 
-        def work(c, p):
-            return c.put_map_files(files, lambda name, held, size, done, tot: p(done, tot, name),
-                                   lambda n, e: retries.append(f"retry {n}: {e}"))
+        folder = self.path.text().strip()
 
         def prog(job, done, tot, name):
             if state["start"] is None:
@@ -774,7 +771,9 @@ class MapView(_View):
             else:
                 self.prog.show_state("Done: map uploaded", 100,
                                      f"{fmt_bytes(total)} in {fmt_dur(time.monotonic() - t0)}", "ok")
-        self.tab.run(work, done, progress=prog)
+        job = self.tab.worker.map_upload(folder)
+        self.tab._progress[job] = prog
+        self.tab.expect(job, done)
 
 
 try:

@@ -44,17 +44,19 @@ extern "C" {
 /* handheld -> laptop */
 enum { HH_SF_HELLO = 0x40, HH_SF_READ = 0x41, HH_SF_TICK = 0x42, HH_SF_LINK = 0x43, HH_SF_GPS = 0x44,
        HH_SF_EVENT = 0x45, HH_SF_STATS = 0x46, HH_SF_LOG = 0x47, HH_SF_ISO = 0x48, HH_SF_TIME_RSP = 0x49,
-       HH_SF_ACK = 0x4A, HH_SF_FILE_INFO = 0x4B, HH_SF_FILE_DATA = 0x4C };
+       HH_SF_ACK = 0x4A, HH_SF_FILE_INFO = 0x4B, HH_SF_FILE_DATA = 0x4C, HH_SF_MAPUP = 0x4D };
 /* laptop -> handheld (two-way builds only) */
 enum { HH_SC_GET_HELLO = 0x60, HH_SC_TIME_REQ = 0x61, HH_SC_TIME_SET = 0x62, HH_SC_MARK = 0x63,
        HH_SC_ACK_ALARM = 0x64, HH_SC_DRIVE = 0x65, HH_SC_LIST_FILES = 0x66, HH_SC_READ_FILE = 0x67,
-       HH_SC_PUT_BEGIN = 0x68, HH_SC_PUT_DATA = 0x69, HH_SC_PUT_END = 0x6A, HH_SC_DTC = 0x6B };
+       HH_SC_PUT_BEGIN = 0x68, HH_SC_PUT_DATA = 0x69, HH_SC_PUT_END = 0x6A, HH_SC_DTC = 0x6B,
+       HH_SC_MAPUP_OPEN = 0x6C, HH_SC_MAPUP_WRITE = 0x6D, HH_SC_MAPUP_STATUS = 0x6E, HH_SC_MAPUP_COMMIT = 0x6F };
 
 enum { HH_SER_VARIANT_DEFAULT = 0, HH_SER_VARIANT_GPS_P1 = 1 };
 #define HH_SER_CAP_RX       0x0001  /* commands are heard (two-way). Clear = tx-only */
 #define HH_SER_CAP_FILES    0x0002  /* LIST_FILES / READ_FILE */
 #define HH_SER_CAP_PUT      0x0004  /* PUT_* (HANDHELD.MAP, HANDHELD.CFG) */
 #define HH_SER_CAP_LOG      0x0008  /* ESP_LOG lines arrive as LOG frames */
+#define HH_SER_CAP_MAPUP    0x0010  /* MAPUP_* (files into the card's MAP/ folder) */
 
 /* file kinds on the wire */
 enum { HH_SER_F_DRIVE = 1, HH_SER_F_CAPTURE = 2, HH_SER_F_MAP = 3, HH_SER_F_CFG = 4 };
@@ -74,7 +76,7 @@ typedef struct HH_PACKED {
     uint8_t  link_state;            /* HH_LINK_* */
     uint8_t  backend, link_mode;    /* as in a drive file's header */
     uint8_t  n_ch;
-    uint8_t  flags;                 /* 1 built-in map, 2 clock set, 4 clock from GPS, 8 card ok */
+    uint8_t  flags;                 /* 1 built-in map, 2 clock set, 4 clock from GPS, 8 card ok, 16 clock from the GPS pulse (PPS) */
     uint32_t boot_no, baud;
     uint64_t t_us;                  /* device time now */
     int64_t  unix_us;               /* wall clock now, 0 = not known */
@@ -98,7 +100,10 @@ typedef struct HH_PACKED {
     uint8_t  link_state, flags;     /* HH_LINK_*, HH_SER_ST_* */
     uint32_t drive_no, log_bytes, free_mb, markers, stall_count, nmea_good, nmea_bad;
     uint32_t tx_frames, tx_dropped, tx_bytes, rx_frames, rx_bad, ring_peak;     /* this link, since boot */
-} hh_ser_stats_t;                   /* 96 bytes */
+    /* appended after the first revision: a reader that knows only the first 96 bytes ignores these */
+    uint8_t  time_source, rsv[3];   /* HH_TS_*: 0 none, 1 GPS sentences, 2 GPS pulse (PPS), 3 laptop */
+    uint32_t time_err_us;           /* estimate of unix_us's error, 0 = unknown (1000000 for sentences only) */
+} hh_ser_stats_t;                   /* 104 bytes (96 + 8) */
 
 typedef struct HH_PACKED { int64_t host_tx_us; uint64_t dev_rx_us, dev_tx_us; } hh_ser_time_rsp_t;     /* 24 */
 typedef struct HH_PACKED { uint8_t cmd, seq; int16_t status; uint32_t value; } hh_ser_ack_t;           /* 8 */
@@ -112,6 +117,23 @@ typedef struct HH_PACKED { uint8_t kind, rsv[3]; uint32_t after_no; } hh_ser_lis
 typedef struct HH_PACKED { uint8_t kind, rsv; uint16_t len; uint32_t file_no, offset; } hh_ser_read_file_t;   /* 12 */
 typedef struct HH_PACKED { uint8_t kind, rsv[3]; uint32_t size, crc32; } hh_ser_put_begin_t;            /* 12 */
 
+/* Files into MAP/ (SERIAL.md, "Map upload"). The name is "MAP/" and an 8.3 name. */
+#define HH_SER_MAPUP_CHUNK      (HH_SER_MAX_PAYLOAD - 8)    /* most file bytes in one WRITE */
+#define HH_SER_MAPUP_NAME_MAX   16
+#define HH_SER_MAPUP_SIZE_MAX   (128u * 1024u * 1024u)
+#define HH_SER_MAPUP_IDLE_S     10.0    /* no MAPUP frame this long: the map reader gets its files back; the upload can still be carried on */
+#define HH_SER_MAPUP_TMP        "UPLOAD.TMP"    /* in MAP/; a name of that kind is refused */
+#define HH_SER_MAPUP_FINAL     0x01     /* COMMIT: the last file; let the map reader reopen MAP/ at once */
+#define HH_SER_MAPUP_ABORT     0x02     /* COMMIT: drop the file being written, and let go of MAP/ */
+typedef struct HH_PACKED { uint8_t flags, name_len; uint16_t rsv; uint32_t size, crc32; } hh_ser_mapup_open_t;   /* 12 + name */
+typedef struct HH_PACKED { uint32_t offset, crc32; } hh_ser_mapup_write_t;                                      /* 8 + data */
+typedef struct HH_PACKED { uint8_t flags, rsv[3]; } hh_ser_mapup_commit_t;                                      /* 4 */
+#define HH_SER_MU_NONE   0      /* hh_ser_mapup_info_t.state: no upload */
+#define HH_SER_MU_OPEN   1      /*   one is open, the map reader is held off */
+#define HH_SER_MU_PAUSED 2      /*   one is waiting for its next chunk; the map reader has its files */
+/* the answer to MAPUP_STATUS (before its ACK): which file, so that a laptop that starts again knows where it stopped */
+typedef struct HH_PACKED { uint8_t state, rsv1; uint16_t rsv2; uint32_t got, size, crc32; char name[HH_SER_MAPUP_NAME_MAX]; } hh_ser_mapup_info_t;  /* 32 */
+
 /* The card, as the commands need it. Every pointer may be NULL (no card). */
 typedef struct {
     void *ctx;
@@ -123,6 +145,16 @@ typedef struct {
     int (*put_data)(void *ctx, uint32_t offset, const uint8_t *data, uint16_t len);
     /* Check the temporary file (length, crc32, and that a map loads) and move it into place. *value: lines skipped (cfg). */
     int (*put_end)(void *ctx, uint8_t kind, uint32_t size, uint32_t crc, uint32_t *value);
+    /* MAP/ uploads: name is "MAP/xxxxxxxx.xxx", already checked. open: keep = 0 starts MAP/UPLOAD.TMP
+     * (replacing any left over); keep > 0 opens the one there again, which must hold at least that many
+     * bytes. write puts data at offset (always the next byte). pause closes the file and leaves it.
+     * commit reads the temporary file back from the card, checks its length and CRC32 and only then
+     * renames it over name; any failure removes it. abort closes and removes it. */
+    int (*mapup_open)(void *ctx, const char *name, uint32_t size, uint32_t keep);
+    int (*mapup_write)(void *ctx, uint32_t offset, const uint8_t *data, uint16_t len);
+    int (*mapup_commit)(void *ctx, const char *name, uint32_t size, uint32_t crc);
+    void (*mapup_pause)(void *ctx);
+    void (*mapup_abort)(void *ctx);
 } hh_serial_fs_t;
 
 typedef struct {
@@ -133,6 +165,10 @@ typedef struct {
     void *lock_ctx;
     void (*wake)(void *ctx);        /* a frame is waiting: the TX task may stop sleeping. May be NULL */
     hh_serial_fs_t fs;
+    /* The map reader keeps MAP/MAP.IDX and MAP/MAP.DAT open. Called from the command task when a
+     * MAP/ upload starts (on = 1: close them and stay off the folder; returns 0 once they are closed,
+     * non-zero if that did not happen in time) and when it ends (on = 0: may open them again). May be NULL. */
+    int (*map_hold)(int on);
     hh_ring_t ring;
     uint8_t  item[2 + HH_SER_MAX_PAYLOAD];  /* a frame being queued (under the lock): off the producers' stacks */
     uint8_t  seq, variant;
@@ -147,6 +183,11 @@ typedef struct {
     /* a file being pushed */
     uint8_t  put_kind;              /* 0 = none */
     uint32_t put_size, put_crc, put_got;
+    /* a MAP/ file being uploaded */
+    uint8_t  mapup_active, mapup_held;      /* an upload exists / its file is open and the map reader has been told to keep off */
+    char     mapup_name[HH_SER_MAPUP_NAME_MAX + 1];
+    uint32_t mapup_size, mapup_crc, mapup_got;
+    double   mapup_t;                       /* time of the last MAPUP frame */
 } hh_serial_t;
 
 /* mem/size: the ring (16 KB or more). caps without HH_SER_CAP_RX = tx-only. */
@@ -165,6 +206,9 @@ void hh_serial_log(hh_serial_t *s, const char *text, size_t len);
 size_t hh_serial_poll(hh_serial_t *s, uint8_t *out, size_t cap);
 /* RX task (two-way builds): bytes from the laptop. */
 void hh_serial_rx(hh_serial_t *s, const uint8_t *data, size_t len);
+/* Command task, after each read and each timeout: a MAP/ upload that has gone quiet for HH_SER_MAPUP_IDLE_S
+ * gives the map reader its files back. The temporary file stays, and the next chunk carries on. */
+void hh_serial_tick(hh_serial_t *s);
 /* 1 while the laptop has been heard within HH_SER_HOST_S. */
 int  hh_serial_host_attached(const hh_serial_t *s);
 
@@ -175,7 +219,7 @@ int      hh_cobs_decode(const uint8_t *in, size_t len, uint8_t *out);   /* bytes
 size_t   hh_ser_frame(uint8_t type, uint8_t seq, const uint8_t *payload, size_t len, uint8_t *out);
 
 /* The card through stdio under a root folder ("/sd"): port/hh_serfs.c. */
-typedef struct { char root[200]; hh_core_t *core; void *fh; uint8_t kind; uint32_t file_no, size; void *put; } hh_serfs_t;
+typedef struct { char root[200]; hh_core_t *core; void *fh; uint8_t kind; uint32_t file_no, size; void *put; void *mup; } hh_serfs_t;
 void hh_serfs_init(hh_serfs_t *fs, const char *root, hh_core_t *core, hh_serial_fs_t *ops);
 
 #ifdef __cplusplus

@@ -179,6 +179,8 @@ class CydSim(HlMixin):
         self.keep_sent = False
         #: stop answering READ_FILE after this many more answers (the cable is pulled mid-transfer)
         self.file_answers_left: int | None = None
+        #: stop answering MAPUP_WRITE after this many more answers (the cable is pulled mid-upload)
+        self.mapup_answers_left: int | None = None
         self.silent = False                 # True: the UART sends nothing (unplugged)
         # the card
         self.record = record and self.sd is not None
@@ -186,6 +188,10 @@ class CydSim(HlMixin):
         self._drive_no = 0
         self._hold = False
         self._put: dict[str, Any] | None = None
+        self._mapup: dict[str, Any] | None = None   # the MAP/ file being uploaded: name, size, crc, got, fh, t
+        self._mapup_t = 0.0
+        self.map_held = False                       # the map reader has been told to keep off MAP/ (a real handheld closes its files)
+        self.map_commits: list[str] = []            # names renamed into place, in order
         self.time_set: int | None = None
         if self.sd is not None:
             (self.sd / "DRIVES").mkdir(parents=True, exist_ok=True)
@@ -255,7 +261,7 @@ class CydSim(HlMixin):
         return data
 
     def hello(self) -> P.Hello:
-        caps = P.CAP_LOG if self.tx_only else P.CAP_RX | P.CAP_LOG | (P.CAP_FILES | P.CAP_PUT if self.sd else 0)
+        caps = P.CAP_LOG if self.tx_only else P.CAP_RX | P.CAP_LOG | (P.CAP_FILES | P.CAP_PUT | P.CAP_MAPUP if self.sd else 0)
         unix = self.unix_us(self.now)
         state = P.LINK_OK if self._up else P.LINK_OFF if self._down_since is not None else P.LINK_CONNECTING
         return P.Hello(P.REV, P.VARIANT_GPS_P1 if self.tx_only else P.VARIANT_DEFAULT, caps, FW, self.device,
@@ -270,7 +276,10 @@ class CydSim(HlMixin):
         flags = ((P.ST_SD_OK if self.sd else 0) | (P.ST_RECORDING if self._drive else 0)
                  | (P.ST_GPS_FIX if self.gps else 0) | (P.ST_TIME if self.unix_us(self.now) else 0)
                  | (P.ST_ARMED if self._armed else 0) | (P.ST_HOST if self.host_attached() else 0))
+        # the clock's source, as the firmware says it: sentences (about a second) with a GPS, else the laptop's, else none
+        source = P.TS_NMEA if self.gps else P.TS_HOST if self.time_set is not None else P.TS_NONE
         self._send(P.SF_STATS, P.pack_stats(
+            time_source=source, time_err_us=1_000_000 if source == P.TS_NMEA else 0,
             t_us=_us(self.now), unix_us=self.unix_us(self.now), reads=self.reads, errors=self.errors,
             hz_c=int(self.hz * 100), link_state=P.LINK_OK if self._up else P.LINK_OFF, flags=flags,
             drive_no=self._drive.file_no if self._drive else 0,
@@ -365,6 +374,7 @@ class CydSim(HlMixin):
             if due > t:
                 break
             self.now = max(self.now, due)
+            self._mapup_idle()
             if due == self._next_hello:
                 self._next_hello += P.HELLO_S
                 self._send(P.SF_HELLO, self.hello().pack())
@@ -383,6 +393,7 @@ class CydSim(HlMixin):
                 self._exchange()
         self.now = max(self.now, t)
         self._hl_tick()
+        self._mapup_idle()
 
     def gps_fix(self, t: float) -> bytes:
         """One GPS record at device time ``t``: where the car has got to."""
@@ -450,6 +461,8 @@ class CydSim(HlMixin):
             self._read_file(seq, *P.READ_FILE.unpack(p[:P.READ_FILE.size]))
         elif ftype in (P.SC_PUT_BEGIN, P.SC_PUT_DATA, P.SC_PUT_END):
             self._put_cmd(ftype, seq, p)
+        elif ftype in (P.SC_MAPUP_OPEN, P.SC_MAPUP_WRITE, P.SC_MAPUP_STATUS, P.SC_MAPUP_COMMIT):
+            self._mapup_cmd(ftype, seq, p)
         else:
             self._ack(ftype, seq, P.E_UNSUPPORTED if ftype not in (P.SC_TIME_REQ, P.SC_TIME_SET, P.SC_DRIVE,
                                                                    P.SC_LIST_FILES, P.SC_READ_FILE) else P.E_ARG)
@@ -561,6 +574,137 @@ class CydSim(HlMixin):
             final.write_bytes(data)
             self._ack(ftype, seq, P.OK, value)
 
+    # ---- files into MAP/ (SERIAL.md, "Map upload") ----
+
+    def _mapup_drop(self) -> None:
+        up, self._mapup = self._mapup, None
+        if up is not None:
+            if up["fh"] is not None:
+                up["fh"].close()
+            (self.sd / "MAP" / "UPLOAD.TMP").unlink(missing_ok=True)       # type: ignore[operator]
+
+    def _mapup_release(self) -> None:
+        self._mapup_drop()
+        self.map_held = False
+
+    def _mapup_idle(self) -> None:
+        """Quiet for a while: the map reader has its files back, the temporary file stays (the upload is paused)."""
+        if self.map_held and self.now - self._mapup_t > P.MAPUP_IDLE_S:
+            if self._mapup is not None and self._mapup["fh"] is not None:
+                self._mapup["fh"].close()
+                self._mapup["fh"] = None
+            self.map_held = False
+
+    def _mapup_take(self) -> bool:
+        """The upload takes the folder (again): the map reader is held off and the temporary file reopened."""
+        up = self._mapup
+        if up is not None and up["fh"] is None:
+            tmp = self.sd / "MAP" / "UPLOAD.TMP"            # type: ignore[operator]
+            if not tmp.is_file() or tmp.stat().st_size < up["got"]:
+                self._mapup = None                          # taken away: the session is over
+                self.map_held = False
+                return False
+            up["fh"] = open(tmp, "r+b")
+        self.map_held = True
+        return True
+
+    def _mapup_cmd(self, ftype: int, seq: int, p: bytes) -> None:
+        if self.sd is None:
+            self._ack(ftype, seq, P.E_UNSUPPORTED)
+            return
+        self._mapup_t = self.now
+        up = self._mapup
+        folder = self.sd / "MAP"
+        if ftype == P.SC_MAPUP_OPEN:
+            if len(p) < P.MAPUP_OPEN.size:
+                self._ack(ftype, seq, P.E_ARG)
+                return
+            _flags, name_len, size, crc = P.MAPUP_OPEN.unpack(p[:P.MAPUP_OPEN.size])
+            raw = p[P.MAPUP_OPEN.size:]
+            name = raw.decode("ascii", "replace")
+            if len(raw) != name_len or not P.mapup_name_ok(name) or not 0 < size <= P.MAPUP_SIZE_MAX:
+                self._ack(ftype, seq, P.E_REFUSED)
+                return
+            if up and (up["name"], up["size"], up["crc"]) == (name, size, crc):
+                if not self._mapup_take():                          # the same file again: carry on
+                    self._ack(ftype, seq, P.E_IO)
+                    return
+                self._ack(ftype, seq, P.OK, up["got"])
+                return
+            self._mapup_drop()
+            self.map_held = True
+            folder.mkdir(exist_ok=True)
+            self._mapup = {"name": name, "size": size, "crc": crc, "got": 0,
+                           "fh": open(folder / "UPLOAD.TMP", "wb")}
+            self._ack(ftype, seq)
+        elif ftype == P.SC_MAPUP_WRITE:
+            if len(p) < P.MAPUP_WRITE.size + 1:
+                self._ack(ftype, seq, P.E_ARG)
+                return
+            if up is None:
+                self._ack(ftype, seq, P.E_STATE)
+                return
+            if self.mapup_answers_left is not None:
+                if self.mapup_answers_left <= 0:
+                    return                  # the cable is out: nothing arrives, nothing is answered
+                self.mapup_answers_left -= 1
+            offset, crc = P.MAPUP_WRITE.unpack(p[:P.MAPUP_WRITE.size])
+            data = p[P.MAPUP_WRITE.size:]
+            got = up["got"]
+            if F.crc32(data) != crc:
+                self._ack(ftype, seq, P.E_CRC, got)
+            elif offset + len(data) <= got:
+                self._ack(ftype, seq, P.OK, got)
+            elif offset != got:
+                self._ack(ftype, seq, P.E_OFFSET, got)
+            elif got + len(data) > up["size"]:
+                self._ack(ftype, seq, P.E_ARG, got)
+            elif not self._mapup_take():
+                self._ack(ftype, seq, P.E_STATE)
+            else:
+                up["fh"].seek(offset)
+                up["fh"].write(data)
+                up["fh"].flush()
+                up["got"] = got + len(data)
+                self._ack(ftype, seq, P.OK, up["got"])
+        elif ftype == P.SC_MAPUP_STATUS:
+            if up:
+                state = P.MU_OPEN if up["fh"] is not None else P.MU_PAUSED
+                self._send(P.SF_MAPUP, P.MAPUP_INFO.pack(state, up["got"], up["size"], up["crc"],
+                                                         F.fit(up["name"], 16)))
+            else:
+                self._send(P.SF_MAPUP, P.MAPUP_INFO.pack(P.MU_NONE, 0, 0, 0, b""))
+            self._ack(ftype, seq, P.OK if up else P.E_STATE, up["got"] if up else 0)
+        else:
+            flags = p[0] if p else 0
+            if flags & P.MAPUP_ABORT:
+                self._mapup_release()
+                self._ack(ftype, seq)
+                return
+            if up is None:
+                self._ack(ftype, seq, P.E_STATE)
+                return
+            if up["got"] != up["size"]:
+                self._ack(ftype, seq, P.E_STATE, up["got"])
+                return
+            if not self._mapup_take():
+                self._ack(ftype, seq, P.E_STATE)
+                return
+            up["fh"].close()
+            tmp = folder / "UPLOAD.TMP"
+            self._mapup = None
+            data = tmp.read_bytes()                                 # what is on the "card" counts
+            if len(data) != up["size"] or F.crc32(data) != up["crc"]:
+                tmp.unlink(missing_ok=True)
+                status, value = P.E_CRC, 0
+            else:
+                tmp.replace(folder / up["name"][4:])
+                self.map_commits.append(up["name"])
+                status, value = P.OK, up["size"]
+            if flags & P.MAPUP_FINAL:
+                self.map_held = False
+            self._ack(ftype, seq, status, value)
+
 
 def _cfg_defaults() -> str:
     from .mapfile import DEFAULT_CFG
@@ -604,7 +748,7 @@ class SimPort:
 
     def open(self) -> None:
         if self._t0 is None:
-            self._t0 = self._clock()
+            self._t0 = self._clock() - self.sim.now     # a second port on a simulator that has been running carries on
 
     def close(self) -> None:
         pass
@@ -644,7 +788,7 @@ HELP = "keys: s stall (rpm 0)  p power cut (ECU silent)  r restart  m marker  q 
 
 
 def serve(sim: CydSim, link_path: str = CYDSIM_SYMLINK, keys: bool = True, run_for: float | None = None,
-          out: Any = sys.stdout, wire_baud: int | None = None) -> None:
+          out: Any = sys.stdout, stop: Any = None, wire_baud: int | None = None) -> None:
     """Put the simulator on a pseudo-terminal until 'q', Ctrl+C or run_for."""
     import termios
     import tty
@@ -674,7 +818,7 @@ def serve(sim: CydSim, link_path: str = CYDSIM_SYMLINK, keys: bool = True, run_f
     credit_tx = credit_rx = 0.0
     last_t = time.monotonic()
     try:
-        while run_for is None or time.monotonic() - t0 < run_for:
+        while (run_for is None or time.monotonic() - t0 < run_for) and not (stop is not None and stop.is_set()):
             fds = [master] + ([stdin_fd] if stdin_fd is not None else [])
             ready, _, _ = select.select(fds, [], [], 0.004)
             now = time.monotonic()

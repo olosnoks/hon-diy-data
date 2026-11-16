@@ -11,6 +11,13 @@ CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_CAPS_ALLOC=y
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 
+# Executable-in-place from PSRAM (selects CONFIG_SPIRAM_FETCH_INSTRUCTIONS and
+# CONFIG_SPIRAM_RODATA): the app's code and read-only data run from PSRAM, so
+# a flash write (an NVS commit, say) does not switch off the cache path to
+# PSRAM while the RGB panel's interrupt reads frames from it. ESP-IDF
+# recommends it for RGB panels with PSRAM frame buffers.
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_FREERTOS_HZ=1000

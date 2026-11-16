@@ -118,10 +118,12 @@ TEST(test_framing)
 {
     uint8_t in[700], enc[720], dec[720], out[HH_SER_FRAME_MAX];
     CHECK(hh_crc16((const uint8_t *)"123456789", 9) == 0x29B1);
-    CHECK(sizeof(hh_ser_hello_t) == 96 && sizeof(hh_ser_stats_t) == 96 && sizeof(hh_ser_ack_t) == 8);
+    CHECK(sizeof(hh_ser_hello_t) == 96 && sizeof(hh_ser_stats_t) == 104 && sizeof(hh_ser_ack_t) == 8);
     CHECK(sizeof(hh_tap_read_t) == 12 && sizeof(hh_tap_tick_t) == 16 && sizeof(hh_tap_link_t) == 12 && sizeof(hh_tap_iso_t) == 12);
     CHECK(sizeof(hh_ser_time_rsp_t) == 24 && sizeof(hh_ser_file_info_t) == 12 && sizeof(hh_ser_file_data_t) == 16);
     CHECK(sizeof(hh_ser_list_t) == 8 && sizeof(hh_ser_read_file_t) == 12 && sizeof(hh_ser_put_begin_t) == 12);
+    CHECK(sizeof(hh_ser_mapup_open_t) == 12 && sizeof(hh_ser_mapup_write_t) == 8 && sizeof(hh_ser_mapup_commit_t) == 4 && sizeof(hh_ser_mapup_info_t) == 32);
+    CHECK(8 + HH_SER_MAPUP_CHUNK == HH_SER_MAX_PAYLOAD);
 
     /* COBS: the classic vectors */
     static const uint8_t v1[] = {0x00}, e1[] = {0x01, 0x01};
@@ -382,7 +384,7 @@ TEST(test_tx_only)
     run(h, 5.0);
     hh_ser_hello_t hello;
     memcpy(&hello, last(HH_SF_HELLO)->p, sizeof(hello));
-    CHECK(hello.variant == HH_SER_VARIANT_GPS_P1 && !(hello.caps & (HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT)));
+    CHECK(hello.variant == HH_SER_VARIANT_GPS_P1 && !(hello.caps & (HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP)));
     CHECK(rx.count[HH_SF_READ] > 200 && rx.count[HH_SF_TICK] > 70);
     /* whatever arrives on the pin (it is the GPS's line) is not a command */
     hh_snapshot_t before, after;
@@ -692,6 +694,279 @@ TEST(test_commands)
     hhhost_free(h);
 }
 
+
+/* ---- MAP/ uploads --------------------------------------------------------------------- */
+
+static int hold_on, hold_off, hold_fail;
+static int test_hold(int on)
+{
+    if (!on) { hold_off++; return 0; }
+    if (hold_fail) return -1;
+    hold_on++;
+    return 0;
+}
+
+static int mu_open(hhhost_t *h, const char *name, uint32_t size, uint32_t crc, uint32_t *value)
+{
+    uint8_t msg[sizeof(hh_ser_mapup_open_t) + 64];
+    size_t nl = strlen(name);
+    hh_ser_mapup_open_t o = {0, (uint8_t)nl, 0, size, crc};
+    memcpy(msg, &o, sizeof(o));
+    memcpy(msg + sizeof(o), name, nl);
+    send(h, HH_SC_MAPUP_OPEN, msg, sizeof(o) + nl);
+    return acked(HH_SC_MAPUP_OPEN, value);
+}
+
+static int mu_write(hhhost_t *h, uint32_t off, const uint8_t *d, uint32_t n, uint32_t crc, uint32_t *value)
+{
+    uint8_t msg[8 + HH_SER_MAPUP_CHUNK];
+    hh_ser_mapup_write_t w = {off, crc};
+    memcpy(msg, &w, sizeof(w));
+    memcpy(msg + sizeof(w), d, n);
+    send(h, HH_SC_MAPUP_WRITE, msg, sizeof(w) + n);
+    return acked(HH_SC_MAPUP_WRITE, value);
+}
+
+static int mu_chunk(hhhost_t *h, const uint8_t *data, uint32_t size, uint32_t off, uint32_t *value)
+{
+    uint32_t n = size - off < HH_SER_MAPUP_CHUNK ? size - off : HH_SER_MAPUP_CHUNK;
+    return mu_write(h, off, data + off, n, hh_crc32(0, data + off, n), value);
+}
+
+static int mu_commit(hhhost_t *h, uint8_t flags, uint32_t *value)
+{
+    hh_ser_mapup_commit_t c = {flags, {0, 0, 0}};
+    send(h, HH_SC_MAPUP_COMMIT, &c, sizeof(c));
+    return acked(HH_SC_MAPUP_COMMIT, value);
+}
+
+static int mu_status(hhhost_t *h, uint32_t *value)
+{
+    send(h, HH_SC_MAPUP_STATUS, NULL, 0);
+    return acked(HH_SC_MAPUP_STATUS, value);
+}
+
+static uint8_t *make_data(uint32_t n, uint32_t seed)
+{
+    uint8_t *d = malloc(n);
+    uint32_t r = seed;
+    for (uint32_t i = 0; i < n; i++) { r = r * 1664525u + 1013904223u; d[i] = (uint8_t)(r >> 15); }
+    return d;
+}
+
+static int file_is(const char *path, const uint8_t *data, uint32_t n)
+{
+    long size;
+    uint8_t *got = slurp(path, &size);
+    int ok = size == (long)n && memcmp(got, data, n) == 0;
+    free(got);
+    return ok;
+}
+
+TEST(test_map_upload)
+{
+    char fin[400], tmp[400], dat[400], old[400];
+    const char *root = fresh_dir();
+    uint32_t value = 0;
+    const uint32_t N = 2000;                    /* 504 + 504 + 504 + 488 */
+    uint8_t *a = make_data(N, 1), *b = make_data(N + 300, 2);
+    uint32_t crc_a = hh_crc32(0, a, N), crc_b = hh_crc32(0, b, N + 300);
+    hhsim_reset();
+    hhhost_t *h = hhhost_new(root, NULL, 0, NULL, hhsim_callbacks(), 1, 0);
+    hh_serial_t *s = hhhost_serial(h, 0, 0);
+    s->map_hold = test_hold;
+    rx_reset();
+    run(h, 3.0);
+    snprintf(fin, sizeof(fin), "%s/MAP/MAP.IDX", root);
+    snprintf(dat, sizeof(dat), "%s/MAP/MAP.DAT", root);
+    snprintf(tmp, sizeof(tmp), "%s/MAP/" HH_SER_MAPUP_TMP, root);
+    snprintf(old, sizeof(old), "%s/MAP/UPLOAD.OLD", root);
+    {   /* the hello says this firmware can */
+        hh_ser_hello_t hello;
+        send(h, HH_SC_GET_HELLO, NULL, 0);
+        memcpy(&hello, last(HH_SF_HELLO)->p, sizeof(hello));
+        CHECK(hello.caps & HH_SER_CAP_MAPUP);
+    }
+
+    /* the temporary file first, the real one only at the commit; the map reader is held off from the first byte */
+    CHECK(mu_status(h, NULL) == HH_SER_E_STATE);
+    CHECK(mu_open(h, "MAP/MAP.IDX", N, crc_a, &value) == HH_SER_OK && value == 0);
+    CHECK(hold_on == 1 && hold_off == 0);
+    CHECK(file_size(tmp) == 0 && file_size(fin) == -1);
+    CHECK(mu_chunk(h, a, N, 0, &value) == HH_SER_OK && value == 504);
+    CHECK(mu_chunk(h, a, N, 504, &value) == HH_SER_OK && value == 1008);
+    CHECK(file_size(fin) == -1 && file_is(tmp, a, 1008));
+    CHECK(mu_status(h, &value) == HH_SER_OK && value == 1008);
+
+    /* the logger and the K-line go on while it is held */
+    run(h, SIM.now + 2.0);
+    hh_snapshot_t snap;
+    hhhost_snapshot(h, &snap);
+    CHECK(snap.link.state == HH_LINK_OK && SIM.mode4_seen == 0 && hh_core_link_stats(hhhost_core(h))->blocked == 0);
+
+    /* a chunk with a bad CRC is refused and not counted; so is one out of order; a repeat is a no-op */
+    CHECK(mu_write(h, 1008, a + 1008, 504, hh_crc32(0, a + 1008, 504) ^ 0x10, &value) == HH_SER_E_CRC && value == 1008);
+    {   /* the data itself damaged on the way: its CRC is the original's */
+        uint32_t good = hh_crc32(0, a + 1008, 504);
+        a[1100] ^= 0x01;
+        CHECK(mu_write(h, 1008, a + 1008, 504, good, &value) == HH_SER_E_CRC && value == 1008);
+        a[1100] ^= 0x01;
+    }
+    CHECK(mu_write(h, 1512, a + 1512, 488, hh_crc32(0, a + 1512, 488), &value) == HH_SER_E_OFFSET && value == 1008);
+    CHECK(mu_write(h, 504, a + 504, 504, hh_crc32(0, a + 504, 504), &value) == HH_SER_OK && value == 1008);
+    CHECK(file_is(tmp, a, 1008));
+    CHECK(mu_commit(h, 0, &value) == HH_SER_E_STATE && value == 1008);          /* not all there yet */
+
+    /* the cable was pulled here: asking for the same file again carries on, the hold is not taken twice */
+    CHECK(mu_open(h, "MAP/MAP.IDX", N, crc_a, &value) == HH_SER_OK && value == 1008);
+    CHECK(hold_on == 1);
+    CHECK(mu_chunk(h, a, N, 1008, &value) == HH_SER_OK && value == 1512);
+    CHECK(mu_chunk(h, a, N, 1512, &value) == HH_SER_OK && value == N);
+    CHECK(file_size(fin) == -1);
+    CHECK(mu_commit(h, 0, &value) == HH_SER_OK && value == N);
+    CHECK(file_is(fin, a, N) && file_size(tmp) == -1 && file_size(old) == -1);
+    CHECK(hold_off == 0);                       /* more files may follow: still held */
+    CHECK(mu_status(h, NULL) == HH_SER_E_STATE);
+
+    /* replacing a file that is there: the old one stays whole until the commit */
+    FILE *f = fopen(dat, "wb");
+    fwrite("OLD", 1, 3, f);
+    fclose(f);
+    CHECK(mu_open(h, "MAP/MAP.DAT", N + 300, crc_b, &value) == HH_SER_OK && value == 0);
+    CHECK(hold_on == 1);
+    for (uint32_t off = 0; off < N + 300; off += HH_SER_MAPUP_CHUNK) {
+        CHECK(mu_chunk(h, b, N + 300, off, &value) == HH_SER_OK);
+        CHECK(off + HH_SER_MAPUP_CHUNK >= N + 300 || file_size(dat) == 3);
+    }
+    CHECK(value == N + 300 && file_is(tmp, b, N + 300) && file_size(dat) == 3);
+    CHECK(mu_commit(h, HH_SER_MAPUP_FINAL, &value) == HH_SER_OK);
+    CHECK(file_is(dat, b, N + 300) && file_size(tmp) == -1 && file_size(old) == -1);
+    CHECK(hold_off == 1);                       /* the last one: the map reader may open the files */
+
+    /* the whole-file CRC is wrong (every chunk was fine): refused, the real file untouched, the temporary one gone */
+    CHECK(mu_open(h, "MAP/MAP.IDX", N, crc_a ^ 1, &value) == HH_SER_OK);
+    CHECK(hold_on == 2);
+    for (uint32_t off = 0; off < N; off += HH_SER_MAPUP_CHUNK) CHECK(mu_chunk(h, a, N, off, &value) == HH_SER_OK);
+    CHECK(mu_commit(h, HH_SER_MAPUP_FINAL, &value) == HH_SER_E_CRC);
+    CHECK(file_is(fin, a, N) && file_size(tmp) == -1 && hold_off == 2);
+    CHECK(mu_status(h, NULL) == HH_SER_E_STATE);
+    CHECK(mu_commit(h, 0, NULL) == HH_SER_E_STATE);
+
+    /* a write with nothing open */
+    CHECK(mu_write(h, 0, a, 10, hh_crc32(0, a, 10), NULL) == HH_SER_E_STATE);
+
+    /* names: only MAP/ and an 8.3 name; nothing is created, nothing is held */
+    static const char *const bad[] = {"MAP/../MAP.IDX", "../MAP/A.B", "MAP/SUB/A.B", "/MAP/A.B", "MAP/", "MAP/.HID", "MAP/LONGNAME9.DAT",
+        "MAP/A.LONG", "MAP/a.dat", "MAP/A B.DAT", "MAP/A..B", "MAP/A.B.C", "MAP/UPLOAD.TMP", "HANDHELD.MAP", "MAP\\A.DAT",
+        "MAP/MAP.DAT/", "map/MAP.DAT", "MAPS/A.DAT", "MAP", "MAP/A/../B", "MAP/..", "MAP/.", "MAP/A:B", "MAP/A*.DAT", "MAP/ABCDEFGH.TXTX",
+        "DRIVES/D000001.HHD", "MAP/A\x01.DAT"};
+    int holds = hold_on;
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        CHECK(mu_open(h, bad[i], 100, 0, NULL) == HH_SER_E_REFUSED);
+    }
+    {   /* an embedded NUL, and a name length that does not match the frame */
+        uint8_t msg[sizeof(hh_ser_mapup_open_t) + 16];
+        hh_ser_mapup_open_t o = {0, 9, 0, 100, 0};
+        memcpy(msg, &o, sizeof(o));
+        memcpy(msg + sizeof(o), "MAP/A\0.DAT", 10);
+        send(h, HH_SC_MAPUP_OPEN, msg, sizeof(o) + 9);
+        CHECK(acked(HH_SC_MAPUP_OPEN, NULL) == HH_SER_E_REFUSED);
+        o.name_len = 11;
+        memcpy(msg, &o, sizeof(o));
+        memcpy(msg + sizeof(o), "MAP/MAP.IDX", 11);
+        send(h, HH_SC_MAPUP_OPEN, msg, sizeof(o) + 10);           /* shorter than it says */
+        CHECK(acked(HH_SC_MAPUP_OPEN, NULL) == HH_SER_E_REFUSED);
+        send(h, HH_SC_MAPUP_OPEN, msg, 5);                        /* not even a header */
+        CHECK(acked(HH_SC_MAPUP_OPEN, NULL) == HH_SER_E_ARG);
+    }
+    CHECK(mu_open(h, "MAP/MAP.IDX", 0, 0, NULL) == HH_SER_E_REFUSED);
+    CHECK(mu_open(h, "MAP/MAP.IDX", HH_SER_MAPUP_SIZE_MAX + 1, 0, NULL) == HH_SER_E_REFUSED);
+    CHECK(hold_on == holds && file_size(tmp) == -1);
+    CHECK(file_is(fin, a, N));
+    snprintf(old, sizeof(old), "%s/MAP/SUB", root);
+    CHECK(file_size(old) == -1);
+    snprintf(old, sizeof(old), "%s/A.B", root);
+    CHECK(file_size(old) == -1);
+
+    /* the map reader does not let go in time: busy, nothing opened; the same request later works */
+    hold_fail = 1;
+    CHECK(mu_open(h, "MAP/README.TXT", 100, 0, NULL) == HH_SER_E_BUSY && file_size(tmp) == -1);
+    hold_fail = 0;
+    CHECK(mu_open(h, "MAP/README.TXT", 100, 0, NULL) == HH_SER_OK);
+
+    /* opening another file drops this one (a different name, size or CRC is a new upload) */
+    holds = hold_on;
+    CHECK(mu_open(h, "MAP/README.TXT", 200, 0, &value) == HH_SER_OK && value == 0);
+    CHECK(hold_on == holds);                    /* still held from before: not asked again */
+    CHECK(mu_chunk(h, a, 200, 0, &value) == HH_SER_OK && value == 200);
+    CHECK(mu_commit(h, HH_SER_MAPUP_ABORT, NULL) == HH_SER_OK);   /* abort: gone, and the reader is free */
+    CHECK(file_size(tmp) == -1 && mu_status(h, NULL) == HH_SER_E_STATE && hold_off == 3);
+
+    /* the laptop went away mid-file: after HH_SER_MAPUP_IDLE_S the map reader has its files back, the
+     * temporary file stays, and the next chunk takes the folder again and carries on */
+    int on0 = hold_on, off0 = hold_off;
+    uint32_t crc_r = hh_crc32(0, a, 1000);
+    CHECK(mu_open(h, "MAP/README.TXT", 1000, crc_r, NULL) == HH_SER_OK);
+    CHECK(mu_chunk(h, a, 1000, 0, &value) == HH_SER_OK && value == 504 && file_size(tmp) == 504);
+    SIM.now += HH_SER_MAPUP_IDLE_S - 1.0;
+    hh_serial_tick(s);
+    CHECK(hold_on == on0 + 1 && hold_off == off0);
+    SIM.now += 2.0;
+    hh_serial_tick(s);
+    CHECK(file_size(tmp) == 504 && hold_off == off0 + 1);
+    hh_serial_tick(s);
+    CHECK(hold_off == off0 + 1);                                  /* once */
+    CHECK(mu_status(h, &value) == HH_SER_OK && value == 504);
+    {
+        hh_ser_mapup_info_t info;
+        memcpy(&info, last(HH_SF_MAPUP)->p, sizeof(info));
+        CHECK(last(HH_SF_MAPUP)->len == sizeof(info) && info.state == HH_SER_MU_PAUSED && info.got == 504
+              && info.size == 1000 && info.crc32 == crc_r && strcmp(info.name, "MAP/README.TXT") == 0);
+    }
+    CHECK(mu_open(h, "MAP/README.TXT", 1000, crc_r, &value) == HH_SER_OK && value == 504);   /* same file: resumed */
+    CHECK(hold_on == on0 + 2);
+    CHECK(mu_status(h, NULL) == HH_SER_OK);
+    {
+        hh_ser_mapup_info_t info;
+        memcpy(&info, last(HH_SF_MAPUP)->p, sizeof(info));
+        CHECK(info.state == HH_SER_MU_OPEN);
+    }
+    SIM.now += HH_SER_MAPUP_IDLE_S + 1.0;
+    hh_serial_tick(s);                                            /* paused again: a chunk alone brings it back */
+    CHECK(hold_off == off0 + 2);
+    CHECK(mu_chunk(h, a, 1000, 504, &value) == HH_SER_OK && value == 1000 && hold_on == on0 + 3);
+    SIM.now += HH_SER_MAPUP_IDLE_S + 1.0;
+    hh_serial_tick(s);                                            /* paused with all of it in: the commit takes the folder */
+    CHECK(hold_off == off0 + 3);
+    CHECK(mu_commit(h, HH_SER_MAPUP_FINAL, &value) == HH_SER_OK && value == 1000);
+    CHECK(hold_on == on0 + 4 && hold_off == off0 + 4);
+    snprintf(old, sizeof(old), "%s/MAP/README.TXT", root);
+    CHECK(file_is(old, a, 1000) && file_size(tmp) == -1);
+    CHECK(mu_status(h, NULL) == HH_SER_E_STATE);
+    CHECK(file_is(fin, a, N) && file_is(dat, b, N + 300));
+    /* a paused file that a stale temporary file cannot back (it was taken away): the chunk is refused, the session ends */
+    CHECK(mu_open(h, "MAP/README.TXT", 1000, crc_r, NULL) == HH_SER_OK);
+    CHECK(mu_chunk(h, a, 1000, 0, &value) == HH_SER_OK);
+    SIM.now += HH_SER_MAPUP_IDLE_S + 1.0;
+    hh_serial_tick(s);
+    remove(tmp);
+    CHECK(mu_chunk(h, a, 1000, 504, &value) == HH_SER_E_STATE);
+    CHECK(mu_status(h, NULL) == HH_SER_E_STATE);
+    snprintf(old, sizeof(old), "%s/MAP/UPLOAD.OLD", root);
+
+    /* more than the file said it would be */
+    CHECK(mu_open(h, "MAP/README.TXT", 100, 0, NULL) == HH_SER_OK);
+    CHECK(mu_write(h, 0, a, 101, hh_crc32(0, a, 101), &value) == HH_SER_E_ARG && value == 0);
+    CHECK(mu_write(h, 0, a, 0, 0, NULL) == HH_SER_E_ARG);
+    mu_commit(h, HH_SER_MAPUP_ABORT, NULL);
+
+    /* the K-line saw nothing but reads */
+    run(h, SIM.now + 5.0);
+    CHECK(SIM.bad_frames_sent == 0 && SIM.mode4_seen == 0 && rx.bad == 0);
+    free(a); free(b);
+    hhhost_free(h);
+}
+
 /* No card: the stream runs, file commands say they cannot. */
 TEST(test_no_card_ops)
 {
@@ -710,8 +985,65 @@ TEST(test_no_card_ops)
     hh_ser_put_begin_t pb = {HH_SER_F_CFG, {0, 0, 0}, 10, 0};
     send(h, HH_SC_PUT_BEGIN, &pb, sizeof(pb));
     CHECK(acked(HH_SC_PUT_BEGIN, NULL) == HH_SER_E_UNSUPPORTED);
+    CHECK(mu_open(h, "MAP/MAP.IDX", 100, 0, NULL) == HH_SER_E_UNSUPPORTED);
     send(h, HH_SC_MARK, NULL, 0);
     CHECK(acked(HH_SC_MARK, NULL) == HH_SER_OK);
+    hhhost_free(h);
+}
+
+/* ---- the clock on the link: hello and stats carry the time source ---------------------------- */
+
+static void nmea_line(char *out, size_t cap, const char *body)
+{
+    uint8_t sum = 0;
+    for (const char *c = body; *c; c++) sum ^= (uint8_t)*c;
+    snprintf(out, cap, "$%s*%02X\r\n", body, sum);
+}
+
+TEST(test_time_source_on_the_link)
+{
+    hhsim_reset();
+    hhhost_t *h = hhhost_new(fresh_dir(), NULL, 0, NULL, hhsim_callbacks(), 1, 0);
+    hh_serial_t *s = hhhost_serial(h, 0, 0);
+    hh_core_t *core = hhhost_core(h);
+    (void)s;
+    rx_reset();
+    run(h, 3.0);
+    hh_ser_stats_t st;
+    hh_ser_hello_t hello;
+    run(h, 4.0);
+    memcpy(&st, last(HH_SF_STATS)->p, sizeof(st));
+    CHECK(last(HH_SF_STATS)->len == sizeof(st) && st.time_source == HH_TS_NONE && st.unix_us == 0 && st.time_err_us == 0);
+
+    /* 2026-11-15 12:35:19 UTC + k, the pulse at the start of each second of device time 5 + k */
+    const int64_t u0 = 1794746119LL;
+    for (int k = 0; k < 14; k++) {
+        char gga[128], rmc[128], body[128];
+        double t = 5.0 + k;
+        int sec = (int)((u0 + k) % 60);
+        run(h, t);
+        hh_core_pps_edge(core, (int64_t)(t * 1e6));
+        snprintf(body, sizeof(body), "GPGGA,1235%02d,3217.100,N,09007.200,W,1,08,0.9,95.4,M,-29.0,M,,", sec);
+        nmea_line(gga, sizeof(gga), body);
+        snprintf(body, sizeof(body), "GPRMC,1235%02d,A,3217.100,N,09007.200,W,022.4,084.4,151126,003.1,W", sec);
+        nmea_line(rmc, sizeof(rmc), body);
+        run(h, t + 0.12);
+        hh_core_gps_bytes_at(core, (const uint8_t *)gga, strlen(gga), (int64_t)((t + 0.12) * 1e6));
+        run(h, t + 0.65);
+        hh_core_gps_bytes_at(core, (const uint8_t *)rmc, strlen(rmc), (int64_t)((t + 0.65) * 1e6));
+    }
+    run(h, 20.5);
+    memcpy(&st, last(HH_SF_STATS)->p, sizeof(st));
+    memcpy(&hello, last(HH_SF_HELLO)->p, sizeof(hello));
+    CHECK(st.time_source == HH_TS_PPS && st.time_err_us >= 1 && st.time_err_us < 40 && (st.flags & HH_SER_ST_TIME));
+    CHECK((hello.flags & 2) && (hello.flags & 4) && (hello.flags & 16));
+    /* the pair (t_us, unix_us) is one instant: unix_us - t_us is the offset, whenever in the second it was taken */
+    int64_t off = st.unix_us - (int64_t)st.t_us;
+    CHECK(llabs(off - (u0 * 1000000LL - 5000000LL)) < 60);
+    CHECK(llabs((int64_t)hello.unix_us - (int64_t)hello.t_us - (u0 * 1000000LL - 5000000LL)) < 60);
+
+    /* the old reader's view of the same frame: the first 96 bytes are as they were */
+    CHECK(offsetof(hh_ser_stats_t, time_source) == 96 && offsetof(hh_ser_stats_t, ring_peak) == 92);
     hhhost_free(h);
 }
 
@@ -726,7 +1058,9 @@ int main(void)
     RUN(test_stream_not_drained);
     RUN(test_tx_only);
     RUN(test_commands);
+    RUN(test_map_upload);
     RUN(test_no_card_ops);
+    RUN(test_time_source_on_the_link);
     printf("%d checks, %d failed (files left in %s)\n", checks, failures, TMP);
     return failures ? 1 : 0;
 }

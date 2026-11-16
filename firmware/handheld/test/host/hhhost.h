@@ -32,6 +32,9 @@ void hhhost_run(hhhost_t *h, int steps);
 /* Steps until the clock reaches t. */
 void hhhost_run_until(hhhost_t *h, double t);
 void hhhost_gps(hhhost_t *h, const char *nmea);
+/* The pulse clock: a rising edge at device time t_us, and sentences "read" at device time t_us (esp_timer us). */
+void hhhost_pps_edge(hhhost_t *h, int64_t t_us);
+void hhhost_gps_at(hhhost_t *h, const char *nmea, int64_t t_us);
 void hhhost_snapshot(hhhost_t *h, hh_snapshot_t *out);
 /* After this many more bytes every file write is lost (power cut). <0 = no limit. */
 void hhhost_set_write_budget(hhhost_t *h, long bytes);

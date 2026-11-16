@@ -53,6 +53,9 @@ against the simulators and the host builds of the firmware cores.
 
 ### Data
 
+- `stall_locations` finds the nearest GPS fix with `min(abs())` instead of a
+  correlated `ORDER BY`, which SQLite 3.45.0/3.45.1 rejected ("no such column:
+  c.t_trigger"); ties now pick the earlier fix.
 - Every drive goes into one crash-safe SQLite database,
   `~/hondalog/hondalog.db`, committed every half second, with the raw bytes
   of every K-line read. A short-lived `.hlog` file format came first and was
@@ -194,6 +197,44 @@ against the simulators and the host builds of the firmware cores.
   (`sim/testmap`, `make testmap` rebuilds it), with layout, 3:1 contrast
   checks for the map's graphics, and the render budget.
 - Fonts: the © sign added to the text fonts.
+- Map upload over the USB-C cable (two-way build): four new link commands
+  (`MAPUP_OPEN`, `MAPUP_WRITE`, `MAPUP_STATUS`, `MAPUP_COMMIT`, capability
+  bit 16, SERIAL.md "Map upload") put files into the card's `MAP/` folder:
+  names `MAP/` plus an 8.3 name only (no path tricks, refused in the
+  `--gps-p1` build), a CRC32 on every chunk and on the whole file, a status
+  query for resuming, and a commit that reads the temporary file back from
+  the card, checks length and CRC32 and only then renames it over the real
+  file. The Map screen's files are closed for the length of an upload
+  (`MAP BEING UPDATED`) and reopened after the last commit, an abort, or 10 s
+  of silence (the upload then waits, resumable). `hondalog-handheld put-map
+  DIR` (progress bar, resume, verification) and `tools/cyd_debug.py PORT
+  --put-map DIR` (Python and pyserial only, a progress line every 5 %) send
+  `README.TXT`, `MAP.DAT` and `MAP.IDX`; `cydsim` keeps the files in its
+  `--sd` folder. About 40-55 kB/s expected on the cable (5-7 minutes for the
+  17 MB map; not yet measured on the board). Host C tests cover chunking,
+  resume, bad chunk and whole-file CRCs, refused names and the
+  temporary-file-then-rename sequence.
+- The firmware runs its code and read-only data from PSRAM
+  (`CONFIG_SPIRAM_XIP_FROM_PSRAM`, ESP-IDF's advice for RGB panels with
+  frame buffers in PSRAM): a flash write such as an NVS commit no longer
+  stops the LCD interrupt's reads of the frames.
+- Wall clock from the GPS pulse: each PPS edge is paired with the UTC second of
+  the GGA/RMC that follows within 900 ms, and an alpha-beta filter keeps the
+  device clock's offset and drift, so `unix_us` is good to tens of microseconds
+  while the pulse is there (portable `hh_pps.c`, host tests with simulated
+  pulses, jitter, missing and noise pulses, a lost fix and a clock step). Noise
+  pulses (not 1 s +- 1 ms) and pairs far from the prediction are ignored. With
+  no pulse or no fix it falls back to the sentences' time as before. The
+  snapshot has `time_source` (none / GPS sentences / PPS / laptop) and the error
+  estimate; the Link screen shows `TIME PPS +-20us`; drive files get a TIME
+  record (new source 4, with the error and drift) when the source changes and
+  every minute; the serial link's hello has a PPS flag and STATS gains
+  `time_source` and `time_err_us` (104 bytes, the first 96 unchanged), and its
+  `t_us` and `unix_us` are now read at the same instant. The `gps time` log
+  line shows the offset, drift and jitter. The laptop reads the new codes
+  (`hondalog-handheld status`, the importer's epoch) and still reads files and
+  frames from older firmware. The Link screen's STALL row is shortened to make
+  room for TIME.
 
 ### Tuning (Track C)
 

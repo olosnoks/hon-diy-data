@@ -32,6 +32,7 @@ typedef enum {
     MAPSVC_NO_MAP,          /* no MAP folder on the card (err: HM_ERR_NOFILE) */
     MAPSVC_BAD_MAP,         /* there is one, but it cannot be read (err says why) */
     MAPSVC_NO_MEMORY,       /* the canvases or the cache did not fit */
+    MAPSVC_UPDATING,        /* MAP/ is being replaced over the USB cable: its files are closed */
 } mapsvc_status_t;
 
 typedef struct { float lat, lon; } mapsvc_ll_t;
@@ -73,6 +74,8 @@ uint32_t mapsvc_submit(const mapsvc_req_t *req);    /* returns the request's seq
 const mapsvc_result_t *mapsvc_take(void);           /* a new picture, or NULL */
 bool mapsvc_busy(void);                             /* a request is waiting or being drawn */
 mapsvc_req_t *mapsvc_scratch(void);                 /* a request to fill in (big: PSRAM on the board) */
+int mapsvc_hold(int on);                            /* the laptop link is replacing MAP/ files: on = close them and stay off (0 = done, -1 = the worker
+                                                     * is still drawing; ask again), off = open again at the next picture. Any task but the worker's. */
 void mapsvc_reopen(void);                           /* close the MAP folder and open it again (another card) */
 
 /* Worker side ------------------------------------------------------------------- */

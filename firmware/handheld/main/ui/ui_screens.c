@@ -230,7 +230,7 @@ static void gps_update(const hh_snapshot_t *s, const ui_derived_t *d)
 
 /* ---- Link / status --------------------------------------------------------- */
 
-static struct { row_t link, backend, ecu, rate, reads, errors, sd, log, pc, pc_lost, stall; lv_obj_t *reason; } lnk;
+static struct { row_t link, backend, ecu, rate, reads, errors, sd, log, pc, pc_lost, stall, time; lv_obj_t *reason; } lnk;
 
 static void link_create(lv_obj_t *body)
 {
@@ -247,7 +247,8 @@ static void link_create(lv_obj_t *body)
     /* the laptop on the USB-C port (SERIAL.md) */
     lnk.pc      = row_create(body, GRID_X, GAP + 4 * rh, w, rh, "PC", f, true);
     lnk.pc_lost = row_create(body, x2, GAP + 4 * rh, w, rh, "PC SENT/LOST", f, false);
-    lnk.stall   = row_create(body, GRID_X, GAP + 5 * rh, UI_W - 2 * GRID_X, rh, "STALL CATCHER", f, true);
+    lnk.stall   = row_create(body, GRID_X, GAP + 5 * rh, w, rh, "STALL", f, true);
+    lnk.time    = row_create(body, x2, GAP + 5 * rh, w, rh, "TIME", f, false);       /* where the clock comes from */
     lv_obj_t *k = ui_label(body, &hh_font_16, GRID_X + 2, GAP + 6 * rh + (rh - 20) / 2, 0, LV_TEXT_ALIGN_LEFT);
     lv_label_set_text(k, "LAST");
     ui_ink(k, TK(fg2));
@@ -305,10 +306,22 @@ static void link_update(const hh_snapshot_t *s, const ui_derived_t *d)
     else snprintf(text, sizeof(text), "%u / %u", (unsigned)s->pc.frames, (unsigned)s->pc.dropped);
     ui_set_text(lnk.pc_lost.value, text);
 
-    snprintf(text, sizeof(text), "%s   COUNT %u", s->stall.triggered ? "CAUGHT" : s->stall.armed ? "ARMED" : "OFF", (unsigned)s->stall.count);
+    snprintf(text, sizeof(text), "%s %u", s->stall.triggered ? "CAUGHT" : s->stall.armed ? "ARMED" : "OFF", (unsigned)s->stall.count);
     ui_set_text(lnk.stall.value, text);
     if (s->stall.triggered) ui_shape_set(lnk.stall.shape, UI_SHAPE_OCTAGON, TK(alarm), TK(alarm));
     else ui_shape_set(lnk.stall.shape, s->stall.armed ? UI_SHAPE_RING : UI_SHAPE_SQUARE, TK(fg), TK(fg));
+
+    /* TIME: NONE (no clock), GPS (sentences only, about a second), PPS +-20us (the pulse), PC (set by the laptop) */
+    switch (s->time_source) {
+    case HH_TS_PPS:
+        if (s->time_err_us >= 1000) snprintf(text, sizeof(text), "PPS \xC2\xB1%ums", (unsigned)(s->time_err_us / 1000));
+        else snprintf(text, sizeof(text), "PPS \xC2\xB1%u\xC2\xB5s", (unsigned)s->time_err_us);
+        break;
+    case HH_TS_NMEA: snprintf(text, sizeof(text), "GPS \xC2\xB1" "1s"); break;
+    case HH_TS_HOST: snprintf(text, sizeof(text), "PC"); break;
+    default: snprintf(text, sizeof(text), "NONE"); break;
+    }
+    ui_set_text(lnk.time.value, text);
 
     char reason[sizeof(s->stall.last_reason) + 1];
     memcpy(reason, s->stall.last_reason, sizeof(s->stall.last_reason));

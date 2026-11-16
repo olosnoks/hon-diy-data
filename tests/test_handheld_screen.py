@@ -115,21 +115,18 @@ def test_pure_helpers():
 
 
 def test_map_upload_view(screen, tmp_path):
-    from test_hl_client import fake_map
-    src = tmp_path / "MAP"
-    src.mkdir()
-    idx, dat = fake_map()
-    (src / "MAP.IDX").write_bytes(idx)
-    (src / "MAP.DAT").write_bytes(dat)
+    root = Path(__file__).resolve().parent.parent
+    src = root / "firmware" / "handheld" / "test" / "host" / "fixtures" / "tinymap" / "MAP"
     connect(screen)
     v = screen.map_view
     v.path.setText(str(src))
     v.check()
     assert v.summary.text().startswith("OK"), v.summary.text()
     v.upload()
-    assert wait(lambda: v.prog.stage.text().startswith(("Done", "Failed")), 20)
+    assert wait(lambda: v.prog.stage.text().startswith(("Done", "Failed", "Stopped")), 30)
     assert v.prog.stage.text().startswith("Done"), v.prog.detail.text()
-    assert (screen.sd / "MAP" / "MAP.DAT").read_bytes() == dat
+    assert (screen.sd / "MAP" / "MAP.DAT").read_bytes() == (src / "MAP.DAT").read_bytes()
+    assert wait(lambda: screen.connected, 20), "reopen: " + screen.state_label.text()
 
 
 def test_install_view_guards(screen, tmp_path):

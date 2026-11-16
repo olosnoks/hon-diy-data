@@ -71,6 +71,8 @@ void ui_port_map_lock(void)
 
 void ui_port_map_unlock(void) { xSemaphoreGive(lock); }
 
+void ui_port_map_wait(int ms) { vTaskDelay(pdMS_TO_TICKS(ms) ? pdMS_TO_TICKS(ms) : 1); }
+
 void *ui_port_map_alloc(size_t n)
 {
     void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);

@@ -148,6 +148,7 @@ int16_t hh_channel_index(const char *name)
 }
 void hh_ack_alarm(void) { acks++; }
 void hh_core_start(void) { t0_us = clock_us(); }
+void hh_serial_port_set_map_hold(int (*hold)(int on)) { (void)hold; }
 int hh_display_rotation(void) { return 0; }
 
 static uint8_t level(const hh_channel_info_t *c, float v)
@@ -199,6 +200,7 @@ void hh_snapshot(hh_snapshot_t *out)
     out->link.backend = 1;
     out->link.hz_fast = 10.8f + 0.2f * fast;
     out->link.reads = (uint32_t)(t * 43);
+    out->time_source = HH_TS_PPS; out->time_err_us = 18; out->unix_us = 1794746119000000LL + now;   /* a demo clock on the pulse */
     out->pc.mode = 1; out->pc.frames = (uint32_t)(t * 80); out->pc.dropped = 0;    /* streaming to a laptop, GPS on P1 */
     out->link.errors = (uint32_t)(t / 40);
     snprintf(out->link.ecu_id, sizeof(out->link.ecu_id), "37820-P2P");

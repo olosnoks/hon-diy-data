@@ -178,6 +178,14 @@ void hhhost_gps(hhhost_t *h, const char *nmea)
     while (hh_core_storage_step(h->core)) {}
 }
 
+void hhhost_pps_edge(hhhost_t *h, int64_t t_us) { hh_core_pps_edge(h->core, t_us); }
+
+void hhhost_gps_at(hhhost_t *h, const char *nmea, int64_t t_us)
+{
+    hh_core_gps_bytes_at(h->core, (const uint8_t *)nmea, strlen(nmea), t_us);
+    while (hh_core_storage_step(h->core)) {}
+}
+
 void hhhost_snapshot(hhhost_t *h, hh_snapshot_t *out) { hh_core_snapshot(h->core, out); }
 void hhhost_set_write_budget(hhhost_t *h, long bytes) { h->budget = bytes; }
 void hhhost_set_stale(hhhost_t *h, const char *path) { snprintf(h->stale, sizeof(h->stale), "%s", path ? path : ""); }
@@ -194,7 +202,7 @@ hh_serial_t *hhhost_serial(hhhost_t *h, int tx_only, uint32_t ring_size)
     h->ser_ring = malloc(ring_size);
     hh_serial_init(h->ser, &h->plat.clk, h->ser_ring, ring_size,
                    tx_only ? HH_SER_VARIANT_GPS_P1 : HH_SER_VARIANT_DEFAULT,
-                   tx_only ? HH_SER_CAP_LOG : HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_LOG, 921600);
+                   tx_only ? HH_SER_CAP_LOG : HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP | HH_SER_CAP_LOG, 921600);
     if (!tx_only) hh_serfs_init(&h->serfs, h->root, h->core, &h->ser->fs);
     hh_serial_attach(h->ser, h->core);
     hh_core_set_tap(h->core, hh_serial_tap, h->ser);

@@ -162,6 +162,38 @@ the optional second button (it still is in the `--gps-p1` build, which has no
 PPS). If P3 is wired the other way round (data on pin 1, PPS on pin 2), the
 firmware sees the NMEA on the PPS pin and swaps the UART to it at run time.
 
+#### Time from GPS and PPS
+
+The CYD has no battery clock. Its wall clock (`unix_us` in the stream, the
+time in drive files) comes from the GPS in one of three qualities, shown as
+**TIME** on the Link screen and sent as `time_source` in the serial link's
+stats:
+
+| Link screen | `time_source` | What it is |
+|---|---|---|
+| `PPS ±20µs` | 2 | the GPS pulse (PPS on GPIO17) is paired with the sentence that follows it, and a filter keeps the offset and the crystal's drift: tens of µs while the pulse is there |
+| `GPS ±1s` | 1 | sentences only: no pulse (the `--gps-p1` build has none, or the wire is off), or it was lost for 10 s. The clock is set once and left alone: good to about a second |
+| `PC` | 3 | set by the laptop (`hondalog-handheld set-time`), no GPS yet |
+| `NONE` | 0 | no clock yet |
+
+How it works: the receiver's pulse rises at the start of a UTC second and
+the GGA/RMC sentences after it name that second. The interrupt time-stamps
+each rising edge; the firmware pairs an edge with the first sentence that
+arrives 40 to 900 ms after it. Edges that are not 1 s ± 1 ms after the last
+good one are noise and ignored; a pair that is far from the filter's
+prediction (a sentence matched to the wrong pulse) is an outlier and ignored,
+and five in a row make it start again. It takes four pulses (about 5 s with a
+fix) to call the time PPS. A missing pulse or a sentence lost does not break
+it; after 10 s with no pair it goes back to `GPS ±1s` and says so.
+
+What you get: the stream's `unix_us` minus its `t_us` is the clock's offset to
+UTC, so the laptop can stamp every K-line read with a UTC time good to tens of
+µs; drive files get a TIME record when the source changes and once a minute
+(source 4, with the error and the drift, FORMAT.md). The `gps time` line of the
+console log (every 2 s, next to `gps diag`) shows the state, the offset, the
+drift in ppm, the jitter and the pair, outlier and edge counters. Expect a
+crystal 5 to 20 ppm off and a jitter of a few µs.
+
 #### What does not work
 
 - **P4.** It has the right pins on paper (GND, 3V3, GPIO17, GPIO18), but its
@@ -395,6 +427,40 @@ it from OpenStreetMap extracts, once; the handheld never goes online.
      MAP/
        MAP.IDX   MAP.DAT   README.TXT
    ```
+
+#### Copying the map over the USB cable
+
+With the card in the handheld (the normal build, GPS on GPIO18), the map goes
+over the USB-C cable without taking the card out. It needs no hondalog
+install on the machine the cable is plugged into, only Python 3 and pyserial:
+
+```sh
+python cyd_debug.py COM17 --put-map path\to\MAP          # Windows
+python tools/cyd_debug.py /dev/ttyUSB0 --put-map ~/maps/MAP   # Linux
+hondalog-handheld put-map ~/maps/MAP                       # with hondalog installed
+```
+
+`path\to\MAP` is the folder `map-build` wrote (or the card folder that holds
+it). It sends `README.TXT`, `MAP.DAT` and `MAP.IDX` into the card's `MAP/`,
+one file at a time, with a progress line every 5 %. Each file arrives under a
+temporary name and replaces the old one only after the handheld has read it
+back from the card and the length and CRC32 are right; a damaged chunk is sent
+again, and a file that does not check out leaves the old one alone.
+
+**Time.** The cable is stop-and-wait, about 40-55 kB/s at 921600 baud
+(estimated; not yet measured on the board): the 17 MB map of 100 miles around
+Jackson takes **5-7 minutes**, plus 10-15 s for the handheld to read each big
+file back. A 12-mile test map (1.4 MB) takes under a minute.
+
+**If it stops** (cable pulled, laptop asleep, the program closed), run the
+same command again: it asks the handheld what it has and goes on from the last
+byte, even after a long pause, as long as the handheld stays powered. The
+Map screen shows `MAP BEING UPDATED` while files are coming in (the handheld
+closes its map files for the length of the upload), and goes back to the old
+map if nothing arrives for 10 s. If an upload stops after `MAP.DAT` and before
+`MAP.IDX` is in, the screen says the two files differ: just send the folder
+again. The GPS-on-P1 build cannot take files over the cable; copy the folder to
+the card as above.
 
 `hondalog-handheld info /media/you/CARD` reads the map back and checks every
 tile. Rebuild when you want fresher roads: Geofabrik updates the extracts

@@ -454,6 +454,8 @@ class CydPoller(threading.Thread):
             parts.append(("SD rec #%d" % d.get("drive_no", 0)) if flags & P.ST_RECORDING
                          else "SD ok" if flags & P.ST_SD_OK else "no SD")
             parts.append(f"K-line {d.get('timeouts', 0)} t/o {d.get('checksum_failures', 0)} cks")
+            if d.get("time_source"):            # older firmware does not say: nothing is shown rather than a guess
+                parts.append("TIME " + P.time_text(d["time_source"], d.get("time_err_us", 0)))
         parts.append("MAP MISMATCH #" + h.map_hash if self.map_mismatch else "map #" + h.map_hash)
         return " · ".join(parts)
 
@@ -1148,6 +1150,137 @@ class CydClient:
         if status != P.OK:
             raise CydError(f"push: {P.status_text(status)}")
         return value
+
+    # -- files into the card's MAP/ folder --
+
+    def need_map_upload(self) -> None:
+        self.need_two_way()
+        assert self.hello is not None
+        if not self.hello.flags & 8:
+            raise CydError("the handheld has no SD card")
+        if not self.hello.caps & P.CAP_MAPUP:
+            raise CydError("this handheld's firmware cannot take map files over the cable (it is older than the "
+                           "MAP upload): flash the current firmware, or copy the MAP folder to the SD card")
+
+    def put_map_file(self, name: str, data: bytes, progress: Callable[[int, int], None] | None = None,
+                     final: bool = False, commit_timeout: float = 120.0) -> None:
+        """Send one file into the SD card's ``MAP/`` folder (``name`` is ``MAP.IDX`` or ``MAP/MAP.IDX``). It is
+        written to a temporary file, checked as a whole (length and CRC32, read back from the card) and only then
+        renamed over the old one. A transfer that was cut off carries on from the last byte the handheld
+        holds (while it stays powered and the pause is under ``MAPUP_IDLE_S``), and the call can simply be made
+        again. ``final``: this is the last file of a set; the handheld's map reader may open the files again."""
+        full = name if name.startswith("MAP/") else "MAP/" + name
+        if not P.mapup_name_ok(full):
+            raise CydError(f"{full}: the handheld takes MAP/ and an 8.3 name in capitals")
+        if not 0 < len(data) <= P.MAPUP_SIZE_MAX:
+            raise CydError(f"{full}: {len(data)} bytes; the handheld takes 1 to {P.MAPUP_SIZE_MAX}")
+        self.need_map_upload()
+        crc = zlib.crc32(data) & 0xFFFFFFFF
+        wire = full.encode("ascii")
+        for attempt in range(6):
+            status, offset = self.command(P.SC_MAPUP_OPEN, P.MAPUP_OPEN.pack(0, len(wire), len(data), crc) + wire)
+            if status == P.E_BUSY and attempt < 5:      # the map screen is still drawing: try again
+                time.sleep(0.5)
+                continue
+            break
+        if status != P.OK:
+            raise CydError(f"{full}: {P.status_text(status)}")
+        if progress and offset:
+            progress(offset, len(data))
+        bad_run = 0
+        while offset < len(data):
+            chunk = data[offset:offset + P.MAPUP_CHUNK]
+            status, value = self.command(P.SC_MAPUP_WRITE, P.MAPUP_WRITE.pack(offset, zlib.crc32(chunk) & 0xFFFFFFFF)
+                                         + chunk)
+            if status == P.E_CRC:                       # damaged on the way: send it again
+                bad_run += 1
+                if bad_run > 8:
+                    raise CydError(f"{full}: chunks keep arriving damaged at byte {offset} (a long cable? try "
+                                   "--port cyd:...@460800)")
+                continue
+            if status == P.E_STATE:
+                raise CydError(f"{full}: the handheld dropped the upload at byte {offset} (it was silent for "
+                               f"{P.MAPUP_IDLE_S:g} s or restarted); run the command again")
+            if status not in (P.OK, P.E_OFFSET):
+                raise CydError(f"{full}: {P.status_text(status)} at byte {offset}")
+            bad_run = 0
+            offset = value                              # E_OFFSET: it holds more (or less) than we thought
+            if progress:
+                progress(offset, len(data))
+        # not sent twice on a timeout: the first one may have been done (a second would then say "not expected")
+        status, _ = self.command(P.SC_MAPUP_COMMIT, P.MAPUP_COMMIT.pack(P.MAPUP_FINAL if final else 0), retries=0,
+                                 timeout=commit_timeout)
+        if status == P.E_CRC:
+            raise CydError(f"{full}: the file on the card does not match its checksum (a bad SD card?); it was not "
+                           "used and the old one is as it was")
+        if status != P.OK:
+            raise CydError(f"{full}: {P.status_text(status)} at the commit")
+
+    def map_upload_status(self) -> tuple[bool, int]:
+        """(an upload exists, bytes of it the handheld holds)."""
+        info = self.map_upload_info()
+        return (True, info["got"]) if info else (False, 0)
+
+    def map_upload_info(self) -> dict[str, Any] | None:
+        """The upload the handheld holds, if any: ``name`` ("MAP/MAP.DAT"), ``size``, ``crc32``, ``got`` (bytes of
+        it already there), ``paused`` (its map reader has its files back; the next chunk takes them again)."""
+        found: list[dict[str, Any]] = []
+
+        def accept(rtype: int, _rseq: int, p: bytes, seq: int) -> tuple[int, int] | None:
+            if rtype == P.SF_MAPUP and len(p) >= P.MAPUP_INFO.size:
+                state, got, size, crc, name = P.MAPUP_INFO.unpack(p[:P.MAPUP_INFO.size])
+                if state != P.MU_NONE:
+                    found.append({"name": F.cstr(name), "size": size, "crc32": crc, "got": got,
+                                  "paused": state == P.MU_PAUSED})
+                return None
+            if rtype != P.SF_ACK or len(p) < P.ACK.size:
+                return None
+            cmd, cseq, status, value = P.ACK.unpack(p[:P.ACK.size])
+            return (status, value) if cmd == P.SC_MAPUP_STATUS and cseq == seq else None
+        self.request(P.SC_MAPUP_STATUS, b"", accept)
+        return found[-1] if found else None
+
+    def abort_map_upload(self) -> None:
+        """Drop an upload in progress and let the handheld's map reader have its files back."""
+        self.command(P.SC_MAPUP_COMMIT, P.MAPUP_COMMIT.pack(P.MAPUP_ABORT))
+
+    def put_map(self, folder: str | Path, progress: Callable[[str, int, int, int, int], None] | None = None) -> list[str]:
+        """Send a MAP folder (``MAP.IDX``, ``MAP.DAT`` and ``README.TXT``; ``folder`` may also be the card that holds
+        it) into the handheld's ``MAP/``. The folder is checked first. Order: README, MAP.DAT, then MAP.IDX last,
+        so the pair that must match is only ever half replaced for the length of the small index's transfer.
+        ``progress(name, done, total, files_done_bytes, all_bytes)``. Returns the names sent (a set that is
+        carried on from an earlier cut-off run lists all of them)."""
+        from . import osmmap as OM
+        folder = Path(folder)
+        if (folder / OM.DIR_NAME / OM.IDX_NAME).exists():
+            folder = folder / OM.DIR_NAME
+        try:
+            OM.MapReader(folder)
+        except (OSError, ValueError) as exc:
+            raise CydError(f"{folder}: {exc}") from exc
+        names = [n for n in (OM.README_NAME, OM.DAT_NAME, OM.IDX_NAME) if (folder / n).exists()]
+        files = {n: (folder / n).read_bytes() for n in names}
+        total = sum(len(d) for d in files.values())
+        self.need_map_upload()
+        # An earlier run that was cut off: the file it was in the middle of goes on from its last byte, and the
+        # files before it in the order were already sent then.
+        skip = 0
+        info = self.map_upload_info()
+        if info:
+            for i, name in enumerate(names):
+                if (info["name"], info["size"], info["crc32"]) == (
+                        "MAP/" + name, len(files[name]), zlib.crc32(files[name]) & 0xFFFFFFFF):
+                    skip = i
+        done = sum(len(files[n]) for n in names[:skip])
+        for i, name in enumerate(names):
+            if i < skip:
+                continue
+            def one(got: int, size: int, name: str = name, base: int = done) -> None:
+                if progress:
+                    progress(name, got, size, base + got, total)
+            self.put_map_file(name, files[name], one, final=i == len(names) - 1)
+            done += len(files[name])
+        return names
 
 
 __all__ = ["CH340_ID", "CydBusy", "CydClient", "CydError", "CydEvent", "CydPoller", "FileEntry", "PREFIX",

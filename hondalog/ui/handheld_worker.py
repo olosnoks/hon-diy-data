@@ -81,6 +81,16 @@ class HlWorker(QThread):
         self._q.put((job, lambda c, p, image=image, baud=baud, job=job: self._do_flash(image, baud), False))
         return job
 
+    def map_upload(self, folder: str) -> int:
+        """Send a MAP folder over the binary MAPUP link (much faster than base64 PUT, resumable, verified). The HL
+        session is closed first and opened again after, like a flash. ``progress(job, done, total, name)``."""
+        with self._lock:
+            job = self._next_id
+            self._next_id += 1
+            self.busy += 1
+        self._q.put((job, lambda c, p, folder=folder, job=job: self._do_map_upload(folder, job), False))
+        return job
+
     def cancel(self) -> None:
         if self.client is not None:
             self.client.cancel_flag = True
@@ -200,6 +210,36 @@ class HlWorker(QThread):
             self._reopen(name, wait=4.0)
             raise HlError(str(exc))
         self._reopen(name, wait=25.0)
+
+    def _do_map_upload(self, folder: str, job: int) -> list[str]:
+        from ..handheld.serial_link import CydClient, CydError
+        name = self.port_name
+        if not name:
+            raise HlError("connect to the handheld first")
+        port_obj, factory = None, self._factory
+        self._do_disconnect("")
+        self.state.emit("connecting", "map upload")
+        cyd = None
+        try:
+            cyd = CydClient(factory(name))
+            cyd.open()
+            cyd.cancel_flag = False
+
+            def prog(file: str, got: int, size: int, done: int, total: int) -> None:
+                if self._flash_cancel.is_set():
+                    raise CydError("cancelled")
+                self.progress.emit(job, done, total, file)
+            self._flash_cancel.clear()
+            return cyd.put_map(folder, prog)
+        except CydError as exc:
+            raise HlError(str(exc)) from exc
+        finally:
+            if cyd is not None:
+                try:
+                    cyd.close()
+                except Exception:
+                    pass
+            self._reopen(name, wait=8.0)
 
     def _reopen(self, name: str, wait: float) -> None:
         """The board restarts after a flash (or a failed one): connect again, for up to ``wait`` seconds."""

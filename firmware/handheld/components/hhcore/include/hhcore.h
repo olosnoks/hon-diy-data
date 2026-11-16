@@ -437,8 +437,47 @@ typedef struct HH_PACKED {
     uint16_t hdop_c;        /* HDOP x 100, 0 = unknown (reserved in the black box's record) */
 } hh_gps_t;                 /* 28 bytes, the black box's bb_gps_t */
 
-typedef struct { char line[96]; uint8_t n; hh_gps_t fix; uint32_t good, bad; } hh_nmea_t;  /* good/bad: sentences that passed / failed the checksum or framing */
-int hh_nmea_feed(hh_nmea_t *g, char c);     /* 1 when an RMC sentence completed a fix update */
+typedef struct {
+    char line[96]; uint8_t n; hh_gps_t fix;
+    uint32_t good, bad;     /* sentences that passed / failed the checksum or framing */
+    int32_t gga_tod;        /* seconds of the UTC day in the last GGA that had a fix (no date in GGA) */
+} hh_nmea_t;
+/* 1 when an RMC sentence completed a fix update; 2 when a GGA with a fix and a time did (gga_tod); else 0. */
+int hh_nmea_feed(hh_nmea_t *g, char c);
+
+/* ---- PPS: the wall clock from the GPS pulse ---------------------------------- */
+
+/* The receiver's pulse rises at the start of a UTC second and the sentences
+ * that follow carry that second. Pairing the two gives an exact fact, "device
+ * time T was second S"; a small filter keeps the offset (and the crystal's
+ * drift) from those, so unix = device time + offset is good to tens of
+ * microseconds while the pulse is there. Portable: the port only calls
+ * hh_core_pps_edge() with the time its interrupt saw the edge (hh_port.c). */
+enum { HH_PPS_NONE = 0, HH_PPS_PAIR, HH_PPS_STALE, HH_PPS_OUTLIER, HH_PPS_RELOCK };
+#define HH_PPS_HOLD_US  10000000LL      /* no pair for this long: back to NMEA-only time */
+
+typedef struct {
+    int64_t last_good_us;               /* the last edge that fits the 1 s chain */
+    int64_t pend_us;                    /* a good edge not yet paired */
+    int64_t ref_us, last_pair_us;       /* the model is exact at ref_us; the last accepted pair */
+    double  off_us, drift;              /* unix us - device us at ref_us; its change per us */
+    double  jitter2, resid_us;          /* mean square of the residuals; the last one */
+    uint8_t have_edge, pending, n_ok, locked, bad_run, bad_pairs;
+    uint16_t n_pairs;                   /* accepted since the model was (re)started, saturating */
+    uint32_t edges, glitches, gaps, missed, resets, pairs, stale, outliers, relocks, unpaired;
+} hh_pps_t;
+
+void    hh_pps_init(hh_pps_t *p);
+/* One rising edge at device time t_us. 1 if it fits the 1 s +- 1 ms chain and so can be paired with a sentence;
+ * 0 if it is noise, or the first of a chain (not believed until the next one comes a second later). */
+int     hh_pps_edge(hh_pps_t *p, int64_t t_us);
+/* A sentence with UTC second utc_s (unix seconds) arrived at t_rx_us: pair it with the pending edge.
+ * Returns a HH_PPS_* code; HH_PPS_PAIR means the offset moved. */
+int     hh_pps_time(hh_pps_t *p, int64_t t_rx_us, int64_t utc_s);
+int     hh_pps_active(const hh_pps_t *p, int64_t t_us);     /* locked, and a pair came within HH_PPS_HOLD_US */
+int64_t hh_pps_unix_us(const hh_pps_t *p, int64_t t_us);
+double  hh_pps_jitter_us(const hh_pps_t *p);                /* rms of the residuals */
+uint32_t hh_pps_err_us(const hh_pps_t *p, int64_t t_us);    /* jitter plus 2 us per second since the last pair */
 
 /* ---- drive and capture files (FORMAT.md) ---------------------------------- */
 
@@ -491,7 +530,9 @@ typedef struct HH_PACKED { uint32_t dt_us; uint8_t mode, pid, len, flags; } hh_r
 typedef struct HH_PACKED { uint64_t t_us; uint8_t code, src; uint16_t aux; union { int32_t i; float f; } v; } hh_rec_event_t;  /* 16 */
 typedef struct HH_PACKED { uint64_t t_trigger_us, t_start_us, t_end_us; uint8_t reason, complete; uint16_t rsv;
                            uint32_t n_fired; } hh_rec_capture_t;    /* 32 */
-typedef struct HH_PACKED { uint64_t t_us; int64_t unix_us; uint8_t source, rsv[7]; } hh_rec_time_t;   /* 24 */
+/* source: 1 GPS (NMEA), 2 the clock as it was, 3 set by the laptop, 4 GPS + PPS (err_us and drift_ppb are only set for 4) */
+enum { HH_TIME_GPS = 1, HH_TIME_CLOCK = 2, HH_TIME_HOST = 3, HH_TIME_PPS = 4 };
+typedef struct HH_PACKED { uint64_t t_us; int64_t unix_us; uint8_t source, rsv; uint16_t err_us; int32_t drift_ppb; } hh_rec_time_t;   /* 24 */
 typedef struct HH_PACKED { uint32_t n_blocks, n_reads, status, reason; uint64_t t_end_us; } hh_rec_end_t;   /* 24 */
 
 enum { HH_EV_MARKER = 1, HH_EV_LINK_UP, HH_EV_LINK_DOWN, HH_EV_ALARM_RAISED, HH_EV_ALARM_CLEARED,
@@ -577,6 +618,7 @@ typedef struct {
     uint8_t ecu_id[10], ecu_id_len;
     uint8_t link_state, backend, link_mode, builtin_map, time_valid, sd_ok, n_ch;
     uint32_t boot_no;
+    uint8_t time_source;                /* HH_TS_* */
 } hh_core_info_t;
 
 typedef struct {
@@ -606,11 +648,24 @@ hh_core_t *hh_core_init(void *mem, const hh_map_t *map, const hh_config_t *cfg, 
 /* Link task: one exchange (or one wait) per call. Never returns an error:
  * every failure is a state. */
 void hh_core_step(hh_core_t *c);
-/* GPS task. */
+/* GPS task. t_rx_us: device time (esp_timer us) the bytes were read; hh_core_gps_bytes takes it from the clock. */
 void hh_core_gps_bytes(hh_core_t *c, const uint8_t *data, size_t len);
+void hh_core_gps_bytes_at(hh_core_t *c, const uint8_t *data, size_t len, int64_t t_rx_us);
+/* GPS task: a rising edge of the pulse, device time t_us (call it for every edge that came before the bytes
+ * just fed, in order, before feeding them). */
+void hh_core_pps_edge(hh_core_t *c, int64_t t_us);
 /* Storage task: writes what is queued. Returns 1 if it did work, 0 if idle. */
 int  hh_core_storage_step(hh_core_t *c);
 void hh_core_set_storage(hh_core_t *c, int sd_ok, float free_mb);
+/* The pulse clock, for the diagnostics line. */
+typedef struct {
+    uint8_t source, locked;             /* HH_TS_*, filter locked */
+    uint32_t err_us;
+    int64_t offset_us;                  /* unix us - device us, now */
+    double drift_ppm, jitter_us, resid_us;
+    uint32_t edges, glitches, missed, pairs, stale, outliers, relocks;
+} hh_pps_info_t;
+void hh_core_pps_info(hh_core_t *c, hh_pps_info_t *out);
 /* Any task. */
 void hh_core_snapshot(hh_core_t *c, hh_snapshot_t *out);
 void hh_core_mark(hh_core_t *c);

@@ -14,7 +14,8 @@ extra: nothing on the handheld waits for it.
 
 Code: `components/hhcore/hh_serial.c` (portable: framing, ring, commands),
 `components/hhcore/port/hh_serial_port.c` (UART, tasks, ESP_LOG),
-`components/hhcore/port/hh_serfs.c` (the SD card for the file commands);
+`components/hhcore/port/hh_serfs.c` (the SD card for the file commands; the temporary file and
+rename of a MAP/ upload), `main/ui/ui_mapsvc.c` (`mapsvc_hold`: the map reader lets go of its files);
 on the laptop `hondalog/handheld/serial_proto.py` (layouts),
 `serial_link.py` (`CydPoller`, `CydClient`), `sync.py`, `cydsim.py`.
 
@@ -89,6 +90,7 @@ deframer reads both:
 | 0x4A | ACK | `u8 cmd, u8 seq, i16 status, u32 value`: the command's type and seq, the result |
 | 0x4B | FILE_INFO | `u8 kind, u8 flags, u16 rsv, u32 file_no, u32 size`. flags 1 = open for writing. The list ends with `file_no = 0xFFFFFFFF`, `size` = entries sent, flags 2 = more after the last one |
 | 0x4C | FILE_DATA | `u8 kind, u8 flags, u16 len, u32 file_no, u32 offset, u32 crc32` + `len` bytes. flags 1 = end of file. `offset = 0xFFFFFFFF`: no such file (flags 2: it is being written) |
+| 0x4D | MAPUP | 32 bytes, the answer to MAPUP_STATUS (just before its ACK): `u8 state, u8[3], u32 got, u32 size, u32 crc32, char[16] name`. state 0 no upload, 1 open (the map reader is held off), 2 paused (the map reader has its files; the next chunk takes them again). `name` is `MAP/MAP.DAT` etc. |
 
 HELLO (96 bytes):
 
@@ -97,7 +99,7 @@ HELLO (96 bytes):
 | 0 | char[4] | `"HHSL"` |
 | 4 | u8 | link revision (1) |
 | 5 | u8 | variant: 0 default, 1 GPS on P1 |
-| 6 | u16 | capabilities: 1 commands are heard (two-way), 2 file list/read, 4 file push, 8 LOG frames. 2 and 4 only with a working SD card |
+| 6 | u16 | capabilities: 1 commands are heard (two-way), 2 file list/read, 4 file push, 8 LOG frames, 16 map upload (MAPUP). 2, 4 and 16 only with a working SD card |
 | 8 | char[12] | firmware version |
 | 20 | char[12] | device name |
 | 32 | char[12] | address map hash (all 12 characters, no terminator): compare with the laptop map's `version_hash` |
@@ -106,20 +108,34 @@ HELLO (96 bytes):
 | 63 | u8 | link state (as LINK) |
 | 64 | u8, u8 | backend (0 USB KKL cable, 1 UART), link mode (1 = OBD2) |
 | 66 | u8 | channels in the handheld's map |
-| 67 | u8 | flags: 1 built-in map, 2 clock set, 4 clock from GPS, 8 SD card ok |
+| 67 | u8 | flags: 1 built-in map, 2 clock set, 4 clock from GPS, 8 SD card ok, 16 clock held to the GPS pulse (PPS) |
 | 68 | u32 | boot number |
 | 72 | u32 | baud rate |
 | 76 | u64 | `t_us` now |
 | 84 | i64 | wall clock now, unix microseconds (0 = not known) |
 | 92 | u16, u16 | hello interval (ms), largest payload |
 
-STATS (96 bytes): `u64 t_us, i64 unix_us`; the K-line since boot: `u32 reads,
+STATS (104 bytes; the first 96 are the original frame, a reader that stops
+there loses nothing): `u64 t_us, i64 unix_us`; the K-line since boot: `u32 reads,
 errors, timeouts, checksum_failures, retries, reconnects`; `u16 hz_c, u8
 link_state, u8 flags` (1 SD ok, 2 recording, 4 GPS fix, 8 clock set, 16
 stall trigger armed, 32 capturing, 64 laptop heard, 128 built-in map);
 `u32 drive_no, log_bytes, free_mb, markers, stall_count, nmea_good,
 nmea_bad`; this link since boot: `u32 tx_frames, tx_dropped, tx_bytes,
-rx_frames, rx_bad, ring_peak`.
+rx_frames, rx_bad, ring_peak`; then, from byte 96, `u8 time_source, u8[3]
+reserved, u32 time_err_us`.
+
+`time_source` says where `unix_us` comes from: 0 none (`unix_us` is 0), 1 GPS
+sentences only (good to about a second; `time_err_us` is 1000000), 2 the GPS
+pulse (PPS; `time_err_us` is the filter's estimate, normally 5 to 30), 3 set
+by the laptop. In HELLO and STATS `t_us` and `unix_us` are read at the same
+instant (the engine's snapshot), so `unix_us - t_us` is the device clock's
+offset to UTC at that moment, to the accuracy above: with source 2 that is
+what turns every device time in the stream (READ, TICK, EVENT) into a UTC
+time good to tens of microseconds, plus the crystal's drift between two
+STATS frames (a second apart: up to 20 µs). A STATS frame of 96 bytes (older
+firmware) has none of this; use HELLO's flags. The source falls from 2 back
+to 1 ten seconds after the last pulse pair.
 
 ### Laptop -> handheld (two-way firmware only)
 
@@ -137,12 +153,92 @@ rx_frames, rx_bad, ring_peak`.
 | 0x69 | PUT_DATA | `u32 offset` + up to 480 bytes | ACK, value = bytes held. Status -8 (wrong offset): value says where to go on |
 | 0x6A | PUT_END | none | ACK. The file is read back from the card, its length and CRC checked, a map is test-loaded; only then does it replace the old one (kept as `HANDHELD.MBK` / `.CBK`). For a CFG, value = lines it will skip. Used from the next power-up |
 | 0x6B | DTC | none | ACK; the codes come as EVENTs (`dtc` per code, or `dtc_none`) |
+| 0x6C | MAPUP_OPEN | `u8 flags, u8 name_len, u8[2], u32 size, u32 crc32` + `name_len` name bytes (`MAP/` and an 8.3 name) | ACK, value = bytes already held. See "Map upload" |
+| 0x6D | MAPUP_WRITE | `u32 offset, u32 crc32` (of the data) + 1 to 504 bytes | ACK, value = bytes held |
+| 0x6E | MAPUP_STATUS | none | MAPUP, then ACK (value = bytes held; status -4 when there is no upload) |
+| 0x6F | MAPUP_COMMIT | `u8 flags, u8[3]`: 1 = this was the last file, 2 = abort | ACK |
 
 File kinds: 1 `DRIVES/Dnnnnnn.HHD`, 2 `CAPTURES/Cnnnnnn.HHD`,
 3 `HANDHELD.MAP` (at most 256 KB), 4 `HANDHELD.CFG` (at most 8 KB).
 ACK status: 0 ok, 1 ignored, -1 bad argument, -2 card error, -3 CRC
 mismatch, -4 not expected now, -5 refused (the map would not load), -6
 busy, -7 not supported (no card, or older firmware), -8 wrong offset.
+
+### Map upload (files into the card's `MAP/` folder)
+
+The offline road map (`MAP/MAP.IDX`, `MAP/MAP.DAT`, `MAP/README.TXT`, see
+MAPFORMAT.md) can be 17 MB and more, so it has its own commands, shaped like
+PUT_* but for any file in `MAP/`, with a CRC32 on every chunk and on the
+whole file, and a way to ask where a cut-off transfer stopped. Laptop side:
+`hondalog-handheld put-map DIR` and `tools/cyd_debug.py PORT --put-map DIR`.
+
+1. **MAPUP_OPEN** `(name, size, crc32 of the whole file)`. `name` is `MAP/`
+   and an 8.3 name in capitals (1-8 of `A-Z 0-9 _ - ~ $`, optionally a dot
+   and up to 3 more). Anything else is refused with -5, without touching the
+   card: no other folder, no `..`, no `/` after `MAP/`, no lower case, no
+   spaces, not `MAP/UPLOAD.TMP` (the handheld's own temporary file). Size 1
+   to 128 MiB. The ACK value is the bytes already held: 0 for a new upload;
+   for the same name, size and CRC as the upload in progress (or paused),
+   the bytes it has, and writing carries on from there. A different file
+   drops the old upload. -6 (busy) means the map reader was still drawing
+   and did not let go in time: ask again.
+2. **MAPUP_WRITE** `(offset, crc32, data)`, at most 504 bytes of data (so the
+   frame is the largest one, 512), always at the next missing byte. The
+   handheld checks the data against the chunk CRC32 first: -3 (nothing
+   stored, value = bytes held) so the laptop sends it again. A chunk that
+   was already stored (an ACK was lost) is acknowledged without being written
+   twice; an offset beyond the bytes held gets -8 with the offset wanted; one
+   that goes past the announced size gets -1. Each chunk is flushed to the
+   card before its ACK, so "bytes held" is what the card has.
+3. **MAPUP_STATUS** asks what is held: the MAPUP frame says which file (name,
+   size, CRC) and how far, the ACK carries the same byte count (-4 = no
+   upload). A laptop that was stopped and started again uses it to carry on
+   with the right file.
+4. **MAPUP_COMMIT** with all bytes in. The handheld closes the temporary file,
+   **reads it back from the card**, checks its length and the whole-file
+   CRC32, and only then renames it over the real file. -3 = the file on the
+   card does not match (a bad SD card, or the whole-file CRC given at OPEN was
+   wrong): the temporary file is removed, the old file is untouched, and the
+   upload starts again from OPEN. The read-back runs at the card's speed
+   (about 1-2 MB/s: 10 s or more for a 17 MB file), so the laptop waits up to
+   2 minutes for this ACK and does not send COMMIT twice. Flag 1 (last file)
+   also lets the map reader open its files again at once; flag 2 (abort)
+   removes the temporary file and does the same.
+
+The temporary file is `MAP/UPLOAD.TMP`: the real file is not touched until the
+commit. The rename is the card's own (atomic for a FAT rename onto a free
+name); when the card will not rename over an existing file, the old file is
+moved to `MAP/UPLOAD.OLD` first, put back if the second rename fails and
+removed when it works. Only whole, verified files ever have a real name.
+`MAP.IDX` and `MAP.DAT` must come from the same build; the laptop sends
+`MAP.DAT` first and `MAP.IDX` last, so the pair does not match only while the
+small index is on its way (the Map screen says "MAP.IDX and MAP.DAT differ"
+if an upload is stopped in that gap; send the folder again).
+
+**The map reader.** The Map screen keeps `MAP.IDX` and `MAP.DAT` open, and
+FAT cannot rename an open file. The handheld therefore **closes the map files
+for the length of an upload** (not "refuse while it is drawing"): the first
+MAPUP_OPEN of a set asks the map task to close them (it finishes the picture
+it is drawing, at most 3 s, then answers -6 if it is still busy), the Map
+screen shows `MAP BEING UPDATED`, and the files are opened again after the
+COMMIT with flag 1, after an abort, or when the laptop has been silent for 10
+s. After such a silence the upload is **paused**, not lost: the temporary file
+stays, the map is drawn from the old files again, and the next chunk or
+MAPUP_OPEN of the same file takes the folder back and carries on. A paused
+upload is lost at the next power-up, or when another file is opened.
+Nothing in this touches the logger or the K-line: it is the SD card's FAT
+volume (which serialises access) and the serial task.
+
+MAPUP is refused (-7, and not in HELLO's capabilities) in the TX-only
+`HH_GPS_P1` build, which hears no commands at all, and when there is no SD
+card.
+
+Throughput: stop-and-wait like the file reads: a 512-byte chunk is 5.8 ms on
+the wire at 921600 baud, plus the USB-serial round trip and the card's write,
+so expect about **40-55 kB/s** (estimated, not measured on the board): the
+17.3 MB map of 100 miles around Jackson takes 5-7 minutes, plus the read-back.
+Against `hondalog-cydsim` on a pty (no wire, no card) the laptop programs
+manage 300-570 kB/s, which is only the cost of the programs themselves.
 
 **Nothing on this link can put anything but a read on the K-line.**
 `hh_serial.c` has no transport. Every command touches the card, the clock,

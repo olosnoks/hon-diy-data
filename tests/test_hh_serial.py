@@ -156,7 +156,7 @@ def test_sim_speaks_like_the_firmware(firmware):
     assert (P.SF_GPS, F.REC_GPS.size) in s_shapes
     c_hello = P.parse_hello([p for t, _, p in c_frames if t == P.SF_HELLO][-1])
     s_hello = P.parse_hello([p for t, _, p in s_frames if t == P.SF_HELLO][-1])
-    card = P.CAP_FILES | P.CAP_PUT                # these two need an SD card
+    card = P.CAP_FILES | P.CAP_PUT | P.CAP_MAPUP     # these need an SD card
     assert c_hello.map_hash == s_hello.map_hash and c_hello.caps & ~card == s_hello.caps & ~card
     assert c_hello.n_ch == s_hello.n_ch and c_hello.max_payload == s_hello.max_payload
 

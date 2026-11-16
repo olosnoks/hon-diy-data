@@ -9,7 +9,7 @@
 CORE := ../../components/hhcore
 CFLAGS ?= -std=c11 -O1 -g -Wall -Wextra -Werror -fPIC -ffp-contract=off -D_DEFAULT_SOURCE -I$(CORE)/include
 SRC := $(CORE)/hh_proto.c $(CORE)/hh_link.c $(CORE)/hh_plan.c $(CORE)/hh_expr.c $(CORE)/hh_map.c \
-       $(CORE)/hh_alarm.c $(CORE)/hh_iso.c $(CORE)/hh_nmea.c $(CORE)/hh_log.c $(CORE)/hh_core.c \
+       $(CORE)/hh_alarm.c $(CORE)/hh_iso.c $(CORE)/hh_nmea.c $(CORE)/hh_pps.c $(CORE)/hh_log.c $(CORE)/hh_core.c \
        $(CORE)/hh_text.c $(CORE)/hh_serial.c $(CORE)/port/hh_serfs.c hhhost.c
 MAP := ../../components/hhmap
 MAP_SRC := $(MAP)/hm_format.c $(MAP)/hm_store.c $(MAP)/hm_render.c
@@ -29,6 +29,11 @@ $(OUT)/hhtest: $(SRC) hhsim.c hhtest.c $(DEPS)
 	mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -o $@ $(SRC) hhsim.c hhtest.c -lm
 
+# the pulse clock (hh_pps.c): the filter against a simulated receiver, then the engine with the pulse fed in
+$(OUT)/hhpps: $(SRC) hhsim.c hhpps.c $(DEPS)
+	mkdir -p $(OUT)
+	$(CC) $(CFLAGS) -o $@ $(SRC) hhsim.c hhpps.c -lm
+
 # the laptop link (hh_serial.c): framing, the ring and its drop policy, the stream, the commands
 $(OUT)/hhsertest: $(SRC) hhsim.c hhsertest.c $(DEPS)
 	mkdir -p $(OUT)
@@ -45,8 +50,9 @@ $(OUT)/hmtest: $(MAP_SRC) hmtest.c $(MAP)/include/hhmap.h
 	mkdir -p $(OUT)
 	$(CC) $(MAP_CFLAGS) -o $@ $(MAP_SRC) hmtest.c -lm
 
-test: $(OUT)/hhtest $(OUT)/hhsertest $(OUT)/hh_serial_txonly.o $(OUT)/hmtest
+test: $(OUT)/hhtest $(OUT)/hhpps $(OUT)/hhsertest $(OUT)/hh_serial_txonly.o $(OUT)/hmtest
 	$(OUT)/hhtest
+	$(OUT)/hhpps
 	$(OUT)/hhsertest
 	$(OUT)/hmtest
 

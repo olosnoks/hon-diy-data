@@ -1,4 +1,4 @@
-"""``hondalog-handheld ls|get|put|rm|cfg|stat|mark|time|reboot|map-put|flash``: thin wrappers on
+"""``hondalog-handheld ls|get|put|rm|cfg|stat|mark|time|reboot|flash``: thin wrappers on
 ``hl_client.HlClient``, the same client the app's Handheld tab uses."""
 
 from __future__ import annotations
@@ -165,26 +165,6 @@ def _reboot(args) -> int:
     return 0
 
 
-@_guard
-def _map_put(args) -> int:
-    last = {"name": ""}
-
-    def progress(name, held, size, done, total):
-        if name != last["name"]:
-            last["name"] = name
-            print(f"\n{name}", file=sys.stderr)
-        print(f"\r  {100.0 * done / total:5.1f}%  {_mb(done)} / {_mb(total)} MB", end="", file=sys.stderr, flush=True)
-
-    t0 = time.monotonic()
-    with session(args) as c:
-        done = c.put_map(args.folder, progress if sys.stderr.isatty() else None,
-                         on_retry=lambda n, e: print(f"\nretry {n}: {reason_text(e)}", file=sys.stderr))
-        rate = c.rate
-    print(f"\nMAP/ on the handheld: {', '.join(f'{n} {_mb(s)} MB' for n, s in done)} in {time.monotonic() - t0:.0f} s "
-          f"(last file {rate / 1024:.0f} kB/s)")
-    return 0
-
-
 def _flash(args) -> int:
     from . import flasher
     from .serial_link import find_device
@@ -251,10 +231,6 @@ def register(sub, port_help: str = PORT_HELP) -> None:
         p = sub.add_parser(name, help=text)
         common(p)
         p.set_defaults(fn=fn)
-    p = sub.add_parser("map-put", help="upload a MAP folder (MAP.DAT, MAP.IDX, README.TXT) to the card, with resume")
-    p.add_argument("folder", help="the MAP folder, or the card folder that holds it")
-    common(p)
-    p.set_defaults(fn=_map_put)
     p = sub.add_parser("flash", help="install a merged firmware image on the handheld (esptool)")
     p.add_argument("image", help="the merged .bin, written at 0x0")
     p.add_argument("--port", default="cyd:", help=port_help)
