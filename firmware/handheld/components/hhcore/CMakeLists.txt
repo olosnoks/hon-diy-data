@@ -7,6 +7,6 @@ idf_component_register(
          "port/hh_port.c" "port/hh_kline_usb.c" "port/hh_kline_uart.c" "port/hh_serial_port.c" "port/hh_serfs.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "port" "../../include"
-    PRIV_REQUIRES usb usb_host_cdc_acm usb_host_ftdi_vcp esp_driver_uart esp_driver_gpio esp_driver_spi
+    PRIV_REQUIRES usb usb_host_cdc_acm usb_host_ftdi_vcp esp_driver_uart esp_driver_gpio esp_driver_spi esp_driver_pcnt
                   esp_driver_sdspi sdmmc fatfs vfs nvs_flash esp_timer esp_hw_support heap
 )

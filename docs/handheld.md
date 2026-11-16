@@ -509,6 +509,25 @@ fixes and events, damaged or missing blocks, and how it ended.
 The card is not cleared by the import. Delete old `DRIVES/` files yourself
 when it fills.
 
+## Debugging it over the USB cable
+
+`tools/cyd_debug.py` watches the handheld over its USB-C serial link. It is a
+single file that needs only Python 3 and pyserial, so it runs on Windows with
+PlatformIO's Python as well as on Linux; no hondalog install is needed.
+
+```sh
+python tools/cyd_debug.py /dev/ttyUSB0            # Linux; COM17 etc. on Windows
+python tools/cyd_debug.py COM17 --gps             # GPS fixes, counters and diagnostics only
+python tools/cyd_debug.py COM17 --reset --seconds 15   # reset the board and watch it boot
+```
+
+Every 2 s the firmware logs a `gps diag` line: whether the GPS reader is
+running, its UART and pin, bytes received, how many times the RX pin was
+pulled low (a hardware pulse counter, independent of the UART), the sentence
+counts and the last bytes received. **Falling edges 0** means nothing ever
+pulls the line low: the GPS has no power, its TX goes to another pin, or
+something else holds the line high.
+
 ## Turning the picture upside down
 
 If the board is mounted the other way up, set `rotate = 180` in

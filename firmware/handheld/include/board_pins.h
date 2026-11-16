@@ -123,16 +123,16 @@
 #undef  HH_GPS_UART_NUM
 #undef  HH_GPS_RX
 #undef  HH_GPS_TX
-#define HH_GPS_UART_NUM         0
+#define HH_GPS_UART_NUM         1    /* UART1 routed to GPIO44 through the GPIO matrix, so a pulse counter can watch the pin too */
 #define HH_GPS_RX               44   /* P1 pin 3, RX0 */
 #define HH_GPS_TX               (-1) /* P1 pin 2 (TX0) left idle: nothing is sent to the GPS */
 #endif
 
 /* ---- Laptop link (SERIAL.md): binary frames through the CH340C ------------ */
 /* Default build: UART0, both directions, shared with (and replacing) the
- * console. GPS on P1: UART0 and GPIO44 belong to the GPS at 9600 baud, and a
- * UART has one baud rate for both directions, so the link takes UART1 and
- * routes only its TX to GPIO43: the handheld talks, it cannot listen. */
+ * console. GPS on P1: GPIO44 belongs to the GPS (UART1 at 9600 baud), and a
+ * UART has one baud rate for both directions, so the link keeps UART0 with
+ * only its TX on GPIO43: the handheld talks, it cannot listen. */
 #define HH_SERIAL_UART_NUM      0
 #define HH_SERIAL_TX            HH_PIN_UART0_TX
 #define HH_SERIAL_RX            HH_PIN_UART0_RX
@@ -142,7 +142,7 @@
 #undef  HH_SERIAL_UART_NUM
 #undef  HH_SERIAL_RX
 #undef  HH_SERIAL_TX_ONLY
-#define HH_SERIAL_UART_NUM      1
+#define HH_SERIAL_UART_NUM      0    /* TX only on its own pin (GPIO43); the GPS has UART1 at 9600 */
 #define HH_SERIAL_RX            (-1)
 #define HH_SERIAL_TX_ONLY       1
 #endif

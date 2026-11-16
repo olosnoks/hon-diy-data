@@ -29,6 +29,7 @@
 #include "driver/gpio.h"
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
+#include "driver/pulse_cnt.h"
 #include "driver/uart.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -267,28 +268,123 @@ static void link_task(void *arg)
     for (;;) hh_core_step(core);        /* every step ends in an exchange or a wait */
 }
 
+/* GPS diagnostics, logged every 2 s (as log frames on the laptop link): did
+ * the reader start, how many bytes arrived, how many times the RX pin was
+ * pulled low at all (hardware pulse counter, independent of the UART), and the
+ * last bytes as text. Zero edges = nothing ever drives the line low: no power
+ * to the GPS, TX on the wrong pin, or something else holding the line high. */
+static int gps_status = -99;            /* 0 running, else the step that failed */
+static uint32_t gps_bytes;
+static char gps_tail[49];
+static pcnt_unit_handle_t gps_pcnt;
+static int gps_edges_overflows;
+
+static bool gps_pcnt_overflow(pcnt_unit_handle_t u, const pcnt_watch_event_data_t *e, void *ctx)
+{
+    (void)u; (void)e; (void)ctx;
+    gps_edges_overflows++;
+    return false;
+}
+
+static void gps_diag_init(void)
+{
+    if (HH_GPS_RX < 0) return;
+    pcnt_unit_config_t uc = {.low_limit = -1, .high_limit = 30000};
+    if (pcnt_new_unit(&uc, &gps_pcnt) != ESP_OK) { gps_pcnt = NULL; return; }
+    pcnt_chan_config_t cc = {.edge_gpio_num = HH_GPS_RX, .level_gpio_num = -1};
+    pcnt_channel_handle_t ch;
+    if (pcnt_new_channel(gps_pcnt, &cc, &ch) != ESP_OK
+        || pcnt_channel_set_edge_action(ch, PCNT_CHANNEL_EDGE_ACTION_HOLD, PCNT_CHANNEL_EDGE_ACTION_INCREASE) != ESP_OK) {
+        pcnt_del_unit(gps_pcnt); gps_pcnt = NULL; return;
+    }
+    pcnt_unit_add_watch_point(gps_pcnt, 30000);
+    pcnt_event_callbacks_t cbs = {.on_reach = gps_pcnt_overflow};
+    pcnt_unit_register_event_callbacks(gps_pcnt, &cbs, NULL);
+    pcnt_unit_enable(gps_pcnt);
+    pcnt_unit_clear_count(gps_pcnt);
+    pcnt_unit_start(gps_pcnt);
+}
+
+static uint32_t gps_edges(void)
+{
+    int c = 0;
+    if (!gps_pcnt || pcnt_unit_get_count(gps_pcnt, &c) != ESP_OK) return 0;
+    return (uint32_t)gps_edges_overflows * 30000u + (uint32_t)c;
+}
+
+static void gps_diag_log(void)
+{
+    static uint32_t last_bytes, last_edges;
+    uint32_t edges = gps_edges();
+    hh_snapshot_t s;
+    hh_snapshot(&s);
+    char tail[sizeof(gps_tail)];
+    memcpy(tail, gps_tail, sizeof(tail));
+    ESP_LOGI(TAG, "gps diag: reader %s, uart%d rx pin %d @%d baud, pin now %s, bytes %u (+%u), falling edges %s%u (+%u), "
+             "sentences ok %u bad %u, fix %u sats %u, last \"%s\"",
+             gps_status == 0 ? "running" : "NOT running", (int)HH_GPS_UART_NUM, (int)HH_GPS_RX, (int)cfg.gps_baud,
+             HH_GPS_RX >= 0 ? (gpio_get_level((gpio_num_t)HH_GPS_RX) ? "high" : "LOW") : "-",
+             (unsigned)gps_bytes, (unsigned)(gps_bytes - last_bytes), gps_pcnt ? "" : "(no counter) ",
+             (unsigned)edges, (unsigned)(edges - last_edges), (unsigned)s.nmea.good, (unsigned)s.nmea.bad,
+             (unsigned)s.gps.fix, (unsigned)s.gps.sats, tail);
+    last_bytes = gps_bytes;
+    last_edges = edges;
+}
+
 static void gps_task(void *arg)
 {
     uint8_t buf[128];
     (void)arg;
+    int64_t next_diag = esp_timer_get_time() + 2000000;
     for (;;) {
         int n = uart_read_bytes((uart_port_t)HH_GPS_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(100));
-        if (n > 0) hh_core_gps_bytes(core, buf, (size_t)n);
+        if (n > 0) {
+            hh_core_gps_bytes(core, buf, (size_t)n);
+            gps_bytes += (uint32_t)n;
+            /* keep the last 48 bytes as printable text for the log */
+            size_t keep = sizeof(gps_tail) - 1, len = strlen(gps_tail);
+            for (int i = 0; i < n; i++) {
+                char ch = (buf[i] >= 32 && buf[i] < 127) ? (char)buf[i] : (buf[i] == '\n' ? '|' : '.');
+                if (len == keep) { memmove(gps_tail, gps_tail + 1, keep - 1); len--; }
+                gps_tail[len++] = ch;
+                gps_tail[len] = 0;
+            }
+        }
+        if (esp_timer_get_time() >= next_diag) { gps_diag_log(); next_diag += 2000000; }
     }
+}
+
+/* Without a running reader the diagnostics still need to be logged */
+static void gps_diag_task(void *arg)
+{
+    (void)arg;
+    for (;;) { vTaskDelay(pdMS_TO_TICKS(2000)); gps_diag_log(); }
 }
 
 static int gps_start(void)
 {
-    if (cfg.gps_baud <= 0) return -1;
+    if (cfg.gps_baud <= 0) { ESP_LOGW(TAG, "gps: off (gps_baud = 0)"); return gps_status = -4; }
     const uart_config_t ucfg = {
         .baud_rate = cfg.gps_baud, .data_bits = UART_DATA_8_BITS, .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1, .flow_ctrl = UART_HW_FLOWCTRL_DISABLE, .source_clk = UART_SCLK_DEFAULT,
     };
     uart_port_t port = (uart_port_t)HH_GPS_UART_NUM;
-    if (uart_driver_install(port, 1024, 0, 0, NULL, 0) != ESP_OK) return -1;
-    if (uart_param_config(port, &ucfg) != ESP_OK
-        || uart_set_pin(port, HH_GPS_TX, HH_GPS_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK) return -1;
-    return 0;
+    esp_err_t e;
+    if ((e = uart_driver_install(port, 1024, 0, 0, NULL, 0)) != ESP_OK) {
+        ESP_LOGE(TAG, "gps: uart%d driver install failed: %s", (int)port, esp_err_to_name(e));
+        return gps_status = -1;
+    }
+    if ((e = uart_param_config(port, &ucfg)) != ESP_OK) {
+        ESP_LOGE(TAG, "gps: uart%d config failed: %s", (int)port, esp_err_to_name(e));
+        return gps_status = -2;
+    }
+    if ((e = uart_set_pin(port, HH_GPS_TX, HH_GPS_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE)) != ESP_OK) {
+        ESP_LOGE(TAG, "gps: uart%d set pin rx %d failed: %s", (int)port, (int)HH_GPS_RX, esp_err_to_name(e));
+        return gps_status = -3;
+    }
+    gps_diag_init();
+    ESP_LOGI(TAG, "gps: uart%d rx pin %d at %d baud", (int)port, (int)HH_GPS_RX, (int)cfg.gps_baud);
+    return gps_status = 0;
 }
 
 __attribute__((weak)) void hh_ui_before_sleep(void) {}
@@ -399,6 +495,7 @@ void hh_core_start(void)
     xTaskCreatePinnedToCore(link_task, "hh_link", 8192, NULL, 6, NULL, 0);
     xTaskCreatePinnedToCore(storage_task, "hh_store", 6144, NULL, 4, NULL, 0);
     if (gps_start() == 0) xTaskCreatePinnedToCore(gps_task, "hh_gps", 4096, NULL, 5, NULL, 0);
+    else xTaskCreatePinnedToCore(gps_diag_task, "hh_gpsdiag", 3072, NULL, 2, NULL, 0);
 }
 
 const hh_channel_info_t *hh_channels(uint16_t *n)
