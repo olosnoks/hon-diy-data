@@ -1,6 +1,6 @@
 # User guide: the laptop app
 
-`hondalog` is one window with seven screens, built for a 1366x768 laptop in
+`hondalog` is one window with eight screens, built for a 1366x768 laptop in
 a car: every action has a key, nothing needs the touchpad, and every state
 is shown by a shape as well as a colour.
 
@@ -16,6 +16,7 @@ All screenshots on this page are the app itself at 1366x768 on demo data
 - [F5 Raw tools](#f5-raw-tools)
 - [F6 Tune](#f6-tune)
 - [F7 Alarms](#f7-alarms)
+- [F8 Map](#f8-map)
 - [Recording and drives](#recording-and-drives)
 - [Marks](#marks)
 - [The stall catcher and triggers](#the-stall-catcher-and-triggers)
@@ -57,7 +58,7 @@ hondalog --port /dev/hondalog --connect    # connect at once
 | **REC** | `REC` with the elapsed time, or `REC stopped`. Click to start or stop |
 | **STALL CATCHER** | `off`, `waits for engine`, `ARMED`, `STALL CAUGHT, saving +N s`, `STALL CAUGHT` |
 
-**Tab bar.** F1 to F7, and on the right the port, the address map's name,
+**Tab bar.** F1 to F8, and on the right the port, the address map's name,
 the number of channels and how many are unverified, and the link's health.
 
 **Alarm strip (bottom).** The worst active alarm and warning, or
@@ -76,6 +77,7 @@ the number of channels and how many are unverified, and the link's health.
 | Record on connect | On by default. Remembered |
 | Start / stop recording | Ctrl+R |
 | Settings > Units | See [Units](#units) |
+| Settings > Map tiles | Downloads on or off, the tile server, the tile cache. See [F8 Map](#map-tiles) |
 | Edit address map | Opens `~/.config/hondalog/addressmap.toml` in your editor |
 | Open log folder | Opens `~/hondalog/logs` |
 
@@ -396,6 +398,99 @@ screen, the safety rules, and why no P28 definition ships is in
 There is nothing to operate here. The limits are edited in the address map
 (see [Alarms](#alarms)).
 
+## F8 Map
+
+Where the drive went, and where the stalls happened. The GPS comes from the
+handheld: a drive imported from its SD card, or recorded live over `cyd:`.
+A K-line-only drive has no track, and the map says so.
+
+![Map: a drive coloured by speed](screenshots/map-daylight.png)
+
+Two views, **V** switches:
+
+**Drive** shows the track of whatever Replay has open: a drive, or a
+capture (its 40 seconds). Open one with **O** here or in Replay.
+
+- The line is coloured by the channel picked under **Colour by**: Speed,
+  RPM, MAP, AFR (**C** cycles them), or **Other channel…** (**Shift+C**) for
+  any channel of the drive, black box rails like ECU +B included. The legend
+  gives the range (the 2nd to 98th percentile; fuel trims are blue-to-orange
+  around zero). Grey: no value there. Speed is the ECU's vehicle speed when
+  the drive has it, else the GPS's.
+- Pins: **octagon** = stall, **diamond** = another capture (manual, alarm),
+  **triangle** = alarm, **inverted square** with its number = MARK, a ring
+  = where the track starts.
+- **Click the track** and Replay's cursor jumps to that moment. Replay's
+  cursor is the **magenta dot** on the map, with a tick for the heading; it
+  moves when you scrub, step or play in Replay. A click on a pin moves the
+  cursor to it; `[` and `]` step from pin to pin.
+- *At the cursor* shows the time, the GPS speed, the colouring channel's
+  value (or the distance from the start) and the position; *Track* the
+  distance, the time and the gaps (no fix for more than 5 s breaks the line).
+- **G** writes a GPX, **K** a KML of the drive (the KML in the colours on
+  screen). See [Data and SQL](data-and-sql.md#gps-tracks-and-where-the-stalls-happen).
+
+While Replay shows the **live** lanes, the map shows the car now (the dot)
+and the last ten minutes behind it, and follows it. Dragging the map stops
+the following; **F** starts it again.
+
+**All stalls** puts every stall capture of the database on one map, to
+answer the question the black box alone cannot: do the stalls happen at the
+same place? A cluster on one stretch of road (a bumpy one, a railroad
+crossing) points at something shaken loose.
+
+![Map: all stalls](screenshots/map-stalls-daylight.png)
+
+- **Since**: all, the last year, 90, 30 or 7 days. **Trigger** (**R**):
+  stalls of any reason, every capture, or one reason (`rpm`, `link`, ...).
+- Pins that lie on top of each other carry their count.
+- *Where they happen* names the biggest group: "4 stalls. 3 of them within
+  500 ft of one another, near 32.26977, -90.09992, moving at up to 37 mph
+  before." Stalls within 150 m of another count as one place.
+- The list has every capture with the fastest speed in the 30 s before it.
+  A click selects one (and shows it on the map), a double click or **Enter**
+  opens it in Replay; **a click on a pin opens that capture in Replay**.
+- **G** writes the stalls as GeoJSON.
+
+### Map tiles
+
+The base map is OpenStreetMap's raster tiles, used the way the
+[OSM tile usage policy](https://operations.osmfoundation.org/policies/tiles/)
+asks: hondalog names itself and its repository in every request, asks only
+for the tiles on the screen (two at a time, nothing in advance), keeps them
+as long as the server says, and shows "© OpenStreetMap contributors".
+
+It is **offline first**: in the car there is usually no internet.
+
+- Tiles are kept in `~/.cache/hondalog/tiles`, up to 300 MB; the least
+  recently used go first. A tile seen once shows again offline, however old
+  it is, and is checked with the server (a small conditional request) the
+  next time there is a connection.
+- A tile that is neither cached nor reachable borrows the tile of a lower
+  zoom (one already shown), scaled up; failing that, a plain grid. The
+  track, the pins, the scale bar and the north arrow never need tiles. After a failed connection the map
+  waits a minute before trying the network again.
+- To have the map in the car, look at the places you drive once at home,
+  at the zoom levels you use: they are then in the cache.
+- At night the tiles are inverted and dimmed; by day they are washed out a
+  little so the coloured track stands out.
+
+![Map without any tiles](screenshots/map-offline-daylight.png)
+
+ECU chip menu > Settings > Map tiles:
+
+| Entry | Does |
+|---|---|
+| Download map tiles | On by default. Off: only what is cached is shown, nothing goes on the network |
+| Tile server… | Another server, or your own: a URL with `{z}`, `{x}` and `{y}` (`{s}` is filled with `a`), and the attribution its terms ask for (it is shown on the map) |
+| Back to OpenStreetMap | Undo the above |
+| Cache | How much is cached, and where |
+| Clear the tile cache… | Delete the cached tiles of the server in use |
+
+`HONDALOG_TILES=offline` in the environment keeps the app off the network
+whatever the setting (the tests and tools use it); `HONDALOG_TILE_CACHE`
+moves the cache.
+
 ## Recording and drives
 
 Recording starts when the ECU connects, unless you switched "Record on
@@ -609,7 +704,7 @@ Limits:
 
 | Key | Does |
 |---|---|
-| F1 ... F7 | Sensors, Drive, Map 3D, Replay, Raw tools, Tune, Alarms |
+| F1 ... F8 | Sensors, Drive, Map 3D, Replay, Raw tools, Tune, Alarms, Map |
 | F9 | Daylight / Night |
 | F11 | Full screen on / off |
 | Space | MARK |
@@ -681,3 +776,21 @@ deletes after asking.
 | Ctrl+D | Load a definition |
 | Ctrl+S | Save .bin |
 | Ctrl+B | Build the burn image |
+
+### F8 Map
+
+| Key | Does |
+|---|---|
+| V | Drive / All stalls |
+| Arrows | Pan a quarter of the map |
+| `+` (or `=`, PgUp) / `-` (PgDn) | Zoom in / out (also the wheel; a double click zooms in) |
+| F | Fit the drive or the stalls; when live, follow the car |
+| C / Shift+C | Next colour preset / pick any channel |
+| `[` / `]` | Previous / next pin (Drive: moves Replay's cursor; All stalls: selects) |
+| Enter | All stalls: open the selected capture in Replay |
+| R | All stalls: pick the trigger reason |
+| G | GPX of the drive; All stalls: GeoJSON |
+| K | KML of the drive |
+| O / L | Open a drive (in Replay) / Replay back to live |
+
+Drag to pan; a click on the track moves Replay's cursor.

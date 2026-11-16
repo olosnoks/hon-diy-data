@@ -19,6 +19,7 @@ the black box has not been built. Wire colours, pins and thresholds are
 - [Reading a capture in Replay](#reading-a-capture-in-replay)
 - [Combining the two timelines](#combining-the-two-timelines)
 - [After several stalls](#after-several-stalls)
+- [Where do the stalls happen](#where-do-the-stalls-happen)
 - [Try it with no hardware](#try-it-with-no-hardware)
 
 ## The idea
@@ -307,6 +308,52 @@ One capture is an anecdote. Three that agree are a diagnosis.
 Then fix one thing and keep recording. No stalls for a month with the box
 still armed is the proof.
 
+## Where do the stalls happen
+
+The order of loss says *what* failed. The place says *why it chose that
+moment*. A connection that is loose, cracked or corroded opens when it is
+shaken: the stalls then gather on the same rough stretches of road, the same
+railroad crossing, the same pothole. A fault that is heat or time dependent
+does not care where the car is.
+
+The GPS comes from the handheld, so this needs drives recorded with it
+(imported from its SD card, or live over `cyd:`). Each stall capture is
+matched with the GPS fix nearest its trigger.
+
+- **The Map screen, All stalls** (F8, then V) puts every stall of the
+  database on the map. The card *Where they happen* names the biggest group:
+  "4 stalls. 3 of them within 500 ft of one another, near 32.26977,
+  -90.09992". Pins in one spot carry their count. Narrow it with **Since**
+  (to see whether the place moved after a repair) and **Trigger** (RPM-zero
+  stalls and ECU-went-silent stalls can have different causes). A click on a
+  pin opens that capture in Replay.
+
+  ![All stalls on the map](screenshots/map-stalls-daylight.png)
+
+- **The Drive view** of one capture shows its last 40 seconds of road.
+  Colour the track by the black box's ECU +B or the pump feed (Other
+  channel…) and see exactly where on the road the rail sagged; click there
+  and Replay's cursor is on that moment.
+- **The command line**: `hondalog-log stalls` prints the same list with the
+  groups; `--geojson stalls.geojson` writes them for any map tool.
+- **SQL**: the `stall_locations` view, with
+  [examples](data-and-sql.md#gps-and-where-the-stalls-happen): stalls near
+  other stalls, stalls per 100 m square, the speed in the 30 s before each.
+
+How to read it:
+
+| What the map shows | Points at |
+|---|---|
+| Most stalls on one or two stretches, at speed | Something shaken loose: a connector or ground that opens over bumps. Wiggle-test the main relay's connector, the ECU connectors and the engine grounds with the engine idling; look again at those stretches in Replay with ECU +B and the pump feed |
+| Stalls at stops and slowing for corners, anywhere in town | Idle and the transition to idle: the idle air control, a vacuum leak, the fuel pressure at idle. The speed column (fastest in the 30 s before) and Map 3D's stall paths agree |
+| Spread all over, at any speed | Not the road: heat (look at coolant and time since start), the relay's solder joints warming up, the ECU itself |
+| Only on the way home, or only after the same long climb | Heat soak or load: compare the coolant and battery voltage before each |
+
+Three stalls in one place are a clue, not a proof: you may simply drive
+that road every day. Compare with where the drives go (the Drive view of a
+few whole drives): a place you pass ten times a week and stall at once is
+less telling than one you pass twice and stalled at both times.
+
 ## Try it with no hardware
 
 The black box simulator behaves like the box, including faults:
@@ -337,6 +384,15 @@ hondalog-log list
 `bbsim:main_relay@14` is the built-in box with that fault after 14 seconds.
 The result is a drive with a stall capture; open it with
 `hondalog --open stall_...` and read the cards.
+
+For the map, the handheld's simulator drives a loop of streets in Pearl, MS
+and stops where its engine stalls:
+
+```sh
+hondalog-log record --port cyd:sim:stall@40 --seconds 70   # a drive with GPS, a stall after 40 s
+hondalog-log stalls                                         # where it stalled
+hondalog --port cyd:sim --connect                           # F8: the car on the map, live
+```
 
 In the app, `hondalog --port sim: --connect` attaches a healthy simulated
 box automatically.

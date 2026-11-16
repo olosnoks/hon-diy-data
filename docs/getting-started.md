@@ -150,7 +150,7 @@ Notes:
   on that panel is exactly the designed size.
 - F11 inside the app also toggles full screen. With the `for_window` rule
   you do not need it.
-- The app handles every key itself (F1 to F7, F9, Space, Esc). Make sure
+- The app handles every key itself (F1 to F8, F9, Space, Esc). Make sure
   your i3 config does not bind those bare keys.
 - Menus and the drive picker are ordinary dialogs; i3 floats them.
 
@@ -168,7 +168,7 @@ opened.** Use it to learn the keys:
 
 | Key | Does |
 |---|---|
-| F1 to F7 | Sensors, Drive, Map 3D, Replay, Raw tools, Tune, Alarms |
+| F1 to F8 | Sensors, Drive, Map 3D, Replay, Raw tools, Tune, Alarms, Map |
 | F9 | Daylight / Night theme |
 | Space | MARK |
 | Esc | Acknowledge alarms, dismiss the stall banner |
@@ -263,8 +263,9 @@ hondalog --port sim: --connect --profile
 | `lat` | Milliseconds from the last byte of a read to its pixel | under 100 |
 | `poll` | ECU reads of the fast channels per second | about 17 on the simulator |
 
-Walk through F1 to F7, staying a few seconds on each; Map 3D (F3) and Tune
-(F6) are the heavy ones. On exit the app prints a JSON summary to the
+Walk through F1 to F8, staying a few seconds on each; Map 3D (F3) and Tune
+(F6) are the heavy ones, and the Map (F8) while you drag it around a long
+drive. On exit the app prints a JSON summary to the
 terminal (`fps`, `fps_min`, `frame_ms`, `paint_ms`, `latency_ms`, `cpu_pct`
 and the 3D scene's statistics). If F3 or F6 fall below 20 fps, run with
 `--no-gl` and compare.
