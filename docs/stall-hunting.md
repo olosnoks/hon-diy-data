@@ -159,7 +159,9 @@ Two refinements:
 ## hondalog-bb: fetching and reading captures
 
 The box is a USB serial device (`/dev/hondalog-bb` with the udev rule).
-Every subcommand that talks to it takes `--port`.
+Every subcommand that talks to it takes `--port`. Captures come off the box over
+USB with `hondalog-bb fetch` (or by reading its SD card); there is no
+Wi-Fi download, and the app does not fetch them by itself yet.
 
 | Command | Does |
 |---|---|

@@ -152,6 +152,8 @@ First version.
 - Stall catcher: RPM to 0, or the ECU going silent.
 - Raw tools: memory sweep and hex console.
 - Replay of a log.
+- An address map (the kerpz P2T map as a starting guess) with a `?` on
+  every channel until it is marked verified.
 - A simulated ECU on a pseudo-terminal (`hondalog-sim`).
 - `install.sh` for Debian: packages, `/opt/hondalog`, the `dialout` group,
   a udev rule for `/dev/hondalog`, a menu launcher.
