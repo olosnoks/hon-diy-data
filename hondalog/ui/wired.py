@@ -317,6 +317,14 @@ class LinkSource(be.PollerSource):
     def _on_frame(self, frame) -> None:
         bus, poller = self.bus, self.poller
         if frame.link and bus is not None and poller is not None:
+            if getattr(poller, "mode", None) == pl.OBD2 and frame.sample is not None:
+                # OBD2-only mode has no block reads (_on_read): the PIDs read
+                # since the last sample go onto the bus from here
+                fresh = frame.sample.fresh or frame.sample.values.keys()
+                stamps = frame.sample.stamps
+                for name in fresh:
+                    t = poller.t0 + stamps.get(name, frame.t)
+                    bus.publish({name: frame.values.get(name)}, t=bus.bus_time(t), wire=t, source="ECU")
             names = self.live.pipeline.math.names
             if names:
                 bus.publish({n: frame.values.get(n) for n in names},
@@ -337,7 +345,10 @@ class LinkSource(be.PollerSource):
             st.queue = len(self.live.frames)
             self.live.frames.clear()        # nobody drains them here: the bus is the UI's queue
             if self.bus is not None:
-                self.bus.set_timeout("ECU", 3.5)        # slow channels are read once a second
+                # slow channels are read once a second; in OBD2-only mode a round
+                # of every PID takes about 5 s on the car
+                obd2 = getattr(self.poller, "mode", None) == pl.OBD2
+                self.bus.set_timeout("ECU", 12.0 if obd2 else 3.5)
                 self.bus.set_timeout("MATH", 1.0)
         elif st.state == ad.OFF and self.first_contact_running():
             st.detail = self._fc_progress
