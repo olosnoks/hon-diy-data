@@ -34,6 +34,7 @@ class SourceStatus:
     silent_s: float = 0.0       # how long the device has not answered
     queue: int = 0              # samples waiting somewhere (profile overlay)
     simulated: bool = False
+    link: str = ""              # "OBD2": standard ISO 9141-2 PIDs, not Honda reads
 
 
 @runtime_checkable

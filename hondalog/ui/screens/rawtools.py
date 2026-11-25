@@ -721,7 +721,9 @@ class RawScreen(QWidget):
             self.expert_btn.setEnabled(m.available())
             self.expert_btn.setChecked(bool(getattr(m, "expert", False)))
             self._status = (f"0x00–0xFF · sweep {m.sweeps} · {m.sweep_s:.1f} s / sweep"
-                            if m.available() else "not connected · click the ECU chip")
+                            if m.available() else
+                            "OBD2 only · Honda reads are off" if getattr(m, "obd2_only", bool)()
+                            else "not connected · click the ECU chip")
             self.console.set_rx(m.console())
             self.grid.update()
             self.inspector.sync()

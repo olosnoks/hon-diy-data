@@ -30,6 +30,8 @@ def source_chip(name: str, st: ad.SourceStatus, key: str = "") -> tuple:
     sim = " SIM" if st.simulated else ""
     if st.state == ad.OK:
         monos = (_rate(st.rate_hz), f"{st.errors} err") if name == "ECU" else (_rate(st.rate_hz),)
+        if st.link == "OBD2":               # standard PIDs, not Honda reads
+            return (key, "ok", "", f"{name}{sim} OBD2 (ISO 9141-2)", monos)
         return (key, "ok", "", f"{name}{sim} OK", monos)
     if st.state == ad.CONNECTING:
         return (key, "half", "caution", f"{name}{sim} {st.detail or 'connecting'}", ())

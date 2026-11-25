@@ -229,6 +229,11 @@ class LinkSource(be.PollerSource):
             return p.link_text()            # the handheld's link: frames, losses, its SD, the map
         if p is None or p.state != pl.OK:
             return ""
+        if getattr(p, "mode", "") == pl.OBD2:
+            # standard PIDs one by one: no rate classes, no Honda wire budget to show
+            s = p.stats
+            return " · ".join((f"OBD2 {p.iso_link or 'ISO 9141-2'}", f"{p.hz:.1f} Hz",
+                               "Honda reads off", f"{s.timeouts} t/o"))
         rates = p.class_rates()
         parts = [f"{name} {got:.0f}/{target:.0f} Hz" for name, (target, got) in rates.items()]
         s = p.stats

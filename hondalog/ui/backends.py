@@ -32,7 +32,7 @@ from .. import addressmap, protocol
 from .. import poller as pl
 from ..logger import log_dir, read_log
 from ..protocol import ProtocolError
-from ..transport import BUILTIN_SIM, SIM_SYMLINK, list_ports, make_transport
+from ..transport import BUILTIN_SIM, BUILTIN_SIM_ISO, SIM_SYMLINK, list_ports, make_transport
 from . import adapters as ad
 from .bus import ChannelBus, ChannelSpec
 from .units import U
@@ -108,7 +108,7 @@ def spec_from_channel(ch) -> ChannelSpec:
 
 
 def is_sim_port(port: str) -> bool:
-    return port in (BUILTIN_SIM, SIM_SYMLINK)
+    return port in (BUILTIN_SIM, BUILTIN_SIM_ISO, SIM_SYMLINK)
 
 
 # ---- ECU over K-line --------------------------------------------------------
@@ -208,7 +208,8 @@ class PollerSource:
             self._silent_since = None
             if self.bus is not None and p.hz > 0:
                 self.bus.set_timeout("ECU", max(0.5, 3.0 / p.hz))
-            return ad.SourceStatus(ad.OK, p.hz, p.errors, simulated=sim, queue=len(p.samples))
+            return ad.SourceStatus(ad.OK, p.hz, p.errors, simulated=sim, queue=len(p.samples),
+                                   link="OBD2" if getattr(p, "mode", "") == pl.OBD2 else "")
         if p.state == pl.CONNECTING:
             return ad.SourceStatus(ad.CONNECTING, errors=p.errors, detail="waking K-line",
                                    simulated=sim)
@@ -892,6 +893,9 @@ def demo_stall_paths():
 
 # ---- raw tools / mapper -----------------------------------------------------
 
+OBD2_ONLY = ("OBD2 only: this ECU answers standard OBD2 (ISO 9141-2), not Honda reads, so the "
+             "sweep and the console are off. Live values, codes and readiness still work.")
+
 class PollerMapper:
     """Memory sweep and hex console through Poller.submit, plus a small guided
     wizard (stopgap for W3's): baseline, three timed presses, Pearson ranking."""
@@ -919,6 +923,7 @@ class PollerMapper:
         self._t0 = 0.0
         self._console = ""
         self._poller = None
+        self._obd2 = False
         # wizard
         self._step = 0
         self._target = 0
@@ -932,10 +937,16 @@ class PollerMapper:
     # -- sweep --
 
     def available(self) -> bool:
-        return getattr(self.ecu, "poller", None) is not None
+        return getattr(self.ecu, "poller", None) is not None and not self.obd2_only()
+
+    def obd2_only(self) -> bool:
+        """The link runs standard OBD2 PIDs: raw Honda reads are refused."""
+        return getattr(getattr(self.ecu, "poller", None), "mode", "") == pl.OBD2
 
     def set_sweeping(self, on: bool) -> None:
         self.sweeping = bool(on) and self.available()
+        if on and self.obd2_only():
+            self._console = OBD2_ONLY
         self.revision += 1
         if self.sweeping and not self._left:
             self._start_sweep()
@@ -954,6 +965,15 @@ class PollerMapper:
             self._pending.append((fut, "scan", addr))
 
     def poll(self) -> None:
+        obd2 = self.obd2_only()
+        if obd2 != self._obd2:
+            self._obd2 = obd2
+            if obd2:                        # the link went OBD2-only: Honda jobs would only fail
+                self._pending.clear()
+                self._left = 0
+                self.sweeping = False
+                self._console = OBD2_ONLY
+            self.revision += 1
         if self.ecu.poller is not self._poller and self._pending:
             self._pending.clear()           # link went away under us
             self._left = 0
@@ -1116,7 +1136,7 @@ class PollerMapper:
     def send(self, data: bytes, add_checksum: bool) -> None:
         poller = self.ecu.poller if self.available() else None
         if poller is None or not data:
-            self._console = "not connected"
+            self._console = OBD2_ONLY if self.obd2_only() else "not connected"
             self.revision += 1
             return
         if add_checksum:

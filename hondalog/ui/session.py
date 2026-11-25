@@ -8,10 +8,11 @@ object and never import a backend module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
+from ..obd2 import PID_CHANNEL
 from . import adapters as ad
 from .bus import ChannelBus
 
@@ -54,6 +55,7 @@ class Session:
         self._status_t = -1.0
         self._was_ok = False
         self._started = False
+        self._obd2_specs: dict = {}         # id -> (the map's spec, the one shown in OBD2 mode)
 
     # ---- lifecycle ----
 
@@ -133,6 +135,25 @@ class Session:
         rank = {cid: i for i, cid in enumerate(ECU_ORDER)}
         return sorted(states, key=lambda s: rank.get(s.spec.id, len(rank)))
 
+    def _mark_obd2(self, on: bool) -> None:
+        """In OBD2 mode the PID channels are standard values, not guesses from
+        the address map: show them verified, and put the map's spec back after."""
+        for cid in PID_CHANNEL.values():
+            state = self.bus.channel(cid)
+            if state is None:
+                continue
+            mine = self._obd2_specs.get(cid)
+            if on and (mine is None or state.spec is not mine[1]):
+                if state.spec.verified:
+                    continue
+                shown = replace(state.spec, verified=True)
+                self._obd2_specs[cid] = (state.spec, shown)
+                self.bus.register(shown)
+            elif not on and mine is not None:
+                if state.spec is mine[1]:
+                    self.bus.register(mine[0])
+                del self._obd2_specs[cid]
+
     def counts(self) -> tuple[int, int]:
         chans = [s for s in self.bus.channels() if s.spec.mapped]
         return len(chans), sum(1 for s in chans if not s.spec.verified)
@@ -190,6 +211,7 @@ class Session:
             self._status_t = now
             self.ecu_status = self.ecu.status()
             self.bb_status = self.blackbox.status()
+            self._mark_obd2(self.ecu_status.link == "OBD2")
             self.stall = self.recording.stall()
             if self.banner is not None and self.stall.state != "saving":
                 self.stall.state = "triggered"
