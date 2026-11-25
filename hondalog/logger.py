@@ -110,6 +110,20 @@ def column_for(ch: Any) -> Column:
                   ch.kind, ch.decimals, float(ch.min), float(ch.max))
 
 
+def obd2_stream(amap: Any, pid: int, pv: Any) -> tuple[str, Column, dict[str, Any]]:
+    """Stream name, column and attrs for one Mode 01 PID (``pv`` is its decoded
+    ``hondalog.obd2.PidValue``). A PID that is the same quantity as a map
+    channel gets that channel's name, with the PID's own (standard) units."""
+    from .obd2 import PID_CHANNEL
+    ch = amap.channel(PID_CHANNEL.get(pid, ""))
+    if ch is None:
+        column = Column(f"pid_{pid:02x}", "f4", pv.units, pv.name)
+    else:
+        column = Column(ch.name, "f4", pv.units or ch.units, ch.label if ch.label != ch.name else "",
+                        ch.kind, ch.decimals, float(ch.min), float(ch.max))
+    return f"obd2/{pid:02X}", column, {"mode": 1, "pid": pid, "name": pv.name}
+
+
 class Recorder:
     """One recording session: the drives, the trigger engine, the captures.
 
@@ -321,6 +335,28 @@ class Recorder:
                 return
             self._begin(t, None, True)
             changed = self._read(t, addr, bytes(data), latency)
+            changed.update(self._set_link(t, True))
+            self._after(t, changed)
+
+    def feed_pid(self, t: float, pid: int, data: bytes) -> None:
+        """One OBD2 Mode 01 reply (OBD2-only live mode): ``data`` is the PID's
+        data bytes. Stored raw in an ``obd2/XX`` stream, as the handheld's
+        OBD2 drives are imported."""
+        from .obd2 import decode_pid
+        pv = decode_pid(pid, data)
+        with self._lock:
+            if not self.active:
+                return
+            self._begin(t, None, True)
+            log = self._drive()
+            name, column, attrs = obd2_stream(self.amap, pid, pv)
+            if log.stream(name) is None:
+                log.add_stream(name, [column], source="obd2", raw_len=len(data), attrs=attrs)
+            try:
+                log.append(name, t, [pv.value], bytes(data))
+            except ValueError:      # another length than the first reply: keep the stream consistent
+                pass
+            changed: dict[str, Any] = {column.name: pv.value}
             changed.update(self._set_link(t, True))
             self._after(t, changed)
 

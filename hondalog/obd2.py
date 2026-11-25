@@ -522,6 +522,12 @@ def decode_readiness(data: bytes) -> Readiness:
     return Readiness(bool(a & 0x80), a & 0x7F, monitors, bytes(data[:4]))
 
 
+#: Mode 01 PIDs that are the same quantity as an address map channel. OBD2-only
+#: live mode (``Poller``, the handheld's ``iso_fallback``) fills these channels.
+PID_CHANNEL = {0x0C: "rpm", 0x0D: "vss", 0x0B: "map", 0x11: "tps", 0x0E: "ign", 0x14: "o2", 0x06: "stft",
+               0x07: "ltft", 0x05: "ect", 0x0F: "iat"}
+
+
 def decode_dtc(hi: int, lo: int) -> str:
     """Two DTC bytes -> 'P0135'."""
     return f"{'PCBU'[hi >> 6]}{(hi >> 4) & 3}{hi & 0xF:X}{lo >> 4:X}{lo & 0xF:X}"

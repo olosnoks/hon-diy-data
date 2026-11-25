@@ -196,6 +196,8 @@ class LiveSession:
         self.poller = poller
         poller.on_block = self._on_block
         poller.on_sample = self._on_sample
+        if hasattr(poller, "on_pid"):            # OBD2-only mode: raw PID replies
+            poller.on_pid = self._on_pid
         if hasattr(poller, "on_event"):          # the handheld: its GPS and its own events too
             poller.on_gps = self._on_cyd_gps
             poller.on_event = self._on_cyd_event
@@ -339,6 +341,11 @@ class LiveSession:
             recorder.feed_read(read.t - read.latency_s, read.addr, read.data, read.latency_s)
         if self.on_read is not None:
             self.on_read(read)
+
+    def _on_pid(self, t: float, pid: int, data: bytes) -> None:
+        recorder = self.recorder
+        if recorder is not None:
+            recorder.feed_pid(t, pid, data)
 
     def _on_sample(self, sample: Sample) -> None:
         with self._lock:

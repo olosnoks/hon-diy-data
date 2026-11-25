@@ -22,6 +22,19 @@ Recovery
 * Port dies (cable pulled): state PORT_LOST, the thread reopens the port every
   0.25-2 s (the cable may come back under another ttyUSB number) and then goes
   through the same probing.
+
+OBD2-only live mode
+-------------------
+Some ECUs answer standard OBD2 (ISO 9141-2) on the K-line but not Honda reads.
+When Honda reads have gone unanswered for ``_ISO_AFTER_S`` (and
+``iso_fallback`` is on), the thread tries the 5-baud ISO init. If the ECU
+answers, ``mode`` becomes OBD2 and the thread polls the Mode 01 PIDs that
+are the same quantity as a map channel (``obd2.PID_CHANNEL``), RPM on every
+other request, and emits a Sample after each pair. It is slow (a few Samples
+a second), but RPM, MAP, TPS, trims and temperatures reach the same channels,
+so the screens, alarms and stall rules keep working. Each reply goes to
+``on_pid`` (raw bytes, for the recorder). If the ECU stops answering, the
+session is dropped, the link reported down, and the init tried again.
 """
 
 from __future__ import annotations
@@ -56,6 +69,12 @@ _REOPEN_MIN_S, _REOPEN_MAX_S = 0.25, 2.0
 _REPORT_EVERY_S = 0.5
 _REPLAN_EVERY = 256            # good reads between checks of the cost model
 _SWITCH_BACK_S = 8.0           # grace for the ECU to drop an ISO session
+_ISO_AFTER_S = 6.0             # Honda reads unanswered this long: try OBD2
+_ISO_RETRY_S = 5.0             # after an ISO init nobody answered
+_ISO_REINIT_S = 1.0            # after a live ISO session went quiet (key off, stall)
+_ISO_FAILS = 3                 # PID requests in a row without a reply: session lost
+#: polled in OBD2-only mode, most important first; weight = places per round
+_ISO_WEIGHT = {"fast": 3, "medium": 2, "slow": 1}
 
 
 @dataclass
@@ -90,7 +109,7 @@ class BlockRead:
 class Poller(threading.Thread):
     def __init__(self, transport: Transport, amap: AddressMap,
                  on_sample: Callable[[Sample], None] | None = None,
-                 max_queue: int = 2000, clock: Clock = REAL) -> None:
+                 max_queue: int = 2000, clock: Clock = REAL, iso_fallback: bool = True) -> None:
         super().__init__(name="hondalog-poller", daemon=True)
         self.transport = transport
         self.amap = amap
@@ -98,6 +117,11 @@ class Poller(threading.Thread):
         self.link = Link(transport, amap.framing, clock)
         self.on_sample = on_sample                  # called on this thread
         self.on_block: Callable[[BlockRead], None] | None = None
+        #: OBD2-only mode: (seconds since connect, PID, data bytes) for every reply
+        self.on_pid: Callable[[float, int, bytes], None] | None = None
+        self.iso_fallback = iso_fallback
+        #: OBD2-only mode: how the session came up ("ISO 9141-2 via 5-baud init, ...")
+        self.iso_link = ""
         self.samples: collections.deque[Sample] = collections.deque(maxlen=max_queue)
         self._jobs: collections.deque[tuple[str, Callable[..., Any], Future[Any]]] = collections.deque()
         self._stop_evt = threading.Event()
@@ -140,6 +164,14 @@ class Poller(threading.Thread):
         self._next_report = 0.0
         self._next_replan = _REPLAN_EVERY
         self._quiet_until = 0.0
+        # OBD2-only mode
+        self._iso: Any = None                       # Iso9141Link while a session is live
+        self._iso_session: Any = None               # Obd2Session on it
+        self._iso_plan: list[tuple[int, str, bool]] = []    # (pid, channel, emit after it)
+        self._iso_i = 0
+        self._iso_fails = 0
+        self._honda_last_ok = self.clock.now()
+        self._next_iso_try = 0.0
 
     # -- plan --
 
@@ -256,12 +288,16 @@ class Poller(threading.Thread):
                 if jobs:
                     self._run_job()
                 state = self.state
-                if state == OK:
+                if self._iso is not None:
+                    self._iso_step()
+                elif state == OK:
                     self._step()
                 elif state == PORT_LOST:
                     self._emit_down()
                     self._sleep(self._reopen_wait)
                     self._reopen()
+                elif self._iso_due():
+                    self._try_iso()
                 else:
                     self._probe()
         finally:
@@ -310,6 +346,7 @@ class Poller(threading.Thread):
             self.last_error = f"{addr:02X}+{length}: {exc}"
             raise
         self.reads += 1
+        self._honda_last_ok = self.clock.now()
         return result
 
     # -- the hot loop: one block per call --
@@ -487,6 +524,8 @@ class Poller(threading.Thread):
         self._link_up()
 
     def _port_lost(self, exc: Exception) -> None:
+        self._iso = self._iso_session = None
+        self.mode = HONDA
         self.errors += 1
         self.last_error = f"port: {exc}"
         self._link_down()
@@ -518,6 +557,9 @@ class Poller(threading.Thread):
             return
         if self.state == PORT_LOST:
             fut.set_exception(TransportError(self.last_error))
+            return
+        if self._iso is not None:            # OBD2-only mode: the session is already up
+            self._run_job_iso(kind, fn, fut)
             return
         if kind == "obd2":
             self._run_obd2(fn, fut)
@@ -560,6 +602,153 @@ class Poller(threading.Thread):
         self.state = CONNECTING
         self._probes = 3
         self._quiet_until = self.clock.now() + _SWITCH_BACK_S
+
+    # -- OBD2-only live mode --
+
+    def _iso_due(self) -> bool:
+        if not self.iso_fallback:
+            return False
+        now = self.clock.now()
+        return (now >= self._quiet_until and now - self._honda_last_ok >= _ISO_AFTER_S
+                and now >= self._next_iso_try)
+
+    def _try_iso(self) -> None:
+        """Honda reads stay unanswered: does the ECU speak standard OBD2?"""
+        from .obd2 import Iso9141Error, Iso9141Link, Obd2Session
+        self.mode = OBD2
+        iso = Iso9141Link(self.transport, self.clock, honda_baud=self.amap.framing.baud)
+        try:
+            result = iso.connect()
+            session = Obd2Session(iso)
+            try:
+                supported = session.supported_pids()
+            except Iso9141Error:
+                supported = []
+        except TransportError as exc:
+            self._port_lost(exc)
+            return
+        except Iso9141Error as exc:
+            self.last_error = f"OBD2: {exc}"
+            self._iso_close(iso)
+            self.mode = HONDA
+            self._next_iso_try = self.clock.now() + _ISO_RETRY_S
+            return
+        if self._stop_evt.is_set():
+            self._iso_close(iso)
+            return
+        self._iso, self._iso_session = iso, session
+        self._iso_plan = self._plan_iso(supported)
+        self._iso_i = 0
+        self._iso_fails = 0
+        self.iso_link = str(result)
+        self.last_error = ""
+        self.state = OK
+        self._values = {n: None for n in self.amap.names}
+        self._stamps = {}
+        self._fresh.clear()
+
+    def _plan_iso(self, supported: list[int]) -> list[tuple[int, str, bool]]:
+        """One round of PID requests: RPM before every other PID (a Sample is
+        emitted after each pair), the others weighted by their rate class.
+        Only PIDs the ECU supports and the map has a channel for."""
+        from .obd2 import PID_CHANNEL
+        names = set(self.amap.names)
+        have = [(pid, name) for pid, name in PID_CHANNEL.items()
+                if name in names and (not supported or pid in supported)]
+        rpm = next(((p, n) for p, n in have if n == "rpm"), None)
+        if rpm is None and 0x0C in PID_CHANNEL and (not supported or 0x0C in supported):
+            rpm = (0x0C, PID_CHANNEL[0x0C])
+        others = [(p, n) for p, n in have if rpm is None or p != rpm[0]]
+        # weighted round, spread out: fast channels three places, medium two, slow one
+        slots: list[tuple[float, int, str]] = []
+        for k, (pid, name) in enumerate(others):
+            weight = _ISO_WEIGHT.get(self._class.get(name, "slow"), 1)
+            slots += [((j + 0.5) / weight + k * 1e-3, pid, name) for j in range(weight)]
+        slots.sort()
+        plan: list[tuple[int, str, bool]] = []
+        for _, pid, name in slots:
+            if rpm is not None:
+                plan.append((rpm[0], rpm[1], False))
+            plan.append((pid, name, True))
+        if not plan and rpm is not None:
+            plan.append((rpm[0], rpm[1], True))
+        return plan
+
+    def _iso_step(self) -> None:
+        """One PID request in OBD2-only mode."""
+        from .obd2 import Iso9141Error
+        if not self._iso_plan:
+            self._iso_leave("no usable PIDs")
+            return
+        pid, name, emit = self._iso_plan[self._iso_i]
+        self._iso_i = (self._iso_i + 1) % len(self._iso_plan)
+        try:
+            pv = self._iso_session.read_pid(pid)
+        except TransportError as exc:
+            self._port_lost(exc)
+            return
+        except Iso9141Error as exc:
+            self.errors += 1
+            self.last_error = f"OBD2 PID {pid:02X}: {exc}"
+            self._iso_fails += 1
+            if self._iso_fails >= _ISO_FAILS:
+                self._iso_leave(self.last_error)
+            return
+        self._iso_fails = 0
+        self.reads += 1
+        mono = self.clock.now()
+        t = mono - self.t0
+        if name in self._values:
+            self._values[name] = pv.value
+            self._stamps[name] = t
+            self._fresh.add(name)
+        hook = self.on_pid
+        if hook is not None:
+            try:
+                hook(t, pid, pv.raw)
+            except Exception as exc:        # a logging problem must not kill polling
+                self.last_error = f"on_pid: {exc!r}"
+        if emit:
+            self._emit(t, mono, 0.0)
+
+    def _iso_close(self, iso: Any) -> None:
+        try:
+            iso.close()                     # back to the Honda baud rate
+        except TransportError as exc:
+            self._port_lost(exc)
+            return
+        self.link.reset()
+
+    def _iso_leave(self, why: str) -> None:
+        """The OBD2 session went quiet (key off, power lost): report the link
+        down, go back to probing, and try the init again soon."""
+        iso, self._iso, self._iso_session = self._iso, None, None
+        self.mode = HONDA
+        self.last_error = f"OBD2 session lost: {why}"
+        self._link_down()
+        self._emit_down()
+        if iso is not None:
+            self._iso_close(iso)
+        if self.state != PORT_LOST:
+            self.state = NO_REPLY
+            self._probes = 3
+            self._next_iso_try = self.clock.now() + _ISO_REINIT_S
+
+    def _run_job_iso(self, kind: str, fn: Callable[..., Any], fut: Future[Any]) -> None:
+        from .obd2 import Iso9141Error
+        if kind != "obd2":
+            fut.set_exception(ProtocolError(
+                "Honda reads are off: this ECU answers standard OBD2 only"))
+            return
+        try:
+            fut.set_result(fn(self._iso_session))
+        except TransportError as exc:
+            fut.set_exception(exc)
+            self._port_lost(exc)
+        except Iso9141Error as exc:
+            fut.set_exception(exc)
+        except Exception as exc:
+            fut.set_exception(exc)
 
     def _fail_jobs(self, why: str) -> None:
         while True:

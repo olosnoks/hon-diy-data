@@ -31,6 +31,7 @@ UDEV_SYMLINK = "/dev/hondalog"
 SIM_SYMLINK = "/tmp/hondalog-sim"
 BUILTIN_SIM = "sim:"
 BUILTIN_SIM_FLAKY = "sim:flaky"
+BUILTIN_SIM_ISO = "sim:iso"
 
 DEFAULT_USB_LATENCY_S = 0.016      # FTDI default latency_timer when we could not lower it
 LOW_USB_LATENCY_S = 0.001
@@ -398,6 +399,7 @@ def list_ports() -> list[PortInfo]:
             add(p.device, f"{p.device}  ({p.vid:04x}:{p.pid:04x} {p.description})")
     add(BUILTIN_SIM, "sim:  (built-in simulator, true 9600 baud timing)")
     add(BUILTIN_SIM_FLAKY, "sim:flaky  (built-in simulator with line faults)")
+    add(BUILTIN_SIM_ISO, "sim:iso  (built-in simulator that answers OBD2 only)")
     return ports
 
 
@@ -405,7 +407,9 @@ def make_transport(port: str, framing: Framing = protocol.DEFAULT) -> Transport:
     if port.startswith(BUILTIN_SIM):
         from .sim import EcuModel, Faults
         faults = Faults.flaky() if port == BUILTIN_SIM_FLAKY else None
-        transport = LoopbackTransport(EcuModel(framing=framing, faults=faults), byte_timing=True)
+        # sim:iso = an ECU that answers standard OBD2 (ISO 9141-2) but not Honda reads
+        model = EcuModel(framing=framing, faults=faults, honda_protocol=port != BUILTIN_SIM_ISO)
+        transport = LoopbackTransport(model, byte_timing=True)
         transport.name = port
         return transport
     return SerialTransport(port, framing.baud)

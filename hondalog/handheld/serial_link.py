@@ -767,7 +767,7 @@ class CydPoller(threading.Thread):
 
     def _iso(self, p: bytes, now: float) -> None:
         from ..obd2 import decode_pid
-        from .importer import PID_CHANNEL
+        from ..obd2 import PID_CHANNEL
         t_us, mode, pid, length, _flags = P.ISO.unpack(p[:P.ISO.size])
         data = p[P.ISO.size:P.ISO.size + length]
         name = PID_CHANNEL.get(pid)

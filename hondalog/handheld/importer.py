@@ -24,15 +24,12 @@ from ..data.db import DriveRef
 from ..data.model import Column
 from ..data.store import Store
 from ..geo.track import GPS_STREAM, gps_columns
-from ..logger import LINK, LINK_STREAM, column_for
-from ..obd2 import decode_pid
+from ..logger import LINK, LINK_STREAM, column_for, obd2_stream
+from ..obd2 import PID_CHANNEL, decode_pid
 from . import format as F
 from .drivefile import DriveFile, read_drive_file
 from .mapfile import MAP_NAME, read_map
 
-#: Mode 01 PIDs that are the same quantity as a map channel
-PID_CHANNEL = {0x0C: "rpm", 0x0D: "vss", 0x0B: "map", 0x11: "tps", 0x0E: "ign", 0x14: "o2", 0x06: "stft",
-               0x07: "ltft", 0x05: "ect", 0x0F: "iat"}
 
 
 @dataclass
@@ -283,17 +280,11 @@ def _write_iso(drive: Any, df: DriveFile, amap: AddressMap) -> None:
     for r in df.iso:
         if r.mode != 0x41:
             continue
-        name = f"obd2/{r.pid:02X}"
         pv = decode_pid(r.pid, r.data)
+        name, column, attrs = obd2_stream(amap, r.pid, pv)
         if name not in defined:
             defined.add(name)
-            ch = amap.channel(PID_CHANNEL.get(r.pid, ""))
-            column = column_for(ch) if ch is not None else Column(f"pid_{r.pid:02x}", "f4", pv.units, pv.name)
-            if ch is not None:      # the standard PID's own units, not the map's guess at the RAM byte
-                column = Column(ch.name, "f4", pv.units or ch.units, ch.label if ch.label != ch.name else "",
-                                ch.kind, ch.decimals, float(ch.min), float(ch.max))
-            drive.add_stream(name, [column], source="obd2", raw_len=len(r.data),
-                             attrs={"mode": 1, "pid": r.pid, "name": pv.name})
+            drive.add_stream(name, [column], source="obd2", raw_len=len(r.data), attrs=attrs)
         try:
             drive.append(name, df.seconds(r.t_us), [pv.value], r.data)
         except ValueError:          # a reply of another length than the first: keep the stream consistent
