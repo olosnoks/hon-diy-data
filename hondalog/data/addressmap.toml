@@ -46,12 +46,12 @@
 
 schema = 2
 version = "p2p-guess-2 (kerpz P2T map)"
-ecu = "P2P expected, not confirmed"
+ecu = "P2P (confirmed on a 2000 Civic EX, 2026-11-25)"
 ecu_variant = "P2P"                     # which of the [variants] below to load
 
 # The plain channel entries describe the first variant listed here.
 [variants.P2P]
-description = "2000 Civic EX, D16Y8, OBD2B. The target. Not confirmed on the car."
+description = "2000 Civic EX, D16Y8, OBD2B. Confirmed 2026-11-25: Honda reads answer at 10400 baud after the wake frame (set baud = 10400 in [protocol] for the car)."
 
 [variants.P2T]
 description = "kerpz's OBD2 test ECU. The addresses in this file are his."
@@ -99,7 +99,7 @@ max = 7200
 decimals = 0
 gauge = true
 plot = true
-status = "unverified"
+status = "verified"
 rate = "fast"
 source = "kerpz hobd_uni2 (P2T)"
 
@@ -107,6 +107,12 @@ source = "kerpz hobd_uni2 (P2T)"
 formula = "1875000 / (x + 1)"
 source = "kerpz hobd_uni2 (OBD1 branch)"
 
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 0C"
 [[channel]]
 name = "vss"
 label = "Speed"
@@ -118,10 +124,16 @@ min = 0
 max = 200
 decimals = 0
 gauge = true
-status = "unverified"
+status = "verified"
 rate = "medium"
 source = "kerpz hobd_uni2 (P2T)"
 
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 0D"
 [[channel]]
 name = "ect"
 label = "Coolant"
@@ -133,10 +145,16 @@ min = -20
 max = 120
 decimals = 0
 gauge = true
-status = "unverified"
+status = "verified"
 rate = "slow"
 source = "kerpz hobd_uni2 (P2T)"
 
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 05"
 [[channel]]
 name = "iat"
 label = "Intake air"
@@ -148,10 +166,16 @@ min = -20
 max = 80
 decimals = 0
 gauge = true
-status = "unverified"
+status = "verified"
 rate = "slow"
 source = "kerpz hobd_uni2 (P2T)"
 
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 0F"
 [[channel]]
 name = "map"
 label = "MAP"
@@ -164,10 +188,16 @@ max = 110
 decimals = 0
 gauge = true
 plot = true
-status = "unverified"
+status = "verified"
 rate = "fast"
 source = "kerpz hobd_uni2 (P2T)"
 
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 0B"
 [[channel]]
 name = "baro"
 label = "Baro"
@@ -187,17 +217,23 @@ name = "tps"
 label = "Throttle"
 addr = 0x14
 length = 1
-formula = "(x - 24) / 2"
+formula = "x / 2.55"
 units = "%"
 min = 0
 max = 100
 decimals = 0
 gauge = true
 plot = true
-status = "unverified"
+status = "verified"
 rate = "fast"
-source = "kerpz hobd_uni2 (P2T)"
+source = "the raw byte is the OBD2 PID 11 byte on the P2P"
 
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "raw byte equals the PID 11 byte: 7.8 % at idle both ways"
+reference = "PID 11"
 [[channel]]
 name = "o2"
 label = "O2"
@@ -269,10 +305,16 @@ min = -30
 max = 30
 decimals = 1
 gauge = true
-status = "unverified"
+status = "verified"
 rate = "medium"
 source = "kerpz hobd_uni2 (P2T)"
 
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 06"
 [[channel]]
 name = "ltft"
 label = "Long trim"
@@ -284,10 +326,16 @@ min = -30
 max = 30
 decimals = 1
 gauge = true
-status = "unverified"
+status = "verified"
 rate = "medium"
 source = "kerpz hobd_uni2 (P2T)"
 
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 07"
 [[channel]]
 name = "inj"
 label = "Injector"
@@ -367,22 +415,28 @@ name = "ac_sw"
 label = "A/C"
 addr = 0x08
 length = 1
-formula = "bit(x, 2)"
+formula = "bit(x, 1)"
 kind = "flag"
-status = "unverified"
+status = "verified"
 rate = "slow"
-source = "kerpz hobd_uni2 (P2T)"
+source = "P30 (fedorenkoalex) + S2000 (mr-sneezy) bit numbering; confirmed on the 2000 Civic EX P2P; kerpz used bit 2 (the PSP switch)"
 
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 1 of 0x08 followed the A/C button twice"
+reference = "A/C button"
 [[channel]]
 name = "vtec"
 label = "VTEC"
 addr = 0x0A
 length = 1
-formula = "bit(x, 3)"
+formula = "bit(x, 2)"
 kind = "flag"
 status = "unverified"
 rate = "slow"
-source = "kerpz hobd_uni2 (P2T)"
+source = "VTEC solenoid output: P30 (fedorenkoalex) + S2000 (mr-sneezy); kerpz used bit 3. Not yet seen switching on the P2P"
 
 [[channel]]
 name = "mil"
@@ -391,10 +445,16 @@ addr = 0x0B
 length = 1
 formula = "bit(x, 5)"
 kind = "flag"
-status = "unverified"
+status = "verified"
 rate = "slow"
 source = "kerpz hobd_uni2 (P2T)"
 
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 5 of 0x0B on at key on (bulb check), off running"
+reference = "key-on bulb check"
 [[channel]]
 name = "closed_loop"
 label = "Closed loop"
@@ -402,7 +462,7 @@ addr = 0x0F
 length = 1
 formula = "bit(x, 0)"
 kind = "flag"
-status = "unverified"
+status = "verified"
 rate = "slow"
 source = "kerpz hobd_uni2 (P2T)"
 
@@ -412,6 +472,89 @@ source = "kerpz hobd_uni2 (P2T)"
 # and stay empty in Honda mode. Fields: name, pid, label, units, min, max,
 # decimals, kind, gauge (own tile), plot, rate, source, notes. Decoding is
 # SAE J1979's (hondalog/obd2.py), not a formula.
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 0 of 0x0F off when revved to 1600-2400 rpm, on again at idle"
+reference = "rev test"
+
+[[channel]]
+name = "fuel_pump"
+label = "Fuel pump"
+addr = 0x0B
+length = 1
+formula = "bit(x, 0)"
+kind = "flag"
+status = "verified"
+rate = "slow"
+source = "PGM-FI main relay output: P30 (fedorenkoalex) + S2000 (mr-sneezy)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 0 of 0x0B on at key on (pump prime) and while running"
+reference = "key-on prime"
+
+[[channel]]
+name = "fan"
+label = "Fan cmd (ECM)"
+addr = 0x0C
+length = 1
+formula = "bit(x, 1)"
+kind = "flag"
+status = "unverified"
+rate = "slow"
+source = "P30 (fedorenkoalex) only; the ECU's own fan command, not the 83 C thermoswitch path"
+
+[[channel]]
+name = "ac_clutch"
+label = "A/C clutch"
+addr = 0x0B
+length = 1
+formula = "bit(x, 1)"
+kind = "flag"
+status = "verified"
+rate = "slow"
+source = "A/C compressor clutch relay output: P30 (fedorenkoalex) + S2000 (mr-sneezy)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 1 of 0x0B came on after the A/C request with idle-up to ~1050 rpm, off with it"
+reference = "A/C button"
+
+[[channel]]
+name = "brake"
+label = "Brake"
+addr = 0x08
+length = 1
+formula = "bit(x, 3)"
+kind = "flag"
+status = "unverified"
+rate = "slow"
+source = "brake pedal switch: P30 (fedorenkoalex) + S2000 (mr-sneezy)"
+
+[[channel]]
+name = "starter"
+label = "Starter"
+addr = 0x08
+length = 1
+formula = "bit(x, 0)"
+kind = "flag"
+status = "verified"
+rate = "slow"
+source = "starter signal: P30 (fedorenkoalex) + S2000 (mr-sneezy)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 0 of 0x08 set only while cranking"
+reference = "key cycle"
 
 [[obd2]]
 name = "o2_post"
