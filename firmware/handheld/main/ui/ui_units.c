@@ -53,7 +53,11 @@ static void identity(const char *base_unit, ui_conv_t *out)
     out->scale = 1.0f;
     out->offset = 0.0f;
     out->extra_decimals = 0;
-    snprintf(out->unit, sizeof(out->unit), "%s", base_unit ? base_unit : "");
+    const char *s = base_unit ? base_unit : "";
+    size_t n = strlen(s);
+    if (n >= sizeof(out->unit)) n = sizeof(out->unit) - 1;     /* a too-long unit is cut, on purpose */
+    memcpy(out->unit, s, n);
+    out->unit[n] = 0;
 }
 
 bool ui_units_conv(const char *base_unit, ui_conv_t *out)
