@@ -172,7 +172,10 @@ static void apply_state(ui_tile_t *t, int state)
 void ui_tile_update(ui_tile_t *t, const hh_snapshot_t *s, bool octagon_on)
 {
     if (t->ch < 0) return;
-    bool have = t->ch < s->n_ch && s->fresh[t->ch];
+    /* the last value stays up until the engine clears it (link lost, NaN):
+     * slow channels are read once a second while samples come at ~20 Hz,
+     * so "read since the last sample" made them blink */
+    bool have = t->ch < s->n_ch && !isnan(s->value[t->ch]);
     int state = !have ? ST_STALE : s->alarm[t->ch] >= 2 ? ST_ALARM : s->alarm[t->ch] == 1 ? ST_WARN : ST_NORMAL;
     if (state != t->state) {
         t->state = state;
