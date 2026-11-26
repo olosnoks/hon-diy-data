@@ -28,9 +28,11 @@ def test_implementations_satisfy_the_protocols():
 def test_poller_source_specs_cover_the_32_slots():
     ecu = be.PollerSource()
     ids = [s.id for s in ecu.specs()]
-    assert len(ids) == 25 and {"fan", "fuel_pump", "o2_post"} <= set(ids)   # o2_post: OBD2-only
+    assert len(ids) == 28 and {"fan", "fuel_pump", "o2_post"} <= set(ids)   # o2_post: OBD2-only
     by = {s.id: s for s in ecu.specs()}
-    assert not by["fan"].mapped and by["rpm"].mapped and not by["rpm"].verified
+    assert by["fan"].mapped and by["fuel_pump"].mapped          # in the map now: no placeholders
+    assert by["fan"].label == "Fan cmd (ECM)" and not by["fan"].verified
+    assert by["rpm"].mapped and by["rpm"].verified and not by["vtec"].verified
     assert by["alt_fr"].label == "Alt load" and by["ign"].units == "°"
     assert by["ect"].warn_hi == 100 and by["batt"].alarm_lo == 11.5 and by["stft"].signed
     assert len(be.BLACKBOX_SPECS) == 8
@@ -49,7 +51,9 @@ def test_simulator_reaches_the_bus_and_recording_works(tmp_path):
         assert rpm.gen >= 5 and rpm.value > 500 and not rpm.stale(s.bus.now())
         assert s.ecu_status.state == ad.OK and s.ecu_status.simulated
         assert s.recording.active, "record-on-connect"
-        assert s.bus.channel("fan").stale(s.bus.now()), "placeholder never gets data"
+        pump = s.bus.channel("fuel_pump")       # mapped now: the simulator's pump runs
+        assert pump.value == 1 and not pump.stale(s.bus.now())
+        assert s.bus.channel("starter").value == 0 and s.bus.channel("ac_sw").value == 0
         time.sleep(0.3)
         s.pump(s.bus.now() + 1)
         assert s.bb_status.state == ad.OK and s.bus.channel("tach").value > 10

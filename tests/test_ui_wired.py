@@ -67,22 +67,16 @@ def test_wired_implementations_satisfy_the_protocols():
 
 def test_specs_take_limits_from_the_maps_alarm_rules_and_fan_tiles_follow_the_map(tmp_path):
     text = addressmap.DEFAULT_MAP.read_text(encoding="utf-8")
-    with_fan = text.replace("\n[constants]\n", '''\n[[channel]]
-name = "fan"
-label = "Rad fan"
-addr = 0x0C
-formula = "bit(x, 2)"
-kind = "flag"
-
-[constants]
-''', 1)
-    assert with_fan != text
+    start = text.index('[[channel]]\nname = "fan"')
+    end = text.index("[[channel]]", start + 1)
+    no_fan = text[:start] + text[end:]               # a map without the fan channel
+    assert 'name = "fan"' not in no_fan
     path = tmp_path / "map.toml"
-    path.write_text(with_fan, encoding="utf-8")
+    path.write_text(no_fan, encoding="utf-8")
     ecu = wired.LinkSource(load_map=lambda: addressmap.load(path))
     by = {s.id: s for s in ecu.specs()}
-    assert by["fan"].mapped and by["fan"].label == "Rad fan" and by["fan"].is_flag     # real tile
-    assert not by["fuel_pump"].mapped                                                 # still a placeholder
+    assert not by["fan"].mapped and by["fan"].label == "Rad fan"                       # placeholder
+    assert by["fuel_pump"].mapped and by["fuel_pump"].label == "Fuel pump" and by["fuel_pump"].is_flag
     rules = {r.name: r for r in ecu.amap.alarms}
     for rule in rules.values():
         if rule.channel in by and rule.high is not None:
@@ -93,7 +87,8 @@ kind = "flag"
     assert not math["inj_duty"].verified            # built from unverified channels
 
     stock = wired.LinkSource(load_map=addressmap.load_default)
-    assert not {s.id: s for s in stock.specs()}["fan"].mapped
+    fan = {s.id: s for s in stock.specs()}["fan"]
+    assert fan.mapped and fan.label == "Fan cmd (ECM)" and fan.is_flag               # real tile
 
 
 def test_ecu_math_and_black_box_reach_the_bus_at_their_own_rates(live):
@@ -119,7 +114,7 @@ def test_ecu_math_and_black_box_reach_the_bus_at_their_own_rates(live):
     assert reader.t0 == s.ecu.poller.t0 and s.bb_status.simulated
     tach_rpm = reader.samples[-1].values["bb_rpm_tach"]
     assert tach_rpm > 300 and bus.channel("tach").value == pytest.approx(tach_rpm / 30, rel=0.2)
-    assert s.bus.channel("fan").stale(now)
+    assert not s.bus.channel("fan").stale(now) and s.bus.channel("fan").value == 0   # mapped: 0x0C b1
 
 
 def test_recording_is_a_drive_in_the_database_with_public_trigger_status(live):
@@ -250,16 +245,16 @@ def test_verified_mark_is_written_to_the_map_file(user_map):
     session = build_session()
     session.start()
     ecu = session.ecu
-    assert not session.bus.channel("tps").spec.verified
-    message = ecu.set_verified("tps", True)
-    assert "saved" in message and session.bus.channel("tps").spec.verified
+    assert not session.bus.channel("batt").spec.verified           # not yet verified on the P2P
+    message = ecu.set_verified("batt", True)
+    assert "saved" in message and session.bus.channel("batt").spec.verified
     on_disk = addressmap.load(addressmap.user_map_path())
-    tps = on_disk.channel("tps")
-    assert tps.verified and tps.evidence.method == "manual" and tps.evidence.map_hash == on_disk.version_hash
+    batt = on_disk.channel("batt")
+    assert batt.verified and batt.evidence.method == "manual" and batt.evidence.map_hash == on_disk.version_hash
     assert on_disk.version_hash == user_map.version_hash            # marking does not change decoding
-    assert session.mapper.mapped(0x14) == ("tps", True)
-    ecu.set_verified("tps", False)
-    assert not addressmap.load(addressmap.user_map_path()).channel("tps").verified
+    assert session.mapper.mapped(0x17) == ("batt", True)
+    ecu.set_verified("batt", False)
+    assert not addressmap.load(addressmap.user_map_path()).channel("batt").verified
     assert "worked out" in ecu.set_verified("inj_duty", True)
     session.close()
 

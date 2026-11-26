@@ -60,7 +60,7 @@ def test_rank_and_assign_through_the_wired_mapper(user_map):
     assert rows and isinstance(rows[0], ad.RankRow)
     best = rows[0]
     assert (best.addr, best.width, best.label) == (0xA0, 1, "0xA0 u8") and best.score > 0.99 and best.r > 0
-    assert best.mapped == "" and best.lo == 0 and best.hi >= 100 and "x" in best.formula
+    assert best.mapped == "" and (best.lo, best.hi) == (24, 104) and "x" in best.formula   # (x - 24) / 2
     assert 0x14 not in [r.addr for r in rows]               # the reference's own byte is left out
     assert "0xA0 u8" in mapper.console()
     assert [c.addr for c in mapper.rank_against("tps", top=3)][0] == 0xA0      # the short form, same answer

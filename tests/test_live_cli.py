@@ -108,7 +108,7 @@ def run(*argv, answers=()):
 
 def test_cli_status_scripts_hash_diff_upgrade(env, tmp_path):
     code, text = run("status")
-    assert code == 0 and "0 of 22 channels verified" in text and "tps_sweep" in text
+    assert code == 0 and "14 of 27 channels verified" in text and "check with: koeo, idle" in text
     code, text = run("scripts")
     assert code == 0 and "koeo" in text and "Throttle sweep" in text
     code, text = run("hash")
@@ -134,19 +134,20 @@ def test_cli_status_scripts_hash_diff_upgrade(env, tmp_path):
 def test_cli_verify_against_the_built_in_simulator(env, tmp_path):
     """Whole path: poller -> simulated ECU -> sweeps -> session -> evidence -> map file."""
     code, text = run("verify", "steady_3000", "--port", "sim:", "--auto", "--speed", "0.08",
-                     "--ref", "tach_rpm=3000", "--confirm", "vss", "--force")
+                     "--ref", "tach_rpm=3000", "--confirm", "batt", "--force")
     assert "== Hold 3000 rpm ==" in text and "evidence saved:" in text
     assert "rpm: FAIL" in text                      # the simulator idles; nobody held 3000
     assert code == 1
     saved = list((tmp_path / "verification").glob("verify_*_steady_3000.json"))
     assert len(saved) == 1 and saved[0].with_suffix(".npz").exists()
     amap = am.load_user_map()
-    vss = amap.channel("vss")                       # plausibility-only, confirmed with --force
-    assert vss.verified and vss.evidence.method == "guided:steady_3000"
-    assert vss.evidence.result == "plausible" and vss.evidence.log == saved[0].name
-    assert "vss: marked verified" in text
+    assert not am.load_default().channel("batt").verified          # not verified on the car yet
+    batt = amap.channel("batt")                     # plausibility-only, confirmed with --force
+    assert batt.verified and batt.evidence.method == "guided:steady_3000"
+    assert batt.evidence.result == "plausible" and batt.evidence.log == saved[0].name
+    assert "batt: marked verified" in text
     code, text = run("status")
-    assert "1 of 22 channels verified" in text and "guided:steady_3000" in text
+    assert "15 of 27 channels verified" in text and "guided:steady_3000" in text
 
 
 def test_cli_verify_interactive_prompts(env):

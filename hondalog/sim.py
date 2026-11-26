@@ -18,7 +18,11 @@ What it models:
   missing replies, damaged echo, cable unplug. Seeded, so a run repeats.
 * True byte timing: see ``LoopbackTransport(byte_timing=True)`` and ``serve``.
 
-The RAM layout follows the same kerpz P2T guess as the default address map.
+The RAM layout follows the default address map: kerpz's P2T addresses with
+the P2P findings from the 2000 Civic EX (2026-11-25): TPS is the OBD2 PID 11
+byte, and the flag bytes carry the bits seen on the car (starter, A/C switch,
+PSP switch, brake in 0x08; VTEC in 0x0A; fuel pump, A/C clutch, MIL in 0x0B;
+fan command in 0x0C; closed loop in 0x0F).
 """
 
 from __future__ import annotations
@@ -216,6 +220,8 @@ class EcuModel:
         self.rpm = 1500.0
         self.ect = 20.0
         self.tps = 0.0
+        self.ac_on = False         # A/C button: 08 b1, clutch 0B b1, idle-up
+        self.brake_on = False
         self.rev_started: float | None = None
         self.next_rev = rev_every_s
         self.stopped_at: float | None = None
@@ -243,6 +249,10 @@ class EcuModel:
         if self.running and self.rev_started is None:
             self.rev_started = self.clock() - self.t0
 
+    def ac(self, on: bool | None = None) -> None:
+        """Press the A/C button (toggle, or set with ``on``)."""
+        self.ac_on = (not self.ac_on) if on is None else on
+
     # -- engine --
 
     def step(self) -> None:
@@ -266,7 +276,8 @@ class EcuModel:
 
         self.ect = 20.0 + 68.0 * (1 - math.exp(-3.0 * t / max(1.0, self.warmup_s)))
         cold = max(0.0, (70.0 - self.ect) / 50.0)
-        idle = 750.0 + 750.0 * cold
+        clutch = self.ac_on and self.running
+        idle = 750.0 + 750.0 * cold + (300.0 if clutch else 0.0)    # A/C idle-up (~1050 warm)
         self.tps = 0.0
         target = idle
         if self.rev_started is not None:
@@ -285,7 +296,8 @@ class EcuModel:
         rpm = self.rpm + (self.rng.uniform(-12, 12) if self.rpm > 100 else 0.0)
 
         turning = self.rpm > 100
-        closed_loop = turning and self.ect > 60.0
+        cranking = self.running and turning and self.rpm < 500
+        closed_loop = turning and not cranking and self.ect > 60.0 and self.tps < 10.0
         map_kpa = 101.0 if not turning else 30.0 + 0.9 * self.tps + 6.0 * cold
         o2 = 0.45 + 0.4 * math.sin(t * 5.0) if closed_loop else (0.8 if turning else 0.05)
         batt = 14.2 + self.rng.uniform(-0.05, 0.05) if turning else 12.3
@@ -300,15 +312,28 @@ class EcuModel:
         r = self.ram
         r[0x00:0x02] = max(0, min(0xFFFF, int(rpm * 4))).to_bytes(2, "big")
         r[0x02] = 0                                         # VSS: parked
-        r[0x08] &= ~0x04 & 0xFF                             # A/C off
-        r[0x0A] = (r[0x0A] & ~0x08 & 0xFF) | (0x08 if self.rpm > 5500 else 0)
-        r[0x0B] &= ~0x20 & 0xFF                             # MIL off
-        r[0x0F] = (r[0x0F] & ~0x01 & 0xFF) | (1 if closed_loop else 0)
+        # Flag bytes as read on the 2000 Civic EX P2P. Key on engine off:
+        # 08=10000100 0A=00010000 0B=00100001; cranking 08=10000101; running
+        # 08=10000100 0A=10010000 0B=01000001 0F=00000001.
+        stopped_s = None if self.stopped_at is None else t - self.stopped_at
+        pump = self.running or (stopped_s is not None and stopped_s < 2.0)   # 2 s prime
+        mil = (not self.running) or bool(self.dtcs)         # bulb check at key on
+        r[0x08] = (0x80 | 0x04                              # b2: PSP switch (closed at rest)
+                   | (0x02 if self.ac_on else 0)            # b1: A/C switch
+                   | (0x08 if self.brake_on else 0)         # b3: brake switch
+                   | (0x01 if cranking else 0))             # b0: starter
+        r[0x0A] = (0x10 | (0x80 if turning else 0)
+                   | (0x04 if self.rpm > 5500 else 0))      # b2: VTEC solenoid
+        r[0x0B] = ((0x40 if turning else 0) | (0x20 if mil else 0)
+                   | (0x02 if clutch else 0)                # b1: A/C clutch
+                   | (0x01 if pump else 0))                 # b0: fuel pump (main relay)
+        r[0x0C] = 0x02 if self.ect > 98.0 else 0x00         # b1: ECM fan command
+        r[0x0F] = 0x01 if closed_loop else 0x00             # b0: closed loop
         r[0x10] = _temp_raw(self.ect)
         r[0x11] = _temp_raw(28.0)
         r[0x12] = _u8((map_kpa + 5) / 0.716)
         r[0x13] = _u8((101.0 + 5) / 0.716)
-        r[0x14] = _u8(self.tps * 2 + 24)
+        r[0x14] = _u8(self.tps * 2.55)                      # = the OBD2 PID 11 byte
         r[0x15] = _u8(o2 * 51.3)
         r[0x17] = _u8(batt * 10.45)
         r[0x18] = _u8(40 * 2.55)
@@ -322,7 +347,7 @@ class EcuModel:
         # Some life elsewhere so the memory scanner has something to find.
         r[0x80] = (r[0x80] + 1) & 0xFF
         r[0x90:0x92] = r[0x00:0x02]
-        r[0xA0] = _u8(self.tps * 2.55)
+        r[0xA0] = _u8(self.tps * 2.55)                      # a copy of the throttle byte
 
     # -- cable --
 

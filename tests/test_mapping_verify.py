@@ -55,7 +55,7 @@ def test_tps_sweep_passes_and_confirm_writes_evidence(mapfile, tmp_path):
     report = run_tps_sweep(s, clock)
     tps = report.verdicts["tps"]
     assert tps.status == PASS and [r.status for r in tps.results] == [PASS] * 4
-    assert "went 1 -> 99" in tps.results[1].measured
+    assert "went 0.9804 -> 99.02" in tps.results[1].measured
     assert report.verdicts["rpm"].status == PLAUSIBLE     # "reads 0" proves nothing
     assert report.sweeps == 116 and report.samples == 116 and report.duration_s > 20
     assert "tps: PASS" in report.text()
@@ -77,10 +77,12 @@ def test_tps_sweep_passes_and_confirm_writes_evidence(mapfile, tmp_path):
     raw = SweepRecording.load(saved.with_suffix(".npz"))
     assert len(raw) == 116 and [m.label for m in raw.marks] == ["released", "sweep", "floor",
                                                                  "release"]
-    # the user's comments in the map survived, everything else is still unverified
+    # the user's comments in the map survived, the other marks are as shipped
     text = mapfile.read_text(encoding="utf-8")
     assert "# about 101 at key-on/WOT" in text and "[channel.evidence]" in text
-    assert [c.name for c in after.channels if c.verified] == ["tps"]
+    assert ({c.name for c in after.channels if c.verified}
+            == {c.name for c in before.channels if c.verified} | {"tps"})
+    assert after.channel("rpm").evidence.method == "crosscheck:iso"    # untouched
 
     # plausible-only channels need an explicit override; failed ones cannot be confirmed
     with pytest.raises(am.MapError, match="plausibility"):
@@ -108,8 +110,8 @@ def test_wrong_address_fails_and_the_finder_points_at_the_right_one(mapfile, tmp
     assert ch.status == "suspect" and not ch.verified and ch.evidence.result == "fail"
     # apply the suggestion; verification state resets and the map version moves on
     fixed = mapedit.update_channel(mapfile, "tps", **best[0].candidate.channel_fields(),
-                                   formula="(x - 24) / 2" if best[0].candidate.addr == 0x14
-                                   else "x / 2.55")
+                                   formula="x / 2.55" if best[0].candidate.addr == 0x14
+                                   else "(x - 24) / 2")
     assert fixed.channel("tps").status == "unverified" and fixed.channel("tps").evidence is None
     assert fixed.version != suspect.version
     s2, clock2 = session("tps_sweep", mapfile)
@@ -268,8 +270,10 @@ def test_drive_and_switch_scripts_with_bit_suggestion():
     feed(s, clock, [ram(vss=62, rpm=2400)] * 60)
     assert s.finish().verdicts["vss"].status == PASS
 
-    amap = am.loads(am.DEFAULT_MAP.read_text(encoding="utf-8").replace(
-        'formula = "bit(x, 2)"', 'formula = "bit(x, 6)"'))             # wrong bit for the A/C
+    text = am.DEFAULT_MAP.read_text(encoding="utf-8")
+    at = text.index('name = "ac_sw"')
+    amap = am.loads(text[:at] + text[at:].replace(
+        'formula = "bit(x, 1)"', 'formula = "bit(x, 6)"', 1))         # wrong bit for the A/C
     clock = Clock()
     s = VerificationSession(SCRIPTS["ac_switch"], amap, clock=clock)
     s.start()
@@ -280,14 +284,26 @@ def test_drive_and_switch_scripts_with_bit_suggestion():
     feed(s, clock, [ram(rpm=800, ac=0)] * 30)
     assert s.finish().verdicts["ac_sw"].status == FAIL
     bits = s.suggest("ac_sw")
-    assert [(b.addr, b.bit) for b in bits] == [(0x08, 2), (0xB0, 4)]
+    assert [(b.addr, b.bit) for b in bits] == [(0x08, 1), (0x0B, 1), (0xB0, 4)]   # switch, clutch
 
     brake = verify.switch_script("brake", "the brake pedal (press and hold)")
     assert brake.id == "switch_brake" and len(brake.phases) == 3
-    missing = VerificationSession(brake, am.load_default(), clock=Clock())
-    assert missing.missing_channels == ["brake"]
+    clock = Clock()
+    s = VerificationSession(brake, am.load_default(), clock=clock)
+    assert s.missing_channels == []                 # brake is in the map (08 b3)
+    s.start()
+    feed(s, clock, [ram(rpm=800)] * 30)
+    s.next_phase()
+    feed(s, clock, [ram(rpm=800, brake=1)] * 35)
+    s.next_phase()
+    feed(s, clock, [ram(rpm=800)] * 30)
+    assert s.finish().verdicts["brake"].status == PASS
+
+    psp = verify.switch_script("psp", "full lock on the steering wheel (hold it)")
+    missing = VerificationSession(psp, am.load_default(), clock=Clock())
+    assert missing.missing_channels == ["psp"]
     missing.start()
-    assert missing.finish().verdicts["brake"].status == SKIP
+    assert missing.finish().verdicts["psp"].status == SKIP
 
 
 # ---- plumbing ---------------------------------------------------------------

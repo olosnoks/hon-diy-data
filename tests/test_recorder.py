@@ -177,7 +177,7 @@ def test_per_read_recording_keeps_raw_bytes_and_true_times(amap, tmp_path):
         assert bytes(fast.raw[0]) == b"\x2e\xe0" and log.series("rpm").v[0] == 3000
         np.testing.assert_allclose(fast.latency, 0.0035)
         assert np.isnan(log.streams["ecu/12+4"].latency).all()         # not given: unknown, not zero
-        assert log.series("map").v[0] == pytest.approx(60 * 0.716 - 5) and log.series("tps").v[1] == 1
+        assert log.series("map").v[0] == pytest.approx(60 * 0.716 - 5) and log.series("tps").v[1] == pytest.approx(26 / 2.55)
         assert log.streams["ecu/16+4"].info.column_names == ["batt", "alt_fr", "eld"]
         assert log.series("rpm").t[1] == pytest.approx(0.06) and log.series("tps").t[1] == pytest.approx(0.08)
         assert log.series("batt").v[0] == pytest.approx(145 / 10.45, rel=1e-6) and log.series("batt").rate_hz < 2

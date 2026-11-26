@@ -33,12 +33,15 @@ def test_mark_channel_keeps_comments_and_hash(mapfile):
 
 
 def test_mark_channel_on_another_variant_goes_into_the_variant(mapfile):
-    after = me.mark_channel(mapfile, "rpm", am.Evidence(method="manual"), variant="P2T")
-    assert after.variant == "P2T" and after.channel("rpm").verified
-    assert not am.load(mapfile).channel("rpm").verified          # P2P untouched
+    after = me.mark_channel(mapfile, "batt", am.Evidence(method="manual"), variant="P2T")
+    assert after.variant == "P2T" and after.channel("batt").verified
+    assert not am.load(mapfile).channel("batt").verified         # P2P untouched
     doc = tomllib.loads(mapfile.read_text())
-    rpm = next(c for c in doc["channel"] if c["name"] == "rpm")
-    assert rpm["variants"]["P2T"]["status"] == "verified"
+    batt = next(c for c in doc["channel"] if c["name"] == "batt")
+    assert batt["variants"]["P2T"]["status"] == "verified"
+    # and the other way: rpm, verified on the P2P, is not verified on the P2T
+    assert am.load(mapfile).channel("rpm").verified
+    assert not am.load(mapfile, variant="P2T").channel("rpm").verified
 
 
 def test_mark_suspect_and_bad_status(mapfile):

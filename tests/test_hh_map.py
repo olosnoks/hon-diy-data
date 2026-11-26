@@ -55,7 +55,10 @@ def test_channels_limits_and_what_is_left_out(amap):
     assert vtec["kind"] == F.KIND_FLAG and (vtec["lo"], vtec["hi"]) == (0, 1)
     assert by_name["inj_duty"]["kind"] == F.KIND_MATH and by_name["inj_duty"]["rate_class"] == 0
     assert by_name["ign"]["units"] == "° BTDC"          # 7 bytes of UTF-8 in char[8]
-    assert not any(c["verified"] for c in mf.channels)   # nothing in the default map is verified yet
+    verified = {c["name"] for c in mf.channels[:len(amap.channels)] if c["verified"]}
+    assert verified == {c.name for c in amap.channels if c.verified}      # the P2P findings
+    assert by_name["total_trim"]["verified"] and not by_name["inj_duty"]["verified"]   # math: from its inputs
+    assert "rpm" in verified and "tps" in verified and "vtec" not in verified
     assert report.alarms == [r.name for r in amap.alarms]
     alarms = {a["name"]: a for a in mf.alarms}
     hot = alarms["ect_high"]
@@ -84,10 +87,10 @@ def test_the_protocol_section_reaches_the_handheld(tmp_path):
 
 
 def test_a_verified_channel_and_a_variant_reach_the_handheld(tmp_path):
-    text = addressmap.DEFAULT_MAP.read_text(encoding="utf-8").replace(
-        'name = "rpm"\nlabel = "RPM"', 'name = "rpm"\nstatus = "verified"\nlabel = "RPM"', 1)
-    text = text.replace('status = "unverified"\nrate = "fast"\nsource = "kerpz hobd_uni2 (P2T)"\n\n'
-                        '[channel.variants.P28]', 'rate = "fast"\n\n[channel.variants.P28]', 1)
+    # rpm is verified in the shipped map; take the mark off vss in a copy
+    text = addressmap.DEFAULT_MAP.read_text(encoding="utf-8")
+    at = text.index('name = "vss"')
+    text = text[:at] + text[at:].replace('status = "verified"', 'status = "unverified"', 1)
     path = tmp_path / "mine.toml"
     path.write_text(text, encoding="utf-8")
     mine = addressmap.load(path)
@@ -95,6 +98,7 @@ def test_a_verified_channel_and_a_variant_reach_the_handheld(tmp_path):
     assert mf.channels[0]["verified"] and not mf.channels[1]["verified"]
     other = addressmap.load(path, variant="P2T")
     mf2 = read_map(build_map(other))
+    assert not mf2.channels[0]["verified"]           # P2P marks do not carry over to P2T
     assert mf2.variant == "P2T" and mf2.map_hash == other.version_hash != mine.version_hash
     assert mf2.address_map().version_hash == other.version_hash      # the variant is kept with the text
 
@@ -152,7 +156,7 @@ def test_export_map_cli_writes_the_card(tmp_path, capsys):
     card = tmp_path / "sd"
     assert cli.main(["export-map", str(card), "--map", str(addressmap.DEFAULT_MAP), "--pre", "20"]) == 0
     out = capsys.readouterr().out
-    assert "22 channels, 5 math channels, 6 alarms" in out and "left out: math rpm_rate" in out
+    assert "27 channels, 5 math channels, 6 alarms" in out and "left out: math rpm_rate" in out
     assert "not verified" in out
     mf = read_map(card / MAP_NAME)
     assert mf.stall["pre_s"] == 20 and mf.map_hash == addressmap.load_default().version_hash

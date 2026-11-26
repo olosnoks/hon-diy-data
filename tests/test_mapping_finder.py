@@ -138,7 +138,8 @@ def test_finds_the_hidden_copies_and_gets_width_and_byte_order_right():
 
     tps = correlate.rank_against_channel(rec, AMAP, "tps", top=5)
     assert tps[0].candidate == correlate.Candidate(0xA0)             # a byte, not a word
-    assert tps[0].slope == pytest.approx(1 / 2.55, rel=2e-2)
+    assert tps[0].slope == pytest.approx(1 / 2, rel=2e-2)          # (x - 24) / 2
+    assert tps[0].offset == pytest.approx(-12, abs=1)
     wide = [m for m in tps if m.candidate.addr in (0x9F, 0xA0) and m.candidate.width == 2]
     assert wide and all(m.score < tps[0].score and m.notes for m in wide)
 
@@ -232,12 +233,13 @@ def ac_recording():
 def test_what_changed_finds_the_bits_that_follow_the_action():
     rec = ac_recording()
     found = correlate.changed_bits(rec, "ac_on")
-    assert [(c.addr, c.bit, c.outside, c.inside) for c in found] == [(0x08, 2, 0, 1),
+    assert [(c.addr, c.bit, c.outside, c.inside) for c in found] == [(0x08, 1, 0, 1),
+                                                                     (0x0B, 1, 0, 1),
                                                                      (0xB0, 4, 0, 1)]
-    assert found[0].purity == 1.0 and found[0].formula == "bit(x, 2)"
-    assert "0x08 bit 2: 0 -> 1" in str(found[0])
-    assert correlate.changed_bytes(rec, "ac_on") == [0x08, 0xB0]
-    table = correlate.flag_channel_table("ac2", found[1], "A/C (copy)")
+    assert found[0].purity == 1.0 and found[0].formula == "bit(x, 1)"
+    assert "0x08 bit 1: 0 -> 1" in str(found[0])
+    assert correlate.changed_bytes(rec, "ac_on") == [0x08, 0x0B, 0xB0]    # switch, clutch, copy
+    table = correlate.flag_channel_table("ac2", found[2], "A/C (copy)")
     assert am.Channel(**table).convert(bytes([0x90])) == 1
     assert correlate.changed_bits(rec, "no such mark") == []
     assert correlate.changed_bits(SweepRecording(), "x") == []
@@ -248,16 +250,17 @@ def test_what_changed_ignores_free_running_bits_and_tolerates_sloppy_timing():
     rec = recording(rows, marks=[Mark("ac_on", 2.0, 3.9)])
     assert correlate.changed_bits(rec, "ac_on", min_purity=0.99) == []
     assert [(c.addr, c.bit) for c in correlate.changed_bits(rec, "ac_on", guard_s=0.25)] == \
-        [(0x08, 2), (0xB0, 4)]
+        [(0x08, 1), (0xB0, 4)]
     inverted = recording([ram(mil=int(not 10 <= i < 20)) for i in range(30)],
                          marks=[Mark("m", 2.0, 3.9)])
     (c,) = correlate.changed_bits(inverted, "m")
     assert (c.inside, c.formula) == (0, "1 - bit(x, 5)")
-    steps = correlate.rank_steps(ac_recording(), "ac_on", min_span=0, top=2)
-    assert {m.candidate.addr for m in steps} == {0x08, 0xB0}
+    steps = correlate.rank_steps(ac_recording(), "ac_on", min_span=0, top=3)
+    assert {m.candidate.addr for m in steps} == {0x08, 0x0B, 0xB0}
 
 
 def test_bit_history():
     t, bits = correlate.bit_history(ac_recording(), 0x08)
-    assert bits.shape == (30, 8) and bits[:, 2].tolist() == [0] * 10 + [1] * 10 + [0] * 10
+    assert bits.shape == (30, 8) and bits[:, 1].tolist() == [0] * 10 + [1] * 10 + [0] * 10
+    assert bits[:, 2].tolist() == [1] * 30                   # the PSP switch, at rest
     assert t[0] == 0.0 and bits[:, 0].sum() == 0

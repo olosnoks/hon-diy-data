@@ -71,12 +71,15 @@ def test_pid_channels_are_shown_as_standard_values_and_put_back_after(obd2_sessi
             continue
         assert s.bus.channel(cid).spec.verified, cid
     assert s.bus.channel("load").spec.verified                # PID 04 in OBD2 mode
+    amap = s.ecu.amap
     for cid in ("batt", "inj", "iacv", "knock", "baro", "eld", "alt_fr", "ign_limit", "vtec",
                 "ac_sw", "fan", "fuel_pump"):                 # no PID for these: map's mark, and no value
         st = s.bus.channel(cid)
-        assert not st.spec.verified and st.stale(s.bus.now()), cid
-    s._mark_obd2(False)
-    assert not s.bus.channel("rpm").spec.verified
+        assert st.spec.verified == amap.channel(cid).verified and st.stale(s.bus.now()), cid
+    assert s.bus.channel("fuel_pump").spec.verified and not s.bus.channel("vtec").spec.verified
+    s._mark_obd2(False)                                       # back to the map's own marks
+    assert s.bus.channel("rpm").spec.verified == amap.channel("rpm").verified
+    assert not s.bus.channel("batt").spec.verified
     assert not s.bus.channel("load").spec.verified
 
 

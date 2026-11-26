@@ -80,9 +80,17 @@ def test_shipped_v1_default_still_parses():
     """The 0.1.0 default map is the oldest real v1 file."""
     old = am.load(Path(__file__).parent / "data_v1_addressmap.toml")
     new = am.load_default()
-    assert old.schema == 1 and old.names == new.names
+    assert old.schema == 1 and new.names[:len(old.names)] == old.names
+    assert new.names[len(old.names):] == ["fuel_pump", "fan", "ac_clutch", "brake", "starter"]
     mem = {a: (a * 37 + 11) & 0xFF for a in range(256)}
-    assert old.decode(mem) == pytest.approx(new.decode(mem), nan_ok=True)
+    changed = {"tps", "ac_sw", "vtec"}          # P2P findings: x / 2.55, bit 1, bit 2
+    a, b = old.decode(mem), new.decode(mem)
+    assert {k: v for k, v in a.items() if k not in changed} == pytest.approx(
+        {k: b[k] for k in a if k not in changed}, nan_ok=True)
+    assert b["tps"] == pytest.approx(mem[0x14] / 2.55)
+    assert a["tps"] == pytest.approx((mem[0x14] - 24) / 2)
+    assert b["ac_sw"] == (mem[0x08] >> 1) & 1 and a["ac_sw"] == (mem[0x08] >> 2) & 1
+    assert b["vtec"] == (mem[0x0A] >> 2) & 1 and a["vtec"] == (mem[0x0A] >> 3) & 1
 
 
 def test_v2_fields_variants_and_constants():

@@ -3,14 +3,22 @@ import pytest
 from hondalog import addressmap as am
 
 
-def test_default_map_loads_and_is_all_unverified():
+def test_default_map_loads_with_the_p2p_findings_verified():
     m = am.load_default()
     assert m.version
     for name in ("rpm", "ect", "iat", "map", "tps", "batt", "o2", "vss",
                  "ign", "inj", "stft", "ltft"):
         assert m.channel(name) is not None, name
     assert any(c.kind == "flag" for c in m.channels)
-    assert all(not c.verified for c in m.channels)
+    # Confirmed on the 2000 Civic EX P2P (2026-11-25); the rest are still guesses.
+    verified = {"rpm", "vss", "ect", "iat", "map", "tps", "stft", "ltft", "ac_sw", "mil",
+                "closed_loop", "fuel_pump", "ac_clutch", "starter"}
+    assert {c.name for c in m.channels if c.verified} == verified
+    for name in verified:
+        ev = m.channel(name).evidence
+        assert ev is not None and ev.result == "pass", name
+    for name in ("vtec", "fan", "brake", "baro", "o2", "batt", "inj", "ign", "iacv"):
+        assert not m.channel(name).verified, name
 
 
 def test_blocks_cover_every_channel_within_limits():

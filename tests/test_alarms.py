@@ -272,5 +272,5 @@ def test_shipped_alarms_against_the_simulator_values():
         v = dict(base, ect=88.0 + (i - 100))
         kinds += alarms.update({**v, **math.update(v, i * 0.1)}, i * 0.1)
     assert [(e.name, e.kind, e.severity) for e in kinds] == [("ect_high", "raised", "critical")]
-    assert kinds[0].unverified                          # the shipped map is all unverified
+    assert amap.channel("ect").verified and not kinds[0].unverified   # ect is verified on the P2P
     assert kinds[0].message == "Coolant 126 °C" or kinds[0].message.startswith("Coolant 1")
