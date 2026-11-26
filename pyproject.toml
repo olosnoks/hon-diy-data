@@ -13,6 +13,7 @@ test = ["pytest", "pytest-qt"]
 hondalog = "hondalog.__main__:main"
 hondalog-sim = "hondalog.sim:main"
 hondalog-firstcontact = "hondalog.diag.firstcontact:main"
+hondalog-probe = "hondalog.diag.ecuprobe:main"
 hondalog-map = "hondalog.mapping.__main__:main"
 hondalog-log = "hondalog.logtool:main"
 hondalog-bb = "hondalog.blackbox.__main__:main"
