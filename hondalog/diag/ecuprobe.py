@@ -55,23 +55,33 @@ class HondaCandidate:
 WAKE = bytes.fromhex("686af5afbfb3b2c1dbb3e9")
 
 HONDA_CANDIDATES: tuple[HondaCandidate, ...] = (
-    # Honda RAM read (cmd 20, len 05, addr 00, count 02) -> expected 00 05+? reply
-    HondaCandidate("Honda read 00/2 @9600", 9600, 0.0, None, bytes.fromhex("20050002"),
-                   reply_len=5, read_only=True),
-    HondaCandidate("Honda read 00/2 @9600 + wake", 9600, 0.1, WAKE, bytes.fromhex("20050002"),
-                   reply_len=5, read_only=True),
-    HondaCandidate("Honda read 00/2 @10400", 10400, 0.1, None, bytes.fromhex("20050002"),
-                   reply_len=5, read_only=True),
-    HondaCandidate("Honda read 00/2 @10400 + wake", 10400, 0.1, WAKE, bytes.fromhex("20050002"),
-                   reply_len=5, read_only=True),
-    # Honda HDS-style K-line (motorcycle/later cars): "72 05 00 F0" = ECU id
-    # query / start, "72 05 71 00" = read data table 0. Both are reads.
-    HondaCandidate("HDS 72 05 00 F0 @10400", 10400, 0.1, None, bytes.fromhex("720500f0"),
-                   read_only=True),
-    HondaCandidate("HDS 72 05 71 00 @10400", 10400, 0.06, None, bytes.fromhex("72057100"),
-                   read_only=True),
-    HondaCandidate("HDS 72 05 00 F0 @9600", 9600, 0.1, None, bytes.fromhex("720500f0"),
-                   read_only=True),
+    # Honda RAM read, kerpz/ArduinoHondaOBD (P2T OBD2 ECU, but wired to the
+    # 3-pin DLC): cmd 20, 05, addr, count, two's complement checksum; reply
+    # count+3 bytes. Only cmd 20 (read) is allowed: cmd 21 resets the ECU.
+    HondaCandidate("Honda read 00/2 @9600", 9600, 0.05, None, bytes.fromhex("20050002"), reply_len=5, read_only=True),
+    HondaCandidate("Honda read row 00 @9600", 9600, 0.05, None, bytes.fromhex("20050010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read row 10 @9600", 9600, 0.05, None, bytes.fromhex("20051010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read row 20 @9600", 9600, 0.05, None, bytes.fromhex("20052010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read ECU id 76 @9600", 9600, 0.05, None, bytes.fromhex("2005760a"), reply_len=13, read_only=True),
+    HondaCandidate("Honda read batt 17 @9600", 9600, 0.05, None, bytes.fromhex("20051701"), reply_len=4, read_only=True),
+    HondaCandidate("Honda read 00/2 @9600 + wake", 9600, 0.05, WAKE, bytes.fromhex("20050002"), reply_len=5, read_only=True),
+    HondaCandidate("Honda read row 00 @9600 + wake", 9600, 0.05, WAKE, bytes.fromhex("20050010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read row 10 @9600 + wake", 9600, 0.05, WAKE, bytes.fromhex("20051010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read row 20 @9600 + wake", 9600, 0.05, WAKE, bytes.fromhex("20052010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read ECU id 76 @9600 + wake", 9600, 0.05, WAKE, bytes.fromhex("2005760a"), reply_len=13, read_only=True),
+    HondaCandidate("Honda read batt 17 @9600 + wake", 9600, 0.05, WAKE, bytes.fromhex("20051701"), reply_len=4, read_only=True),
+    HondaCandidate("Honda read 00/2 @10400", 10400, 0.05, None, bytes.fromhex("20050002"), reply_len=5, read_only=True),
+    HondaCandidate("Honda read row 00 @10400", 10400, 0.05, None, bytes.fromhex("20050010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read row 10 @10400", 10400, 0.05, None, bytes.fromhex("20051010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read row 20 @10400", 10400, 0.05, None, bytes.fromhex("20052010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read ECU id 76 @10400", 10400, 0.05, None, bytes.fromhex("2005760a"), reply_len=13, read_only=True),
+    HondaCandidate("Honda read batt 17 @10400", 10400, 0.05, None, bytes.fromhex("20051701"), reply_len=4, read_only=True),
+    HondaCandidate("Honda read 00/2 @10400 + wake", 10400, 0.05, WAKE, bytes.fromhex("20050002"), reply_len=5, read_only=True),
+    HondaCandidate("Honda read row 00 @10400 + wake", 10400, 0.05, WAKE, bytes.fromhex("20050010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read row 10 @10400 + wake", 10400, 0.05, WAKE, bytes.fromhex("20051010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read row 20 @10400 + wake", 10400, 0.05, WAKE, bytes.fromhex("20052010"), reply_len=19, read_only=True),
+    HondaCandidate("Honda read ECU id 76 @10400 + wake", 10400, 0.05, WAKE, bytes.fromhex("2005760a"), reply_len=13, read_only=True),
+    HondaCandidate("Honda read batt 17 @10400 + wake", 10400, 0.05, WAKE, bytes.fromhex("20051701"), reply_len=4, read_only=True),
 )
 
 
@@ -114,6 +124,10 @@ def check_honda(c: HondaCandidate) -> None:
         raise ProbeBlocked(f"blocked table entry {c.name!r}: not marked read_only")
     if not c.request:
         raise ProbeBlocked(f"blocked table entry {c.name!r}: empty request")
+    if c.request[0] != 0x20:
+        # 0x20 is the Honda memory read; 0x21 resets the ECU and clears its
+        # learned values, and nothing else is known to be a read
+        raise ProbeBlocked(f"blocked table entry {c.name!r}: only Honda read (20) commands are sent")
 
 
 # ---- results -----------------------------------------------------------------
@@ -419,10 +433,16 @@ class Prober:
         rest, _ = strip_echo(bytes(buf), frame)
         return rest
 
-    def stage_b(self) -> None:
-        self.say(f"waiting {SESSION_GAP_S:g} s for the ISO session to time out")
-        self.tr.note(f"stage B: {SESSION_GAP_S:g} s silence so the ISO session ends")
-        self.clock.sleep(SESSION_GAP_S)
+    def stage_b(self, first: bool = False) -> None:
+        if first:
+            # a fresh line: the ECU may lock to whichever protocol talks first
+            # after key on, so the Honda reads go before any ISO init
+            self.tr.note("stage B first: Honda reads before any ISO 9141-2 init")
+            self.clock.sleep(0.5)
+        else:
+            self.say(f"waiting {SESSION_GAP_S:g} s for the ISO session to time out")
+            self.tr.note(f"stage B: {SESSION_GAP_S:g} s silence so the ISO session ends")
+            self.clock.sleep(SESSION_GAP_S)
         for c in HONDA_CANDIDATES:
             name = "B Honda"
             if self.clock.now() > self.deadline + 10:
@@ -453,7 +473,7 @@ class Prober:
 
 def run(port: str, transport: Transport | None = None, clock: Clock = REAL,
         budget_s: float = 85.0, progress: Callable[[str], None] | None = None,
-        honda: bool = True) -> ProbeReport:
+        honda: bool = True, honda_first: bool = True) -> ProbeReport:
     """Run both stages. Never raises for link problems."""
     report = ProbeReport(port)
 
@@ -472,9 +492,13 @@ def run(port: str, transport: Transport | None = None, clock: Clock = REAL,
     # stage A must leave room for the 5.6 s gap and the Honda table
     prober = Prober(tr, clock, report, t0 + budget_s - 15.0, say)
     try:
-        prober.stage_a()
-        if honda:
-            prober.stage_b()
+        if honda and honda_first:
+            prober.stage_b(first=True)
+            prober.stage_a()
+        else:
+            prober.stage_a()
+            if honda:
+                prober.stage_b()
     except TransportError as exc:
         report.notes.append(f"port failed during the probe: {exc}")
     finally:
@@ -503,6 +527,9 @@ def main(argv: list[str] | None = None) -> int:
                          "simulator (default: the first FTDI adapter, else /dev/hondalog)")
     ap.add_argument("-o", "--out", default=None, help="report file (.md); '-' = stdout")
     ap.add_argument("--no-honda", action="store_true", help="skip stage B (Honda variants)")
+    ap.add_argument("--iso-first", action="store_true",
+                    help="run the ISO 9141-2 stage before the Honda reads (default: Honda first, "
+                         "on a line nothing has talked on since key on)")
     args = ap.parse_args(argv)
     port = args.port
     if port is None:
@@ -515,7 +542,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"hondalog ECU probe on {port}", file=sys.stderr)
     t0 = time.monotonic()
-    report = run(port, progress=progress, honda=not args.no_honda)
+    report = run(port, progress=progress, honda=not args.no_honda, honda_first=not args.iso_first)
     text = report.to_markdown()
     print(f"\ndone in {time.monotonic() - t0:.1f} s: {len(report.hits())} replies worth a "
           f"look out of {len(report.exchanges)} requests", file=sys.stderr)

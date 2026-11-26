@@ -76,8 +76,18 @@ def _trace_tx(r: ep.ProbeReport):
 def test_honda_checksum_is_twos_complement():
     c = ep.HONDA_CANDIDATES[0]
     assert ep.honda_frame(c) == bytes.fromhex("20050002d9")
-    hds = next(c for c in ep.HONDA_CANDIDATES if c.request == bytes.fromhex("720500f0"))
-    assert ep.honda_frame(hds) == bytes.fromhex("720500f099")
+    frames = {ep.honda_frame(c) for c in ep.HONDA_CANDIDATES}
+    # the kerpz frames, checksums as published
+    assert {bytes.fromhex(h) for h in ("20050010cb", "20051010bb", "20052010ab", "2005760a5b")} <= frames
+
+
+def test_only_honda_read_commands_are_allowed():
+    for c in ep.HONDA_CANDIDATES:
+        ep.check_honda(c)
+        assert c.request[0] == 0x20
+    reset = ep.HondaCandidate("reset", 9600, 0, None, bytes.fromhex("210401"), read_only=True)
+    with pytest.raises(ep.ProbeBlocked):
+        ep.check_honda(reset)
 
 
 # ---- full runs on the simulator ---------------------------------------------
