@@ -760,6 +760,16 @@ protocol is in [firmware/handheld/SERIAL.md](../firmware/handheld/SERIAL.md).
 |---|---|---|
 | Live stream, GPS, alarms, stalls | yes | yes |
 | Commands, file sync, push map, set time | yes | no (one-way) |
+| Relay: the laptop's KKL reads shown and logged on the CYD | yes | no |
+
+**Relay.** With the KKL cable on the laptop (the laptop reads the ECU) and no
+K-line cable on the CYD, the laptop forwards every ECU reply over the USB-C
+link. The CYD then shows every gauge, raises its alarms, catches stalls and
+records the drive on its card exactly as if it had read the K-line itself; its
+Link screen says `VIA LAPTOP` (backend `LAPTOP`) and it does not touch the
+K-line. Three seconds after the laptop stops relaying it goes back to its own
+cable. The CYD must run the laptop's address map (the laptop checks the map
+hash in HELLO and pushes its map if they differ; restart the CYD after that).
 
 In the app, pick **CYD (serial)** in the connection menu, or run it from a
 terminal:

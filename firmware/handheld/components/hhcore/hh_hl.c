@@ -209,7 +209,8 @@ static void send_hello(hh_serial_t *s)
 
 static void send_stat(hh_serial_t *s)
 {
-    static const char *const LINK[] = {"no reply from the ECU", "connecting", "ok", "OBD2 only", "K-line cable not found"};
+    static const char *const LINK[] = {"no reply from the ECU", "connecting", "ok", "OBD2 only", "K-line cable not found",
+                                       "via laptop"};
     hh_snapshot_t snap;
     hh_core_info_t info;
     memset(&snap, 0, sizeof(snap));
@@ -220,7 +221,7 @@ static void send_stat(hh_serial_t *s)
     for (int i = 0; i < info.ecu_id_len && i < 10; i++) snprintf(ecu + 2 * i, 3, "%02x", info.ecu_id[i]);
     const char *src = snap.time_source == HH_TS_NMEA || snap.time_source == HH_TS_PPS ? "gps"
                     : snap.time_source == HH_TS_HOST ? "host" : "none";
-    unsigned state = snap.link.state > 4 ? 0 : snap.link.state;
+    unsigned state = snap.link.state > 5 ? 0 : snap.link.state;
     say(s,
         "HL STAT {\"t_ms\":%lld,\"fw\":\"%s\",\"boot\":%u,"
         "\"link\":{\"state\":%u,\"name\":\"%s\",\"hz\":%.2f,\"reads\":%u,\"errors\":%u,\"timeouts\":%u,\"checksum\":%u,"

@@ -141,7 +141,7 @@ int hh_serial_port_start(hh_core_t *core, const hh_config_t *cfg, int sd_ok)
     hh_serial_init(&ser, &clk, mem, size, HH_SER_VARIANT_GPS_P1, HH_SER_CAP_LOG, (uint32_t)cfg->serial_baud);
 #else
     hh_serial_init(&ser, &clk, mem, size, HH_SER_VARIANT_DEFAULT,
-                   HH_SER_CAP_RX | HH_SER_CAP_LOG | HH_SER_CAP_HL
+                   HH_SER_CAP_RX | HH_SER_CAP_LOG | HH_SER_CAP_HL | HH_SER_CAP_RELAY
                        | (sd_ok ? HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP : 0),
                    (uint32_t)cfg->serial_baud);
     if (sd_ok) hh_serfs_init(&serfs, "/sd", core, &ser.fs);

@@ -22,8 +22,8 @@ static const char *const BACKENDS[] = HH_BACKEND_NAMES;
 
 const char *ui_link_word(uint8_t state)
 {
-    static const char *const words[] = {"OFF", "CONNECTING", "OK", "ISO ONLY", "ERROR"};
-    return state < 5 ? words[state] : "?";
+    static const char *const words[] = {"OFF", "CONNECTING", "OK", "ISO ONLY", "ERROR", "VIA LAPTOP"};
+    return state < 6 ? words[state] : "?";
 }
 
 void ui_link_shape(lv_obj_t *shape, uint8_t state)
@@ -33,6 +33,7 @@ void ui_link_shape(lv_obj_t *shape, uint8_t state)
     case 2:  ui_shape_set(shape, UI_SHAPE_DOT, TK(ok), TK(ok)); break;
     case 3:  ui_shape_set(shape, UI_SHAPE_HALF, TK(ok), TK(ok)); break;
     case 4:  ui_shape_set(shape, UI_SHAPE_CROSS, TK(alarm), TK(alarm)); break;
+    case 5:  ui_shape_set(shape, UI_SHAPE_DOT, TK(ok), TK(fg)); break;     /* the laptop reads the ECU (relay) */
     default: ui_shape_set(shape, UI_SHAPE_SQUARE, TK(fg), TK(fg)); break;
     }
 }

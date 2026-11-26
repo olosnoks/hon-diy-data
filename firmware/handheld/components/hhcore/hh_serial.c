@@ -77,9 +77,10 @@ void hh_serial_init(hh_serial_t *s, const hh_clock_t *clk, uint8_t *mem, uint32_
     hh_ring_init(&s->ring, mem, mem ? size : 0);
     s->variant = variant;
 #ifdef HH_SERIAL_TX_ONLY
-    caps &= (uint16_t)~(HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP | HH_SER_CAP_HL);
+    caps &= (uint16_t)~(HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP | HH_SER_CAP_HL | HH_SER_CAP_RELAY);
 #endif
-    if (!(caps & HH_SER_CAP_RX)) caps &= (uint16_t)~(HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP | HH_SER_CAP_HL);
+    if (!(caps & HH_SER_CAP_RX))
+        caps &= (uint16_t)~(HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP | HH_SER_CAP_HL | HH_SER_CAP_RELAY);
     s->caps = caps;
     s->baud = baud;
     s->last_rx = -1;
@@ -564,6 +565,10 @@ static void dispatch(hh_serial_t *s, uint8_t type, uint8_t seq, const uint8_t *p
     case HH_SC_PUT_BEGIN: case HH_SC_PUT_DATA: case HH_SC_PUT_END: cmd_put(s, type, seq, p, len); break;
     case HH_SC_MAPUP_OPEN: case HH_SC_MAPUP_WRITE: case HH_SC_MAPUP_STATUS: case HH_SC_MAPUP_COMMIT:
         cmd_mapup(s, type, seq, p, len);
+        break;
+    case HH_SR_RELAY_READ: case HH_SR_RELAY_ISO: case HH_SR_RELAY_TICK: case HH_SR_RELAY_LINK:
+        /* the laptop's ECU reads (hh_relay.c): into the engine, under its lock. Never answered */
+        if (c && (s->caps & HH_SER_CAP_RELAY) && hh_relay_frame(c, type, p, len) < 0) s->rx_bad++;
         break;
     default:
         ack(s, type, seq, HH_SER_E_UNSUPPORTED, 0);

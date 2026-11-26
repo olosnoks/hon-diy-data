@@ -30,11 +30,13 @@ typedef struct {
 } hh_channel_info_t;
 
 /* link.state */
-enum { HH_LINK_OFF = 0, HH_LINK_CONNECTING = 1, HH_LINK_OK = 2, HH_LINK_ISO_ONLY = 3, HH_LINK_ERROR = 4 };
+enum { HH_LINK_OFF = 0, HH_LINK_CONNECTING = 1, HH_LINK_OK = 2, HH_LINK_ISO_ONLY = 3, HH_LINK_ERROR = 4,
+       HH_LINK_RELAY = 5 };     /* RELAY: the laptop reads the ECU and forwards it (SERIAL.md "Relay") */
 /* time_source */
 enum { HH_TS_NONE = 0, HH_TS_NMEA = 1, HH_TS_PPS = 2, HH_TS_HOST = 3 };
 /* link.backend */
-enum { HH_BACKEND_USB = 0, HH_BACKEND_UART = 1 };
+enum { HH_BACKEND_USB = 0, HH_BACKEND_UART = 1, HH_BACKEND_LAPTOP = 2 };
+#define HH_BACKEND_NAMES { "USB", "UART", "LAPTOP" }
 
 typedef struct {
     uint32_t seq;               /* +1 for every new sample (one fast cycle) or state change */
@@ -44,8 +46,8 @@ typedef struct {
     uint8_t fresh[HH_MAX_CH];   /* 1 = read in the latest sample; 0 = held, or never read */
     uint8_t alarm[HH_MAX_CH];   /* 0 ok 1 warn 2 alarm */
     struct {
-        uint8_t state;          /* 0 off 1 connecting 2 ok 3 iso_only 4 error */
-        uint8_t backend;        /* 0 usb 1 uart */
+        uint8_t state;          /* 0 off 1 connecting 2 ok 3 iso_only 4 error 5 via laptop */
+        uint8_t backend;        /* 0 usb 1 uart 2 laptop (relay) */
         float hz_fast;          /* samples per second (fast cycle rate) */
         uint32_t reads, errors;
         char ecu_id[12];

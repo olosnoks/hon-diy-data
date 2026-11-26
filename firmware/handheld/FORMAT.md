@@ -60,7 +60,7 @@ written:
 | 12 | u32 | boot number |
 | 16 | u8 | kind: 1 drive, 2 capture |
 | 17 | u8 | flags: 1 = clock was set, 2 = clock came from GPS, 4 = space preallocated, 8 = built-in map |
-| 18 | u8 | K-line backend: 0 USB host + KKL cable, 1 UART + L9637D |
+| 18 | u8 | K-line backend: 0 USB host + KKL cable, 1 UART + L9637D, 2 the laptop's reads relayed over the USB-C link (SERIAL.md "Relay") |
 | 19 | u8 | link mode: 0 Honda reads, 1 ISO 9141-2 only |
 | 20 | u32 | nonce, mixed into every block CRC |
 | 24 | u64 | `t0`: device µs of file second 0 |

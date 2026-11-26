@@ -202,7 +202,8 @@ hh_serial_t *hhhost_serial(hhhost_t *h, int tx_only, uint32_t ring_size)
     h->ser_ring = malloc(ring_size);
     hh_serial_init(h->ser, &h->plat.clk, h->ser_ring, ring_size,
                    tx_only ? HH_SER_VARIANT_GPS_P1 : HH_SER_VARIANT_DEFAULT,
-                   tx_only ? HH_SER_CAP_LOG : HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP | HH_SER_CAP_LOG | HH_SER_CAP_HL, 921600);
+                   tx_only ? HH_SER_CAP_LOG : HH_SER_CAP_RX | HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP | HH_SER_CAP_LOG | HH_SER_CAP_HL
+                       | HH_SER_CAP_RELAY, 921600);
     if (!tx_only) hh_serfs_init(&h->serfs, h->root, h->core, &h->ser->fs);
     hh_serial_attach(h->ser, h->core);
     hh_core_set_tap(h->core, hh_serial_tap, h->ser);

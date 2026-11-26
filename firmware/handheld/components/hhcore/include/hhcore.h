@@ -74,7 +74,7 @@ typedef struct {
     int  (*set_baud)(void *ctx, uint32_t baud); /* 0 ok */
     int  (*set_break)(void *ctx, int on);       /* hold the line low; 0 ok */
     double usb_latency_s;                       /* how long the adapter may sit on received bytes */
-    uint8_t backend;                            /* HH_BACKEND_USB / HH_BACKEND_UART */
+    uint8_t backend;                            /* HH_BACKEND_USB / HH_BACKEND_UART (HH_BACKEND_LAPTOP is the engine's, in relay mode) */
 } hh_transport_t;
 
 /* ---- protocol (hondalog/protocol.py) ------------------------------------- */
@@ -679,6 +679,18 @@ double hh_core_idle_s(hh_core_t *c);
 void hh_core_stop(hh_core_t *c, int reason);
 const hh_link_stats_t *hh_core_link_stats(const hh_core_t *c);
 const hh_plan_t *hh_core_plan(const hh_core_t *c);
+/* Relay (SERIAL.md "Relay"; hh_relay.c parses the frames): the laptop reads the ECU and forwards every reply, from the
+ * serial task. They go through the path of the engine's own reads (values, drive file, stall rules, alarms, screen),
+ * stamped with the handheld's clock at arrival. The first one while the engine's own link is not up starts relay mode
+ * (link state HH_LINK_RELAY, backend HH_BACKEND_LAPTOP; the K-line is left alone); HH_RELAY_TIMEOUT_S after the last
+ * one the engine goes back to its own K-line. READ / ISO / TICK of relayed data are not tapped (the laptop has them).
+ * Each returns 0 taken, 1 ignored (own link up). */
+#define HH_RELAY_TIMEOUT_S 3.0
+int  hh_core_relay_read(hh_core_t *c, uint8_t addr, const uint8_t *data, uint8_t len, uint16_t latency_us);
+int  hh_core_relay_iso(hh_core_t *c, uint8_t mode, uint8_t pid, const uint8_t *data, uint8_t len);
+int  hh_core_relay_tick(hh_core_t *c, uint16_t latency_us, uint16_t hz_c);
+int  hh_core_relay_link(hh_core_t *c, uint8_t state, uint8_t up, uint8_t iso, const uint8_t *ecu_id, uint8_t ecu_id_len);
+int  hh_core_relaying(hh_core_t *c);    /* 1 in relay mode */
 /* A listener for everything the engine learns (see hh_tap_fn); NULL = none. Set it before the tasks run. */
 void hh_core_set_tap(hh_core_t *c, hh_tap_fn tap, void *ctx);
 /* For the laptop link (any task). None of these can put a byte on the K-line. */

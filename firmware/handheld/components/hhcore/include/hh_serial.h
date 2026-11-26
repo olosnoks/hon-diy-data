@@ -52,6 +52,8 @@ enum { HH_SC_GET_HELLO = 0x60, HH_SC_TIME_REQ = 0x61, HH_SC_TIME_SET = 0x62, HH_
        HH_SC_ACK_ALARM = 0x64, HH_SC_DRIVE = 0x65, HH_SC_LIST_FILES = 0x66, HH_SC_READ_FILE = 0x67,
        HH_SC_PUT_BEGIN = 0x68, HH_SC_PUT_DATA = 0x69, HH_SC_PUT_END = 0x6A, HH_SC_DTC = 0x6B,
        HH_SC_MAPUP_OPEN = 0x6C, HH_SC_MAPUP_WRITE = 0x6D, HH_SC_MAPUP_STATUS = 0x6E, HH_SC_MAPUP_COMMIT = 0x6F };
+/* laptop -> handheld: the laptop's own ECU reads, relayed (hh_relay.c, SERIAL.md "Relay"). Never answered. */
+enum { HH_SR_RELAY_READ = 0x50, HH_SR_RELAY_ISO = 0x51, HH_SR_RELAY_TICK = 0x52, HH_SR_RELAY_LINK = 0x53 };
 
 enum { HH_SER_VARIANT_DEFAULT = 0, HH_SER_VARIANT_GPS_P1 = 1 };
 #define HH_SER_CAP_RX       0x0001  /* commands are heard (two-way). Clear = tx-only */
@@ -60,6 +62,7 @@ enum { HH_SER_VARIANT_DEFAULT = 0, HH_SER_VARIANT_GPS_P1 = 1 };
 #define HH_SER_CAP_LOG      0x0008  /* ESP_LOG lines arrive as LOG frames */
 #define HH_SER_CAP_MAPUP    0x0010  /* MAPUP_* (files into the card's MAP/ folder) */
 #define HH_SER_CAP_HL       0x0020  /* the HL text session (hh_hl.c, SERIAL.md "The HL session") */
+#define HH_SER_CAP_RELAY    0x0040  /* RELAY_* frames are understood (hh_relay.c) */
 
 /* file kinds on the wire */
 enum { HH_SER_F_DRIVE = 1, HH_SER_F_CAPTURE = 2, HH_SER_F_MAP = 3, HH_SER_F_CFG = 4 };
@@ -136,6 +139,12 @@ typedef struct HH_PACKED { uint8_t flags, rsv[3]; } hh_ser_mapup_commit_t;      
 #define HH_SER_MU_PAUSED 2      /*   one is waiting for its next chunk; the map reader has its files */
 /* the answer to MAPUP_STATUS (before its ACK): which file, so that a laptop that starts again knows where it stopped */
 typedef struct HH_PACKED { uint8_t state, rsv1; uint16_t rsv2; uint32_t got, size, crc32; char name[HH_SER_MAPUP_NAME_MAX]; } hh_ser_mapup_info_t;  /* 32 */
+
+/* RELAY_* payloads (all times are the laptop's, and only informative: the handheld stamps arrival with its own clock) */
+typedef struct HH_PACKED { uint64_t host_us; uint8_t addr, len; uint16_t latency_us; } hh_ser_relay_read_t;    /* 12 + len data */
+typedef struct HH_PACKED { uint64_t host_us; uint8_t mode, pid, len, flags; } hh_ser_relay_iso_t;              /* 12 + len data */
+typedef struct HH_PACKED { uint64_t host_us; uint16_t latency_us, hz_c; uint32_t n; } hh_ser_relay_tick_t;     /* 16 */
+typedef struct HH_PACKED { uint64_t host_us; uint8_t state, up, iso, ecu_id_len; } hh_ser_relay_link_t;        /* 12 + id (<= 10) */
 
 /* The card, as the commands need it. Every pointer may be NULL (no card). */
 typedef struct {
@@ -260,6 +269,9 @@ uint32_t hh_serial_ring_free(hh_serial_t *s);
 int  hh_serial_mapup_name_ok(const char *name, size_t len);
 /* 1 while an HL session is open (the binary stream is paused; ESP_LOG goes out as plain lines). */
 int  hh_serial_in_session(const hh_serial_t *s);
+/* A RELAY_* frame (type HH_SR_RELAY_*) into the engine: hh_relay.c. Returns 0 taken, 1 ignored (the handheld's own
+ * K-line link is up), -1 malformed or not a relay frame. */
+int  hh_relay_frame(hh_core_t *core, uint8_t type, const uint8_t *p, size_t len);
 /* 1 while the laptop has been heard within HH_SER_HOST_S. */
 int  hh_serial_host_attached(const hh_serial_t *s);
 

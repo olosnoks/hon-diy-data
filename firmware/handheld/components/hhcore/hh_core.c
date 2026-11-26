@@ -106,6 +106,9 @@ struct hh_core {
     int64_t ts_log_at;                  /* device us: write the next TIME record for PPS then */
     uint32_t markers, dropped, dropped_logged;
     hh_snapshot_t snap;
+    /* relay: the laptop's ECU reads (hh_core_relay_*, under the lock) */
+    uint8_t relay, relay_up, relay_state;   /* relay mode; the laptop's ECU answering; its LINK state */
+    double relay_last, relay_down_next;     /* the last RELAY frame; the next "still down" while the laptop's ECU is silent */
 
     /* files, as queued (under the lock) */
     uint8_t drive_open, cap_open, drive_hold;
@@ -128,8 +131,10 @@ static void unlock(hh_core_t *c) { if (c->plat.unlock) c->plat.unlock(c->plat.lo
 static uint64_t us(double t) { return t <= 0 ? 0 : (uint64_t)(t * 1e6 + 0.5); }
 static void tap(hh_core_t *c, uint8_t kind, const void *rec, size_t len, const void *data, size_t data_len)
 {
+    if (c->relay && (kind == HH_TAP_READ || kind == HH_TAP_ISO || kind == HH_TAP_TICK)) return;   /* the laptop has them */
     if (c->plat.tap) c->plat.tap(c->plat.tap_ctx, kind, rec, len, data, data_len);
 }
+static uint8_t backend(const hh_core_t *c) { return c->relay ? HH_BACKEND_LAPTOP : c->plat.transport->backend; }
 
 size_t hh_core_size(void) { return sizeof(hh_core_t); }
 const hh_link_stats_t *hh_core_link_stats(const hh_core_t *c) { return &c->link.stats; }
@@ -337,7 +342,7 @@ static void fill_header(hh_core_t *c, hh_file_hdr_t *h, uint8_t kind, uint32_t n
     memset(h, 0, sizeof(*h));
     h->file_no = no; h->boot_no = c->plat.boot_no;
     h->kind = kind;
-    h->backend = c->plat.transport->backend;
+    h->backend = backend(c);
     h->link_mode = c->iso_mode;
     h->nonce = nonce;
     h->t0_us = us(t);
@@ -389,7 +394,7 @@ static void drive_begin(hh_core_t *c, double t)
     q_push(c, Q_DRIVE_OPEN, (const uint8_t *)&h, sizeof(h));
     c->drive_open = 1;
     put_preamble(c, t);
-    log_event(c, t, HH_EV_DRIVE_START, c->plat.transport->backend, c->iso_mode, (int32_t)c->drive_no, 0, 0);
+    log_event(c, t, HH_EV_DRIVE_START, backend(c), c->iso_mode, (int32_t)c->drive_no, 0, 0);
 }
 
 static void put_capture_record(hh_core_t *c, int complete)
@@ -487,11 +492,15 @@ static void set_status(hh_core_t *c, const char *text)
 static void publish_state(hh_core_t *c)
 {
     static const uint8_t map[] = {HH_LINK_CONNECTING, HH_LINK_OK, HH_LINK_OFF, HH_LINK_ERROR, HH_LINK_ISO_ONLY};
-    c->snap.link.state = map[c->state];
-    c->snap.link.backend = c->plat.transport->backend;
+    c->snap.link.state = c->relay ? HH_LINK_RELAY : map[c->state];
+    c->snap.link.backend = backend(c);
     c->snap.link.reads = c->reads;
     c->snap.link.errors = c->errors;
-    switch (c->state) {
+    if (c->relay) {
+        static const char *const via[] = {"via laptop: no reply from the ECU", "via laptop: connecting", "via laptop",
+                                          "via laptop: OBD2 only"};
+        set_status(c, c->relay_state < 4 ? via[c->relay_state] : "via laptop");
+    } else switch (c->state) {
     case ST_OK: set_status(c, "ECU ok"); break;
     case ST_ISO: set_status(c, "OBD2 only (ISO 9141-2)"); break;
     case ST_NO_REPLY: set_status(c, "no reply from the ECU"); break;
@@ -913,6 +922,19 @@ static void run_dtc(hh_core_t *c)
 
 /* ---- the hot loop: one block per call ------------------------------------------------ */
 
+/* One measured channel from its raw bytes (lock held): own reads and relayed ones alike. */
+static float decode_chan(hh_core_t *c, int ci, const uint8_t *raw, double t)
+{
+    const hh_map_chan_t *ch = &c->ch[ci];
+    uint32_t x = 0;
+    for (int i = 0; i < ch->length; i++)
+        x = ch->little_endian ? x | ((uint32_t)raw[i] << (8 * i)) : (x << 8) | raw[i];
+    hh_expr_env_t env = {c->map->consts, c->map->n_const, NULL, 0, raw, ch->length, (double)x, t};
+    c->value[ci] = (float)hh_expr_eval(c->map->prog + ch->prog_off, ch->prog_len, &env);
+    c->fresh[ci] = 1;
+    return c->value[ci];
+}
+
 static void step_read(hh_core_t *c)
 {
     hh_read_t r;
@@ -944,14 +966,8 @@ static void step_read(hh_core_t *c)
         const hh_map_chan_t *ch = &c->ch[ci];
         int off = (int)ch->addr - (int)b->addr;
         if (off < 0 || off + ch->length > b->length) continue;      /* another piece of an oversize span */
-        const uint8_t *raw = r.data + off;
-        uint32_t x = 0;
-        for (int i = 0; i < ch->length; i++)
-            x = ch->little_endian ? x | ((uint32_t)raw[i] << (8 * i)) : (x << 8) | raw[i];
-        hh_expr_env_t env = {c->map->consts, c->map->n_const, NULL, 0, raw, ch->length, (double)x, t};
-        c->value[ci] = (float)hh_expr_eval(c->map->prog + ch->prog_off, ch->prog_len, &env);
-        c->fresh[ci] = 1;
-        if (ci == c->rpm_ch) rpm = c->value[ci];
+        float v = decode_chan(c, ci, r.data + off, t);
+        if (ci == c->rpm_ch) rpm = v;
     }
     log_read(c, t_sampled, (uint8_t)b->addr, r.data, (uint8_t)b->length, r.latency_s);
     stall_feed(c, t, rpm, 1);
@@ -1016,8 +1032,189 @@ static void housekeeping(hh_core_t *c)
     }
 }
 
+/* ---- relay: the laptop reads the ECU, the handheld follows (SERIAL.md "Relay") --------------- */
+
+#define RELAY_NAP_S   0.02              /* the link task's step while relaying: only the timeout to watch */
+#define RELAY_DOWN_S  0.25              /* "still down" while the laptop's ECU is silent, as the probes do */
+
+/* The laptop's ECU answers (lock held): went_up() without the K-line state machine. */
+static void relay_go_up(hh_core_t *c, double t, uint8_t iso)
+{
+    if (c->relay_up && c->iso_mode == iso) return;
+    if (c->drive_open && c->iso_mode != iso) drive_end(c, HH_END_STOPPED);  /* another protocol: another drive */
+    c->iso_mode = iso;
+    c->relay_up = 1;
+    c->down_since = -1;
+    if (!c->drive_hold) drive_begin(c, t);
+    log_event(c, t, HH_EV_LINK_UP, HH_BACKEND_LAPTOP, iso, 0, 0, 0);
+    stall_feed(c, t, NAN, 1);
+    publish_state(c);
+}
+
+/* The laptop's ECU went silent, or the laptop did (lock held): emit_down(). */
+static void relay_go_down(hh_core_t *c, double t)
+{
+    c->relay_up = 0;
+    c->snap.link.hz_fast = 0;
+    c->last_emit = -1;
+    if (c->down_since < 0) {
+        c->down_since = t;
+        log_event(c, t, HH_EV_LINK_DOWN, HH_BACKEND_LAPTOP, 0, 0, 0, 0);
+    }
+    values_unknown(c);
+    stall_feed(c, t, NAN, 0);
+    c->relay_down_next = t + RELAY_DOWN_S;
+    publish_state(c);
+}
+
+/* A RELAY frame arrived (lock held). 0: go on with it; 1: ignore it (the handheld's own link is up). */
+static int relay_enter(hh_core_t *c, double t)
+{
+    if (!c->relay) {
+        if (c->down_since < 0 || c->dtc_busy) return 1;
+        c->relay = 1;
+        c->relay_up = 0;
+        c->relay_state = 1;
+        c->relay_down_next = t + RELAY_DOWN_S;
+        c->snap.link.hz_fast = 0;
+        c->last_emit = -1;
+        publish_state(c);
+    }
+    c->relay_last = t;
+    return 0;
+}
+
+int hh_core_relay_read(hh_core_t *c, uint8_t addr, const uint8_t *data, uint8_t len, uint16_t latency_us)
+{
+    double t = now(c), rpm = NAN;
+    if (len < 1 || len > HH_MAX_READ) return -1;
+    lock(c);
+    if (relay_enter(c, t)) { unlock(c); return 1; }
+    if (!c->ecu_id_len && addr == c->map->info.ecu_id_addr && len == c->map->info.ecu_id_len && len <= sizeof(c->ecu_id)) {
+        memcpy(c->ecu_id, data, len);   /* the laptop's ECU id read, as read_ecu_id() would keep it */
+        c->ecu_id_len = len;
+        for (int i = 0; i < len && i < (int)sizeof(c->snap.link.ecu_id) - 1; i++)
+            c->snap.link.ecu_id[i] = data[i] >= 32 && data[i] < 127 ? (char)data[i] : '.';
+    }
+    relay_go_up(c, t, 0);
+    c->reads++;
+    /* every measured channel this read covers, by the map's own decode */
+    for (int k = 0; k < c->n_pch; k++) {
+        int ci = c->pch_ch[k];
+        const hh_map_chan_t *ch = &c->ch[ci];
+        if (ch->addr < addr || (int)ch->addr + ch->length > (int)addr + len) continue;
+        float v = decode_chan(c, ci, data + (ch->addr - addr), t);
+        if (ci == c->rpm_ch) rpm = v;
+    }
+    log_read(c, t, addr, data, len, latency_us / 1e6);
+    stall_feed(c, t, rpm, 1);
+    unlock(c);
+    return 0;
+}
+
+int hh_core_relay_iso(hh_core_t *c, uint8_t mode, uint8_t pid, const uint8_t *data, uint8_t len)
+{
+    double t = now(c);
+    lock(c);
+    if (relay_enter(c, t)) { unlock(c); return 1; }
+    relay_go_up(c, t, 1);
+    c->reads++;
+    log_iso(c, t, mode, pid, data, len);
+    if (mode == 0x41 && hh_iso_pid_len(pid) > 0 && len >= hh_iso_pid_len(pid)) {
+        double v = iso_value(pid, data);
+        for (int i = 0; i < N_ISO_PIDS; i++) {
+            if (ISO_PIDS[i].pid != pid) continue;
+            for (int k = 0; k < c->n_ch; k++)
+                if (c->ch[k].kind != HH_KIND_MATH && strcmp(c->ch[k].name, ISO_PIDS[i].name) == 0) {
+                    c->value[k] = (float)v; c->fresh[k] = 1;
+                }
+        }
+        if (pid == 0x0C) stall_feed(c, t, v, 1);
+    }
+    unlock(c);
+    return 0;
+}
+
+int hh_core_relay_tick(hh_core_t *c, uint16_t latency_us, uint16_t hz_c)
+{
+    double t = now(c);
+    lock(c);
+    if (relay_enter(c, t)) { unlock(c); return 1; }
+    if (c->relay_up) {                  /* a sample: math channels, alarms, the screen (the stall rules saw the reads) */
+        c->tick_latency_us = latency_us;
+        emit(c, t);
+        if (hz_c) c->snap.link.hz_fast = hz_c / 100.0f;   /* the laptop's cycle rate, not the USB's batching */
+    }
+    unlock(c);
+    return 0;
+}
+
+int hh_core_relay_link(hh_core_t *c, uint8_t state, uint8_t up, uint8_t iso, const uint8_t *ecu_id, uint8_t ecu_id_len)
+{
+    double t = now(c);
+    lock(c);
+    if (relay_enter(c, t)) { unlock(c); return 1; }
+    if (ecu_id_len) {
+        if (ecu_id_len > sizeof(c->ecu_id)) ecu_id_len = sizeof(c->ecu_id);
+        memcpy(c->ecu_id, ecu_id, ecu_id_len);
+        c->ecu_id_len = ecu_id_len;
+        memset(c->snap.link.ecu_id, 0, sizeof(c->snap.link.ecu_id));
+        for (int i = 0; i < ecu_id_len && i < (int)sizeof(c->snap.link.ecu_id) - 1; i++)
+            c->snap.link.ecu_id[i] = ecu_id[i] >= 32 && ecu_id[i] < 127 ? (char)ecu_id[i] : '.';
+    }
+    uint8_t was = c->relay_state;
+    c->relay_state = state > 3 ? 0 : state;
+    if (up) relay_go_up(c, t, (uint8_t)(iso != 0));
+    else if (c->relay_up) relay_go_down(c, t);          /* key off, a stall with power loss: a link loss */
+    if (was != c->relay_state) publish_state(c);
+    unlock(c);
+    return 0;
+}
+
+int hh_core_relaying(hh_core_t *c)
+{
+    lock(c);
+    int on = c->relay;
+    unlock(c);
+    return on;
+}
+
+/* The link task's turn while relaying: no probes, no ISO init, no reopening; the timeout back to the K-line. */
+static int relay_hold(hh_core_t *c)
+{
+    double t = now(c);
+    int on, down = 0, ended = 0;
+    lock(c);
+    on = c->relay;
+    if (on && t - c->relay_last >= HH_RELAY_TIMEOUT_S) {
+        if (c->relay_up) relay_go_down(c, t);           /* the laptop stopped: a link loss, as on the cable */
+        c->relay = 0;
+        publish_state(c);
+        on = 0; ended = 1;
+    } else if (on) {
+        c->req_dtc = 0;                 /* trouble codes would need the K-line: the laptop has it */
+        if (!c->relay_up && t >= c->relay_down_next) {
+            down = 1;                   /* time passes for the link-loss rule and the laptop */
+            c->relay_down_next = t + RELAY_DOWN_S;
+        }
+    }
+    if (on || ended) housekeeping(c);
+    unlock(c);
+    if (ended) {                        /* the handheld's own K-line again, from a fresh probe */
+        if (c->state == ST_OK || c->state == ST_ISO) c->state = ST_NO_REPLY;
+        c->fails = 0; c->probes = 3; c->probe_wait = PROBE_MIN_S; c->quiet_until = 0;
+        c->honda_last_ok = now(c);
+        return 0;
+    }
+    if (!on) return 0;
+    if (down) emit_down(c);
+    nap(c, RELAY_NAP_S);
+    return 1;
+}
+
 void hh_core_step(hh_core_t *c)
 {
+    if (relay_hold(c)) return;          /* the laptop has the K-line */
     if (!c->started) {
         c->started = 1;
         connect(c);
@@ -1209,7 +1406,7 @@ void hh_core_info(hh_core_t *c, hh_core_info_t *out)
     memcpy(out->ecu_id, c->ecu_id, sizeof(out->ecu_id));
     out->ecu_id_len = c->ecu_id_len;
     out->link_state = c->snap.link.state;
-    out->backend = c->plat.transport->backend;
+    out->backend = backend(c);
     out->link_mode = c->iso_mode;
     out->builtin_map = c->plat.builtin_map;
     out->time_valid = c->time_valid;

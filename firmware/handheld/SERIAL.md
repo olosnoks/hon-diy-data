@@ -80,7 +80,7 @@ deframer reads both:
 | 0x40 | HELLO | 96 bytes, below. Every 2 s, and on GET_HELLO |
 | 0x41 | READ | `u64 t_us, u8 addr, u8 len, u16 latency_us` + `len` raw ECU bytes. One per K-line block read. `t_us` is when the request went out; `t_us + latency_us` is when the reply's last byte was in |
 | 0x42 | TICK | `u64 t_us, u16 latency_us, u16 hz_c, u32 n`: one fast cycle done (every fast block read once). `hz_c` = cycle rate x 100 |
-| 0x43 | LINK | `u64 t_us, u8 state, u8 up, u8 backend, u8 iso`. On every change, and repeated (about 4/s) while the ECU is silent so time moves on for the laptop. `state`: 0 no reply, 1 connecting, 2 ok, 3 OBD2 only, 4 K-line cable not found |
+| 0x43 | LINK | `u64 t_us, u8 state, u8 up, u8 backend, u8 iso`. On every change, and repeated (about 4/s) while the ECU is silent so time moves on for the laptop. `state`: 0 no reply, 1 connecting, 2 ok, 3 OBD2 only, 4 K-line cable not found, 5 via laptop (relay). `backend`: 0 USB KKL cable, 1 UART, 2 laptop (relay) |
 | 0x44 | GPS | 28 bytes, the GPS record of FORMAT.md (`u64 t_us, i32 lat_e7, i32 lon_e7, u32 utc, u16 speed_cms, u16 course_cdeg, u8 fix, u8 sats, u16 hdop_c`). Once per RMC sentence |
 | 0x45 | EVENT | 16 bytes, the event record of FORMAT.md (`u64 t_us, u8 code, u8 src, u16 aux, i32/f32 value`): marker, link up/down, alarm raised/cleared/acknowledged, stall trigger, trouble code, drive start ... |
 | 0x46 | STATS | 96 bytes, below. Once a second |
@@ -99,14 +99,14 @@ HELLO (96 bytes):
 | 0 | char[4] | `"HHSL"` |
 | 4 | u8 | link revision (1) |
 | 5 | u8 | variant: 0 default, 1 GPS on P1 |
-| 6 | u16 | capabilities: 1 commands are heard (two-way), 2 file list/read, 4 file push, 8 LOG frames, 16 map upload (MAPUP). 2, 4 and 16 only with a working SD card |
+| 6 | u16 | capabilities: 1 commands are heard (two-way), 2 file list/read, 4 file push, 8 LOG frames, 16 map upload (MAPUP), 32 the HL text session, 64 RELAY frames understood. 2, 4 and 16 only with a working SD card |
 | 8 | char[12] | firmware version |
 | 20 | char[12] | device name |
 | 32 | char[12] | address map hash (all 12 characters, no terminator): compare with the laptop map's `version_hash` |
 | 44 | u8[8] | first 8 bytes of the map text's sha256 |
 | 52 | u8[10], u8 | ECU id, its length (0 = not read yet) |
 | 63 | u8 | link state (as LINK) |
-| 64 | u8, u8 | backend (0 USB KKL cable, 1 UART), link mode (1 = OBD2) |
+| 64 | u8, u8 | backend (0 USB KKL cable, 1 UART, 2 laptop: relay), link mode (1 = OBD2) |
 | 66 | u8 | channels in the handheld's map |
 | 67 | u8 | flags: 1 built-in map, 2 clock set, 4 clock from GPS, 8 SD card ok, 16 clock held to the GPS pulse (PPS) |
 | 68 | u32 | boot number |
@@ -196,12 +196,26 @@ On the handheld:
   stall rules, alarms, the screen. Times are the handheld's clock at
   arrival; `latency_us` is kept.
 - RELAY_LINK `up = 0` is a link loss as on its own cable (key off, stall with
-  power loss): the drive and the stall rules see it the same way.
+  power loss): the drive and the stall rules see it the same way. So is the
+  3 s timeout while the laptop's ECU was answering. RELAY_READ / RELAY_ISO
+  bring the link up by themselves (a READ as Honda reads, an ISO reply as
+  OBD2-only); `up = 1` does too, with `iso` saying which. Changing between the
+  two ends the drive and starts another, as on its own cable. A RELAY_TICK
+  before any read is ignored.
+- A relayed read of the map's ECU id address and length sets the ECU id when
+  RELAY_LINK has not given one.
+- No trouble-code read (DTC command, the button) while relaying: it would need
+  the K-line.
+- A malformed RELAY frame (too short, `len` over 64, a read past address
+  0xFF) is dropped and counted in STATS `rx_bad`.
 - The handheld does **not** send its READ / ISO / TICK frames back for
   relayed data (the laptop has them already); LINK, EVENT, GPS, STATS go on
   as usual, so the laptop still gets the handheld's GPS and events.
-- HELLO capability bit 32: relay frames are understood. The laptop only
-  relays to a handheld that sets it.
+- HELLO capability **64** (0x40, `HH_SER_CAP_RELAY`): relay frames are
+  understood. The laptop only relays to a handheld that sets it. (32 is the
+  HL text session, see below.)
+- Code: `components/hhcore/hh_relay.c` (the payloads), the relay section of
+  `hh_core.c` (`hh_core_relay_*`); tests `test/host/hhrelaytest.c`.
 
 ### Map upload (files into the card's `MAP/` folder)
 
