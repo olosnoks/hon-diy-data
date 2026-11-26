@@ -15,6 +15,13 @@
  *   cable pulled          PORT_LOST: reopen every 0.25-2 s, then probe.
  *   Honda reads never     after iso_after_s: ISO 9141-2 5-baud init; if that
  *   answered              answers, live PIDs and stored codes (ISO_ONLY).
+ *                         Only while no Honda read has worked since start:
+ *                         an ECU that answered and went quiet is keyed off,
+ *                         and an ISO session (5 s) would delay key on.
+ *
+ * The line runs at the map's [protocol] baud (a stock P2P answers Honda reads
+ * at 10400, after the wake-up bytes) from every open and after every ISO
+ * session.
  */
 #include <math.h>
 #include <stdio.h>
@@ -38,12 +45,17 @@ enum { ST_CONNECTING, ST_OK, ST_NO_REPLY, ST_PORT_LOST, ST_ISO };
 enum { Q_DRIVE_OPEN = 1, Q_DRIVE_DATA, Q_DRIVE_CLOSE, Q_CAP_OPEN, Q_CAP_DATA, Q_CAP_CLOSE, Q_SYNC };
 #define Q_ITEM_MAX (HH_BLOCK_PAYLOAD + 80 + 28 + 1)
 
-/* ISO PIDs polled in ISO-only mode, and the map channel each one fills */
-static const struct { uint8_t pid; const char *name; } ISO_PIDS[] = {
-    {0x0C, "rpm"}, {0x0D, "vss"}, {0x0B, "map"}, {0x11, "tps"}, {0x0E, "ign"}, {0x14, "o2"},
-    {0x06, "stft"}, {0x07, "ltft"}, {0x05, "ect"}, {0x0F, "iat"},
+/* ISO PIDs polled in ISO-only mode, the map channel each one fills
+ * (hondalog/obd2.py PID_CHANNEL) and its rate class when the handheld map has
+ * no such channel (o2_post and calc_load are [[obd2]] channels: logged, and
+ * decoded by the laptop, but not on the handheld's screens). */
+static const struct { uint8_t pid; uint8_t rate; const char *name; } ISO_PIDS[] = {
+    {0x0C, 0, "rpm"}, {0x0D, 0, "vss"}, {0x0B, 0, "map"}, {0x11, 0, "tps"}, {0x0E, 1, "ign"}, {0x14, 1, "o2"},
+    {0x06, 1, "stft"}, {0x07, 2, "ltft"}, {0x05, 2, "ect"}, {0x0F, 2, "iat"},
+    {0x01, 2, "mil"}, {0x03, 2, "closed_loop"}, {0x04, 1, "calc_load"}, {0x15, 1, "o2_post"},
 };
 #define N_ISO_PIDS ((int)(sizeof(ISO_PIDS) / sizeof(ISO_PIDS[0])))
+#define ISO_PLAN_MAX (2 * 3 * N_ISO_PIDS + 1)    /* rpm before each of up to three slots per PID */
 
 struct hh_core {
     hh_platform_t plat;
@@ -76,7 +88,9 @@ struct hh_core {
     uint16_t tick_latency_us;           /* age of the read that closes the sample being emitted */
     uint32_t reads, errors, next_replan;
     uint8_t ecu_id[10], ecu_id_len;
-    uint8_t iso_pid[N_ISO_PIDS]; int16_t iso_ch[N_ISO_PIDS]; int n_iso, iso_i;
+    uint8_t honda_seen;                 /* a Honda read has worked: silence is key off, never ISO */
+    /* the ISO round (hondalog/poller.py _plan_iso): pid, channel (-1 none), emit a sample after it */
+    uint8_t iso_pid[ISO_PLAN_MAX], iso_emit[ISO_PLAN_MAX]; int16_t iso_ch[ISO_PLAN_MAX]; int n_iso, iso_i;
 
     /* shared (under the lock) */
     float value[HH_MAX_CH];
@@ -646,6 +660,7 @@ static int read_ecu_id(hh_core_t *c)
         if (rc == HH_E_PORT) return rc;
         if (rc == HH_OK) {
             c->reads++;
+            c->honda_seen = 1;
             lock(c);
             memcpy(c->ecu_id, r.data, (size_t)len);
             c->ecu_id_len = (uint8_t)len;
@@ -683,16 +698,25 @@ static void link_up(hh_core_t *c)
     hh_sched_restart(&c->sched);
     for (int i = 0; i < c->plan.n_blocks; i++) { c->unread[i] = 1; c->pending[i] = c->sched.top[i]; }
     c->honda_last_ok = now(c);
+    c->honda_seen = 1;
     if (!c->ecu_id_len && read_ecu_id(c) == HH_E_PORT) { port_lost(c); return; }
     went_up(c, 0);
 }
 
-static void connect(hh_core_t *c)
+/* Open the cable and set the map's baud rate (the backends open at 9600). */
+static int open_port(hh_core_t *c)
 {
     hh_transport_t *tr = c->plat.transport;
+    if (tr->open(tr->ctx) < 0) return -1;
+    if (tr->set_baud(tr->ctx, c->map->framing.baud) < 0) { tr->close(tr->ctx); return -1; }
+    return 0;
+}
+
+static void connect(hh_core_t *c)
+{
     c->honda_last_ok = now(c);
     lock(c); publish_state(c); unlock(c);
-    if (tr->open(tr->ctx) < 0) { port_lost(c); return; }
+    if (open_port(c) < 0) { port_lost(c); return; }
     hh_link_reset(&c->link);
     if (hh_link_wake(&c->link) == HH_E_PORT) { port_lost(c); return; }
     int rc = read_ecu_id(c);
@@ -705,8 +729,7 @@ static void connect(hh_core_t *c)
 
 static void reopen(hh_core_t *c)
 {
-    hh_transport_t *tr = c->plat.transport;
-    if (tr->open(tr->ctx) < 0) {
+    if (open_port(c) < 0) {
         c->reopen_wait = c->reopen_wait * 1.5 < REOPEN_MAX_S ? c->reopen_wait * 1.5 : REOPEN_MAX_S;
         return;
     }
@@ -742,6 +765,42 @@ static void read_dtcs(hh_core_t *c)
     unlock(c);
 }
 
+/* One round of PID requests, as hondalog/poller.py _plan_iso: RPM before
+ * every other PID (a sample after each pair), the others spread out and
+ * weighted by rate class (fast three places, medium two, slow one). Only PIDs
+ * the ECU has; the rate class is the map channel's if the map has one. */
+static void iso_plan(hh_core_t *c, uint32_t have)
+{
+    struct { double key; uint8_t pid; int16_t ch; } slot[3 * N_ISO_PIDS];
+    int n_slot = 0, k_other = 0, have_rpm = 0;
+    int16_t rpm_ch = -1;
+    for (int i = 0; i < N_ISO_PIDS; i++) {
+        uint8_t pid = ISO_PIDS[i].pid, rate = ISO_PIDS[i].rate;
+        int16_t ch = -1;
+        if (!(have & (0x80000000u >> (pid - 1)))) continue;
+        for (int k = 0; k < c->n_ch; k++)
+            if (c->ch[k].kind != HH_KIND_MATH && strcmp(c->ch[k].name, ISO_PIDS[i].name) == 0) {
+                ch = (int16_t)k;
+                rate = c->ch[k].rate_class;
+            }
+        if (pid == 0x0C) { have_rpm = 1; rpm_ch = ch; continue; }
+        int weight = rate == 0 ? 3 : rate == 1 ? 2 : 1;
+        for (int j = 0; j < weight; j++) {
+            double key = (j + 0.5) / weight + k_other * 1e-3;
+            int at = n_slot++;
+            while (at > 0 && slot[at - 1].key > key) { slot[at] = slot[at - 1]; at--; }
+            slot[at].key = key; slot[at].pid = pid; slot[at].ch = ch;
+        }
+        k_other++;
+    }
+    c->n_iso = 0;
+    for (int i = 0; i < n_slot; i++) {
+        if (have_rpm) { c->iso_pid[c->n_iso] = 0x0C; c->iso_ch[c->n_iso] = rpm_ch; c->iso_emit[c->n_iso++] = 0; }
+        c->iso_pid[c->n_iso] = slot[i].pid; c->iso_ch[c->n_iso] = slot[i].ch; c->iso_emit[c->n_iso++] = 1;
+    }
+    if (!c->n_iso) { c->iso_pid[0] = 0x0C; c->iso_ch[0] = c->rpm_ch; c->iso_emit[0] = 1; c->n_iso = 1; }
+}
+
 /* Honda reads have gone unanswered for iso_after_s: does the ECU speak plain OBD2? */
 static void try_iso(hh_core_t *c)
 {
@@ -759,16 +818,7 @@ static void try_iso(hh_core_t *c)
     uint32_t have = 0xFFFFFFFFu;
     if (hh_iso_read_pid(&c->iso, 0x00, d, 4) == 4)
         have = ((uint32_t)d[0] << 24) | ((uint32_t)d[1] << 16) | ((uint32_t)d[2] << 8) | d[3];
-    c->n_iso = 0;
-    for (int i = 0; i < N_ISO_PIDS; i++) {
-        uint8_t pid = ISO_PIDS[i].pid;
-        if (!(have & (0x80000000u >> (pid - 1)))) continue;
-        c->iso_pid[c->n_iso] = pid;
-        c->iso_ch[c->n_iso] = -1;
-        for (int k = 0; k < c->n_ch; k++)
-            if (c->ch[k].kind != HH_KIND_MATH && strcmp(c->ch[k].name, ISO_PIDS[i].name) == 0) c->iso_ch[c->n_iso] = (int16_t)k;
-        c->n_iso++;
-    }
+    iso_plan(c, have);
     c->iso_i = 0; c->iso_fails = 0;
     went_up(c, 1);
     lock(c);
@@ -787,7 +837,10 @@ static double iso_value(uint8_t pid, const uint8_t *d)
     case 0x0C: return (d[0] * 256 + d[1]) / 4.0;
     case 0x0E: return d[0] / 2.0 - 64.0;
     case 0x11: return d[0] * 100.0 / 255.0;
-    case 0x14: return d[0] / 200.0;
+    case 0x14: case 0x15: return d[0] / 200.0;
+    case 0x01: return (d[0] >> 7) & 1;                          /* MIL commanded on */
+    case 0x03: return d[0] == 0x02 || d[0] == 0x10 ? 1 : 0;     /* fuel system 1 in closed loop */
+    case 0x04: return d[0] * 100.0 / 255.0;
     default: return NAN;
     }
 }
@@ -806,9 +859,13 @@ static void iso_leave(hh_core_t *c)
 static void iso_step(hh_core_t *c)
 {
     uint8_t d[8];
-    if (!c->n_iso) { c->iso_pid[0] = 0x0C; c->iso_ch[0] = c->rpm_ch; c->n_iso = 1; }
+    if (!c->n_iso) { c->iso_pid[0] = 0x0C; c->iso_ch[0] = c->rpm_ch; c->iso_emit[0] = 1; c->n_iso = 1; }
     if (now(c) >= c->next_dtc) { read_dtcs(c); c->next_dtc = now(c) + ISO_DTC_EVERY_S; }
-    uint8_t pid = c->iso_pid[c->iso_i];
+    /* the next entry comes up whether this one answers or not: a PID the ECU
+     * lists but does not answer must not hold up the round */
+    int i = c->iso_i;
+    if (++c->iso_i >= c->n_iso) c->iso_i = 0;
+    uint8_t pid = c->iso_pid[i];
     int n = hh_iso_read_pid(&c->iso, pid, d, sizeof(d));
     if (n == HH_E_PORT) { port_lost(c); return; }
     if (n <= 0) {
@@ -823,18 +880,18 @@ static void iso_step(hh_core_t *c)
     log_iso(c, t, 0x41, pid, d, (uint8_t)n);
     if (n >= hh_iso_pid_len(pid)) {
         double v = iso_value(pid, d);
-        int ch = c->iso_ch[c->iso_i];
+        int ch = c->iso_ch[i];
         if (ch >= 0) { c->value[ch] = (float)v; c->fresh[ch] = 1; }
         if (pid == 0x0C) stall_feed(c, t, v, 1);
     }
-    if (++c->iso_i >= c->n_iso) { c->iso_i = 0; c->tick_latency_us = 0; emit(c, t); }
+    if (c->iso_emit[i]) { c->tick_latency_us = 0; emit(c, t); }
     unlock(c);
 }
 
 /* Stored codes on request while Honda reads are running: Honda polling
- * pauses, the 5-baud init runs, then the line goes back to 9600 and polling
- * resumes once the ECU has let go of the ISO session (nothing is logged as a
- * link loss meanwhile). */
+ * pauses, the 5-baud init runs, then the line goes back to the map's baud
+ * rate (hh_iso_close) and polling resumes once the ECU has let go of the ISO
+ * session (nothing is logged as a link loss meanwhile). */
 static void run_dtc(hh_core_t *c)
 {
     if (c->state == ST_ISO) { read_dtcs(c); return; }
@@ -935,7 +992,7 @@ static void probe(hh_core_t *c)
     }
     nap(c, c->probe_wait);
     c->probe_wait = c->probe_wait * 1.5 < PROBE_MAX_S ? c->probe_wait * 1.5 : PROBE_MAX_S;
-    if (!quiet && c->cfg.iso_fallback && now(c) - c->honda_last_ok >= c->cfg.iso_after_s && now(c) >= c->next_iso_try)
+    if (!quiet && c->cfg.iso_fallback && !c->honda_seen && now(c) - c->honda_last_ok >= c->cfg.iso_after_s && now(c) >= c->next_iso_try)
         try_iso(c);
 }
 

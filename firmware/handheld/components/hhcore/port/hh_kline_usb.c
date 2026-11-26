@@ -132,7 +132,7 @@ static int k_open(void *ctx)
         self->usb_latency_s = 0.016;
     }
     while (xStreamBufferReceive(rx, scratch, sizeof(scratch), 0) > 0) {}
-    ESP_LOGI(TAG, "KKL cable open, 9600 8N1, latency %d ms", (int)(self->usb_latency_s * 1000));
+    ESP_LOGI(TAG, "KKL cable open, 8N1 (the engine sets the map's baud), latency %d ms", (int)(self->usb_latency_s * 1000));
     return 0;
 }
 

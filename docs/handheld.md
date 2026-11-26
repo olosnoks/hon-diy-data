@@ -360,7 +360,7 @@ A wrong or missing line falls back to its default.
 | `backend` | `auto` | `usb`: KKL cable on the USB host socket. `uart`: L9637D on the UART. `auto`: USB |
 | `gps_baud` | 9600 | 0 = no GPS |
 | `iso_fallback` | 1 | Try plain OBD2 (ISO 9141-2) when Honda reads stay unanswered |
-| `iso_after_s` | 8 | ... for this long |
+| `iso_after_s` | 12 | ... for this long. Only while no Honda read has worked since power-up: an ECU that answered and went quiet is keyed off, and an ISO session (5 s) would delay key on |
 | `drive_gap_s` | 120 | ECU silent this long ends the drive |
 | `sync_ms` | 1000 | The card is synced this often: the most a power cut can take |
 | `block_ms` | 250 | A log block is closed after this long |

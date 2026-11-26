@@ -51,6 +51,7 @@ void hhsim_reset(void)
     memcpy(SIM.mem + 0x76, "37820-P2P-", 10);
     SIM.honda = 1; SIM.echo = 1; SIM.powered = 1; SIM.port_ok = 1;
     SIM.turnaround_s = 0.002;
+    SIM.honda_baud = 9600;
     SIM.rng = 12345;
     SIM.mem[0x17] = 144;        /* 13.8 V */
     SIM.mem[0x10] = 40;         /* warm coolant */
@@ -95,6 +96,7 @@ static void iso_reply(const uint8_t *req, size_t n, double tx_end)
     if (req[3] == 0x04) { SIM.mode4_seen++; return; }
     if (req[3] == 0x01 && n == 6) {
         uint8_t pid = req[4];
+        if (pid >= 1 && pid <= 32) SIM.pid_seen |= 1u << (pid - 1);
         out[3] = 0x41; out[4] = pid;
         switch (pid) {
         case 0x00: out[5] = 0xBE; out[6] = 0x3E; out[7] = 0xB8; out[8] = 0x10; len = 9; break;
@@ -107,6 +109,10 @@ static void iso_reply(const uint8_t *req, size_t n, double tx_end)
         case 0x06: case 0x07: out[5] = 128; len = 6; break;
         case 0x0E: out[5] = 148; len = 6; break;
         case 0x14: out[5] = 90; out[6] = 128; len = 7; break;
+        case 0x15: out[5] = 140; out[6] = 0xFF; len = 7; break;          /* 0.70 V downstream */
+        case 0x01: out[5] = 0x82; out[6] = 0x07; out[7] = 0x65; out[8] = 0x00; len = 9; break;  /* MIL on, 2 codes */
+        case 0x03: out[5] = SIM.closed_loop ? 0x02 : 0x01; out[6] = 0; len = 7; break;
+        case 0x04: out[5] = 102; len = 6; break;                         /* 40 % */
         default: return;        /* not supported: silence */
         }
     } else if (req[3] == 0x03 && n == 5) {
@@ -129,17 +135,22 @@ static int s_write(const uint8_t *d, size_t n)
     double tx_end = start + n * byte_s();
     if (SIM.echo) push(start, d, n);
     SIM.requests++;
-    if (baud == 9600) {
+    if (!SIM.powered) SIM.woken = 0;
+    if (iso_stage != 1 && baud == SIM.honda_baud) {
         hh_framing_t f;
         hh_framing_default(&f);
-        if (n == 11 && memcmp(d, wake, 11) == 0) return 0;
-        if (!hh_frame_allowed(&f, d, n)) { SIM.bad_frames_sent++; return 0; }
-        /* the ECU keeps an ISO session for 5 s of silence and ignores Honda reads meanwhile */
-        if (iso_stage == 2 && SIM.now - iso_last < 5.0) return 0;
-        iso_stage = 0;
-        if (SIM.powered && SIM.honda) honda_reply(d, tx_end);
-        return 0;
+        if (n == 11 && memcmp(d, wake, 11) == 0) { SIM.woken = SIM.powered; SIM.wakes++; return 0; }
+        if (hh_frame_allowed(&f, d, n)) {
+            /* the ECU keeps an ISO session for 5 s of silence and ignores Honda reads meanwhile */
+            if (iso_stage == 2 && SIM.now - iso_last < 5.0) return 0;
+            iso_stage = 0;
+            if (SIM.powered && SIM.honda && (SIM.woken || !SIM.need_wake)) honda_reply(d, tx_end);
+            else SIM.honda_ignored++;
+            return 0;
+        }
+        if (baud != 10400) { SIM.bad_frames_sent++; return 0; }
     }
+    if (baud != 10400) { SIM.bad_frames_sent++; return 0; }      /* the wrong baud rate for anything */
     if (iso_stage == 1 && n == 1) {                 /* inverted key byte 2 */
         uint8_t cc = 0xCC;
         if (d[0] == (uint8_t)~0x08) { push(tx_end + 0.03, &cc, 1); iso_stage = 2; iso_last = tx_end; }

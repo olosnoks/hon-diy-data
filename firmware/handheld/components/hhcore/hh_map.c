@@ -144,7 +144,7 @@ static const struct { const char *key; size_t off; int32_t def, lo, hi; } KEYS[]
     {"backend", OFF(backend), HH_CFG_BACKEND_AUTO, 0, 2},
     {"gps_baud", OFF(gps_baud), 9600, 0, 115200},
     {"iso_fallback", OFF(iso_fallback), 1, 0, 1},
-    {"iso_after_s", OFF(iso_after_s), 8, 2, 600},
+    {"iso_after_s", OFF(iso_after_s), 12, 2, 600},
     {"drive_gap_s", OFF(drive_gap_s), 120, 5, 3600},
     {"sync_ms", OFF(sync_ms), 1000, 100, 60000},
     {"block_ms", OFF(block_ms), 250, 20, 5000},

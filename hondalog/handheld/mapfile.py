@@ -35,7 +35,7 @@ DEFAULT_CFG = """\
 backend = auto          # usb: KKL cable on the USB socket.  uart: L9637D on the UART.  auto: usb
 gps_baud = 9600         # 0 = no GPS
 iso_fallback = 1        # try plain OBD2 (ISO 9141-2) when Honda reads stay unanswered
-iso_after_s = 8         # ... for this long
+iso_after_s = 12        # ... for this long (an ISO session left open lasts 5 s)
 drive_gap_s = 120       # ECU silent this long ends the drive
 sync_ms = 1000          # the card is synced this often: the most a power cut can take
 block_ms = 250          # a log block is closed after this long

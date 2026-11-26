@@ -859,6 +859,7 @@ TEST(test_engine_iso_fallback)
     const char *root = fresh_dir();
     hhsim_reset();
     SIM.honda = 0; SIM.iso = 1;                 /* an ECU that only speaks plain OBD2 */
+    SIM.closed_loop = 1;
     SIM.dtc[0] = 0x0301; SIM.dtc[1] = 0x1456;
     hhsim_set_rpm(1500);
     hhhost_t *h = hhhost_new(root, NULL, 0, "iso_after_s = 4\n", hhsim_callbacks(), 1, 0);
@@ -871,6 +872,10 @@ TEST(test_engine_iso_fallback)
     CHECK(NEAR(s.value[ch_index("rpm")], 1500, 0.01) && NEAR(s.value[ch_index("ect")], 90, 0.01));
     CHECK(NEAR(s.value[ch_index("tps")], 20.0, 0.01) && NEAR(s.value[ch_index("o2")], 0.45, 0.001));
     CHECK(isnan(s.value[ch_index("batt")]));                        /* no such PID: no value, not a guess */
+    /* PID 01 bit 7 -> mil, PID 03 -> closed_loop (the map has both as Honda flags) */
+    CHECK(s.value[ch_index("mil")] == 1.0f && s.value[ch_index("closed_loop")] == 1.0f);
+    /* calc_load (04) and o2_post (15) are [[obd2]] channels: asked for and logged, decoded on the laptop */
+    CHECK((SIM.pid_seen & (1u << (0x04 - 1))) && (SIM.pid_seen & (1u << (0x15 - 1))));
     CHECK(s.dtc.valid && s.dtc.n == 2 && s.dtc.code[0] == 0x0301 && s.dtc.code[1] == 0x1456);
     CHECK(s.log.recording && s.stall.armed);
     char text[6];
@@ -891,6 +896,105 @@ TEST(test_engine_iso_fallback)
     scan_t d;
     scan(drive_path(root, "DRIVES", 'D', 1), &d);
     CHECK(d.ok && d.hdr.link_mode == 1 && d.iso > 50 && d.reads == 0 && d.stall_events == 1);
+}
+
+/* The built-in map with another [protocol] baud rate, as the exporter would write it. */
+static size_t map_with_baud(uint8_t *out, size_t cap, uint32_t baud)
+{
+    const uint8_t *def;
+    size_t len = hhhost_default_map(&def);
+    if (len > cap) return 0;
+    memcpy(out, def, len);
+    hh_map_hdr_t hdr;
+    memcpy(&hdr, out, sizeof(hdr));
+    for (size_t pos = sizeof(hdr); pos + sizeof(hh_map_sec_t) <= hdr.core_len;) {
+        hh_map_sec_t sec;
+        memcpy(&sec, out + pos, sizeof(sec));
+        pos += sizeof(sec);
+        if (sec.type == HH_MS_PROTO) memcpy(out + pos + offsetof(hh_map_proto_t, baud), &baud, sizeof(baud));
+        pos += sec.len;
+    }
+    static const uint8_t zero[4] = {0, 0, 0, 0};
+    size_t at = offsetof(hh_map_hdr_t, core_crc);
+    uint32_t crc = hh_crc32(0, out, at);
+    crc = hh_crc32(crc, zero, 4);
+    crc = hh_crc32(crc, out + at + 4, hdr.core_len - at - 4);
+    memcpy(out + at, &crc, 4);
+    return len;
+}
+
+TEST(test_engine_p2p_10400_with_wake)
+{
+    /* What a stock 2000 Civic P2P does: Honda reads at 10400 baud, and only
+     * after the wake-up bytes. The map says 10400; the handheld must open at
+     * it, wake the ECU first, and go back to it after an ISO session. */
+    static uint8_t map[256 * 1024];
+    hh_snapshot_t s;
+    size_t len = map_with_baud(map, sizeof(map), 10400);
+    CHECK(len > 0);
+    hhsim_reset();
+    SIM.honda_baud = 10400; SIM.need_wake = 1; SIM.iso = 1;
+    SIM.dtc[0] = 0x0420;
+    hhsim_set_rpm(900);
+    hhhost_t *h = hhhost_new(fresh_dir(), map, len, NULL, hhsim_callbacks(), 1, 0);
+    hhhost_run_until(h, 5.0);
+    hhhost_snapshot(h, &s);
+    CHECK(s.link.state == HH_LINK_OK && NEAR(s.value[ch_index("rpm")], 900, 0.01) && s.link.hz_fast > 10.0f);
+    CHECK(SIM.wakes >= 1 && SIM.honda_ignored == 0 && SIM.bad_frames_sent == 0);
+    /* key off, then on: the ECU needs waking again; the probes send the wake-up bytes */
+    SIM.powered = 0;
+    hhhost_run_until(h, 10.0);
+    SIM.powered = 1;
+    uint32_t wakes = SIM.wakes;
+    hhhost_run_until(h, 14.0);
+    hhhost_snapshot(h, &s);
+    CHECK(s.link.state == HH_LINK_OK && SIM.wakes > wakes && SIM.iso_inits == 0);
+    /* trouble codes on request: 5-baud init, then back to 10400 and Honda reads */
+    hh_core_request_dtc(hhhost_core(h));
+    hhhost_run_until(h, 40.0);
+    hhhost_snapshot(h, &s);
+    CHECK(SIM.iso_inits == 1 && s.dtc.valid && s.dtc.n == 1 && s.dtc.code[0] == 0x0420);
+    CHECK(s.link.state == HH_LINK_OK && s.link.hz_fast > 10.0f && s.log.drive_no == 1);
+    CHECK(SIM.bad_frames_sent == 0 && SIM.mode4_seen == 0);
+    hhhost_free(h);
+}
+
+TEST(test_engine_honda_seen_then_silent_no_iso)
+{
+    /* Honda reads worked, then the ECU went quiet (key off): never ISO, which
+     * would hold the line for 5 s at key on. */
+    hh_snapshot_t s;
+    hhsim_reset();
+    SIM.iso = 1;
+    hhhost_t *h = hhhost_new(fresh_dir(), NULL, 0, "iso_after_s = 4\n", hhsim_callbacks(), 1, 0);
+    hhhost_run_until(h, 5.0);
+    hhhost_snapshot(h, &s);
+    CHECK(s.link.state == HH_LINK_OK);
+    SIM.powered = 0;
+    hhhost_run_until(h, 60.0);
+    hhhost_snapshot(h, &s);
+    CHECK(s.link.state == HH_LINK_OFF && SIM.iso_inits == 0);
+    /* key on: straight back to Honda reads */
+    SIM.powered = 1;
+    hhhost_run_until(h, 62.0);
+    hhhost_snapshot(h, &s);
+    CHECK(s.link.state == HH_LINK_OK && SIM.iso_inits == 0);
+    hhhost_free(h);
+}
+
+TEST(test_engine_iso_default_wait)
+{
+    /* the default iso_after_s is 12: an OBD2-only ECU is tried after 12 s, not before */
+    hh_snapshot_t s;
+    hhsim_reset();
+    SIM.honda = 0; SIM.iso = 1;
+    hhhost_t *h = hhhost_new(fresh_dir(), NULL, 0, NULL, hhsim_callbacks(), 1, 0);
+    hhhost_run_until(h, 11.5);
+    CHECK(SIM.iso_inits == 0);
+    hhhost_run_until(h, 20.0);
+    hhhost_snapshot(h, &s);
+    CHECK(SIM.iso_inits == 1 && s.link.state == HH_LINK_ISO_ONLY);
+    hhhost_free(h);
 }
 
 TEST(test_engine_dtc_on_request)
@@ -988,6 +1092,9 @@ int main(void)
     RUN(test_engine_power_cut);
     RUN(test_engine_sync_and_blocks);
     RUN(test_engine_iso_fallback);
+    RUN(test_engine_p2p_10400_with_wake);
+    RUN(test_engine_honda_seen_then_silent_no_iso);
+    RUN(test_engine_iso_default_wait);
     RUN(test_engine_dtc_on_request);
     RUN(test_engine_alarm);
     RUN(test_engine_no_card);

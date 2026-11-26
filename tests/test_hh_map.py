@@ -66,6 +66,23 @@ def test_channels_limits_and_what_is_left_out(amap):
     assert mf.stall == {"rpm_run": 400, "rpm_zero": 50, "link_down_s": 1, "pre_s": 30, "post_s": 10, "rpm_channel": 0}
 
 
+def test_the_protocol_section_reaches_the_handheld(tmp_path):
+    """A stock P2P: Honda reads at 10400 baud after the wake-up bytes. The
+    handheld runs the line at the map's baud, so it has to be in the file."""
+    text = addressmap.DEFAULT_MAP.read_text(encoding="utf-8").replace(
+        "[protocol]\n", '[protocol]\nbaud = 10400\ninit_sequence = "68 6a f5 af bf b3 b2 c1 db b3 e9"\n'
+        "init_delay_s = 0.35\n", 1)
+    path = tmp_path / "p2p.toml"
+    path.write_text(text, encoding="utf-8")
+    mine = addressmap.load(path)
+    assert mine.framing.baud == 10400
+    mf = read_map(build_map(mine))
+    assert mf.protocol["baud"] == 10400
+    assert mf.protocol["init_sequence"] == bytes.fromhex("686af5afbfb3b2c1dbb3e9")
+    assert math.isclose(mf.protocol["init_delay_s"], 0.35, rel_tol=1e-6)
+    assert mf.address_map().framing.baud == 10400
+
+
 def test_a_verified_channel_and_a_variant_reach_the_handheld(tmp_path):
     text = addressmap.DEFAULT_MAP.read_text(encoding="utf-8").replace(
         'name = "rpm"\nlabel = "RPM"', 'name = "rpm"\nstatus = "verified"\nlabel = "RPM"', 1)

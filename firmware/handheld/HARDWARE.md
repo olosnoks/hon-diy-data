@@ -166,7 +166,8 @@ not remember it, so a later `line_coding_set` clears a break. That is the
 behaviour wanted.
 
 **Which of these does the handheld need?** The Honda protocol
-(`20 05 addr len cksum`, 9600 8N1) needs **no break**: the wake-up is eleven
+(`20 05 addr len cksum`, 8N1 at the map's `[protocol] baud`: a stock P2P
+answers at 10400, after the wake-up) needs **no break**: the wake-up is eleven
 ordinary bytes (`Framing.init_sequence`). Break is only for the ISO 9141-2
 5-baud init of the generic OBD2 path, where each bit lasts 200 ms and a
 millisecond of USB jitter is harmless. The latency timer matters for speed:
@@ -222,7 +223,7 @@ If USB host will not work, talk to the K-line directly. Same two header pins.
   directly. The pin numbers and the 3 V lower limit for VCC are from memory
   of the datasheet, not from a page read for this document:
   **[unverified], check the datasheet before soldering.**
-- UART2, TX = GPIO19, RX = GPIO20, 9600 8N1, not inverted. Everything sent
+- UART2, TX = GPIO19, RX = GPIO20, 8N1 at the map's baud rate, not inverted. Everything sent
   comes back on RX (single wire); the firmware drops the echo as the laptop
   code does.
 - Break is `uart_set_line_inverse()` or driving the TX pin low as a GPIO
