@@ -164,6 +164,45 @@ ACK status: 0 ok, 1 ignored, -1 bad argument, -2 card error, -3 CRC
 mismatch, -4 not expected now, -5 refused (the map would not load), -6
 busy, -7 not supported (no card, or older firmware), -8 wrong offset.
 
+### Relay: the laptop's ECU data to the handheld (two-way firmware only)
+
+When the laptop reads the ECU itself (KKL cable on the laptop) and the
+handheld is on its USB-C cable, the laptop forwards every ECU reply so the
+handheld shows, alarms on, catches stalls in and logs the same data as if it
+had read the K-line. The handheld decodes the bytes with **its own map**, so
+the laptop first makes sure the handheld runs the same map (HELLO's map hash
+against the laptop map's `version_hash`; if they differ, the laptop uploads
+its map with PUT_BEGIN/DATA/END kind 3 and the handheld must be restarted to
+use it). These frames are not answered (no ACK); the stream itself is the
+heartbeat.
+
+| type | name | payload |
+|---|---|---|
+| 0x50 | RELAY_READ | `u64 host_us, u8 addr, u8 len, u16 latency_us` + `len` raw ECU bytes: one Honda block read on the laptop. `host_us` is the laptop's clock (monotonic, microseconds) when the request went out |
+| 0x51 | RELAY_ISO | `u64 host_us, u8 mode, u8 pid, u8 len, u8 flags` + `len` bytes: one OBD2 reply (mode 0x41 for Mode 01) when the laptop runs OBD2-only |
+| 0x52 | RELAY_TICK | `u64 host_us, u16 latency_us, u16 hz_c, u32 n`: one laptop sample done (fast cycle, or an RPM pair in OBD2 mode). The handheld emits its own sample (UI, alarms, stall rules) on it |
+| 0x53 | RELAY_LINK | `u64 host_us, u8 state, u8 up, u8 iso, u8 ecu_id_len` + up to 10 bytes ECU id: the laptop's link state (as LINK: 0 no reply, 1 connecting, 2 ok, 3 OBD2 only). On every change and once a second |
+
+On the handheld:
+
+- Relay mode starts with the first RELAY frame **while its own K-line link is
+  not up** (no cable on the handheld, or the ECU silent on it). Its own
+  K-line reads then stop (the ECU has one K-line and the laptop owns it); the
+  link state becomes 5 "via laptop" (LINK `state` 5; HELLO byte 63), the
+  backend 2 "laptop". Its own reads come back 3 s after the last RELAY frame.
+- RELAY_READ and RELAY_ISO go through exactly the path of the handheld's own
+  reads and OBD2 replies: channel values, drive logging on the card (the
+  record types of FORMAT.md, with the handheld's own `t_us` of arrival),
+  stall rules, alarms, the screen. Times are the handheld's clock at
+  arrival; `latency_us` is kept.
+- RELAY_LINK `up = 0` is a link loss as on its own cable (key off, stall with
+  power loss): the drive and the stall rules see it the same way.
+- The handheld does **not** send its READ / ISO / TICK frames back for
+  relayed data (the laptop has them already); LINK, EVENT, GPS, STATS go on
+  as usual, so the laptop still gets the handheld's GPS and events.
+- HELLO capability bit 32: relay frames are understood. The laptop only
+  relays to a handheld that sets it.
+
 ### Map upload (files into the card's `MAP/` folder)
 
 The offline road map (`MAP/MAP.IDX`, `MAP/MAP.DAT`, `MAP/README.TXT`, see
