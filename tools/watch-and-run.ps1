@@ -30,8 +30,11 @@ function Say($text) {
 }
 
 function App-Processes {
+    # the launcher (hondalog.exe) shows up the moment Start-Process returns;
+    # the python.exe it runs comes a little later, so count both
     Get-CimInstance Win32_Process | Where-Object {
-        $_.Name -eq "python.exe" -and $_.CommandLine -match "hondalog\.exe" -and $_.CommandLine -notmatch "\-m "
+        $_.Name -eq "hondalog.exe" -or
+        ($_.Name -eq "python.exe" -and $_.CommandLine -match "hondalog\.exe" -and $_.CommandLine -notmatch "\-m ")
     }
 }
 
@@ -71,7 +74,7 @@ while ($true) {
                 if ($changed -contains "pyproject.toml") {
                     & $Py -m pip install -q -e ".[gl,test]" 2>&1 | Select-Object -Last 2 | ForEach-Object { Say "pip: $_" }
                 }
-                if (-not $paused) { Stop-App; Start-App }
+                if (-not $paused) { Stop-App; Start-App; Start-Sleep $Interval; continue }
             }
         }
         if (-not $paused -and -not (App-Processes)) { Start-App }
