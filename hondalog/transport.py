@@ -15,6 +15,7 @@ from __future__ import annotations
 import errno
 import os
 import select
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -111,6 +112,12 @@ class SerialTransport(Transport):
             pass
         ms = ftdi.read_latency_ms(port)
         if ms is None:          # a pty or a non-FTDI adapter: nothing is held back
+            if ftdi.is_windows():
+                # the registry could not be read: an FTDI cable is then most
+                # likely on its 16 ms default, so do not claim 1 ms
+                p = ftdi.find_comport(port)
+                if p is not None and p.vid == ftdi.FTDI_VID:
+                    return DEFAULT_USB_LATENCY_S
             return 0.0 if _is_pty(port) else LOW_USB_LATENCY_S
         if ms > 1 and ftdi.write_latency_ms(port, 1):
             ms = 1
@@ -209,7 +216,7 @@ def _usb_identity(port: str) -> tuple[int, int, str | None] | None:
         from serial.tools import list_ports as lp
         real = os.path.realpath(port)
         for p in lp.comports():
-            if p.device == real and p.vid is not None:
+            if (p.device == real or str(p.device).upper() == port.upper()) and p.vid is not None:
                 return (p.vid, p.pid, p.serial_number)
     except Exception:
         pass
@@ -392,6 +399,8 @@ def list_ports() -> list[PortInfo]:
     for p in found:
         if p.vid == FTDI_VID and p.pid == FTDI_PID:
             add(p.device, f"{p.device}  (FTDI FT232R 0403:6001)", True)
+        elif p.vid == FTDI_VID:
+            add(p.device, f"{p.device}  (FTDI 0403:{p.pid:04x})", True)
     if os.path.exists(SIM_SYMLINK):
         add(SIM_SYMLINK, f"{SIM_SYMLINK}  (hondalog-sim pty)")
     for p in found:
@@ -401,6 +410,28 @@ def list_ports() -> list[PortInfo]:
     add(BUILTIN_SIM_FLAKY, "sim:flaky  (built-in simulator with line faults)")
     add(BUILTIN_SIM_ISO, "sim:iso  (built-in simulator that answers OBD2 only)")
     return ports
+
+
+def default_port() -> str:
+    """The port to use when none is named: the udev link if present, else the
+    first FTDI adapter pyserial lists (COM21 on Windows), else, on Windows, the
+    first USB COM port, else the udev link name."""
+    if os.path.exists(UDEV_SYMLINK):
+        return UDEV_SYMLINK
+    try:
+        from serial.tools import list_ports as lp
+        found = sorted(lp.comports(), key=lambda p: p.device)
+    except Exception:
+        found = []
+    for p in found:
+        if p.vid == FTDI_VID:
+            return str(p.device)
+    if sys.platform == "win32":
+        usb = [str(p.device) for p in found if p.vid is not None]
+        if usb:
+            return usb[0]
+        return "COM1"
+    return UDEV_SYMLINK
 
 
 def make_transport(port: str, framing: Framing = protocol.DEFAULT) -> Transport:
@@ -714,5 +745,5 @@ class Link:
 __all__ = [
     "BUILTIN_SIM", "BUILTIN_SIM_FLAKY", "CommandBlocked", "FTDI_PID", "FTDI_VID", "Link",
     "LoopbackTransport", "PortInfo", "ReadResult", "SIM_SYMLINK", "SerialTransport",
-    "Transport", "TransportError", "UDEV_SYMLINK", "list_ports", "make_transport",
+    "Transport", "TransportError", "UDEV_SYMLINK", "default_port", "list_ports", "make_transport",
 ]

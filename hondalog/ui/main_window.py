@@ -346,7 +346,8 @@ class Shell(QMainWindow):
     def first_contact(self) -> None:
         """W1's first-contact sequence on the last port, in the background.
         The verdict comes back through the status line; the report is a file."""
-        port = str(self.settings.value("port/last", "")) or "/dev/hondalog"
+        from ..transport import default_port
+        port = str(self.settings.value("port/last", "")) or default_port()
         port, ok = QInputDialog.getText(self, "hondalog", "First contact on port (key ON, about "
                                         "15 s, read-only):", text=port)
         if not ok or not port.strip():

@@ -77,6 +77,22 @@ NEXT_STEPS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+#: NO_PORT advice on Windows (no udev, no dialout group there)
+NO_PORT_WINDOWS: tuple[str, ...] = (
+    "Device Manager > Ports (COM & LPT): is the cable listed (e.g. USB Serial Port (COM21))? "
+    "If it shows under Other devices instead, install the FTDI VCP driver.",
+    "Close any other program that may hold the port (a terminal, another hondalog, "
+    "a vendor scan tool), then run this again.",
+    "Name the port explicitly: --port COM21.",
+)
+
+
+def next_steps(verdict: str) -> tuple[str, ...]:
+    if verdict == NO_PORT and ftdi.is_windows():
+        return NO_PORT_WINDOWS
+    return NEXT_STEPS.get(verdict, ())
+
+
 ECHO_BYTE = 0x55               # not a Honda command byte; an ECU ignores it
 ECHO_WAIT_S = 0.020
 
@@ -142,7 +158,7 @@ class FirstContactReport:
             "",
             "## Next steps",
             "",
-            *[f"{i}. {text}" for i, text in enumerate(NEXT_STEPS.get(self.verdict, ()), 1)],
+            *[f"{i}. {text}" for i, text in enumerate(next_steps(self.verdict), 1)],
             "",
             "## Steps",
             "",
@@ -162,7 +178,11 @@ class FirstContactReport:
                     f"- verdict: {a.verdict}",
                     f"- latency timer: {a.latency_ms if a.latency_ms is not None else '-'} ms"]
             out += [f"- {n}" for n in a.notes]
-            if a.is_ftdi and (a.latency_ms or 0) > 1:
+            if a.is_ftdi and ftdi.is_windows():
+                if a.latency_ms is None or a.latency_ms > 1:
+                    out += ["", "Set the latency timer to 1 ms (once; Windows keeps it):", "",
+                            ftdi.WINDOWS_LATENCY_HINT + "."]
+            elif a.is_ftdi and (a.latency_ms or 0) > 1:
                 out += ["", "Make the 1 ms latency timer permanent:", "", "```sh",
                         ftdi.udev_install_hint(), "```"]
         if self.ecu_id:
@@ -278,17 +298,25 @@ def run(port: str, amap: AddressMap | None = None, transport: Transport | None =
         report.step("open port", False, str(exc), _ms(t, clock))
         report.verdict = NO_PORT
         report.summary = (f"Could not open {port}: {exc}. Is the cable plugged in, and is "
-                          "your user in the dialout group?")
+                          + ("the port free (no other program using it)?" if ftdi.is_windows()
+                             else "your user in the dialout group?"))
         report.trace = tr.dump()
         return report
     lat = 1000 * tr.usb_latency_s
+    lat_note = ""
     if a.is_ftdi:
         a.latency_ms = ftdi.read_latency_ms(port, sysfs)
         lat_ok = a.latency_ms is not None and a.latency_ms <= 1
+        if a.latency_ms is not None:
+            lat = float(a.latency_ms)       # what the driver really uses
+        else:
+            lat_note = " (assumed; latency timer unreadable)"
+        where = ("set it in Device Manager, see Adapter below" if ftdi.is_windows()
+                 else "see the udev rule below")
         report.step("latency timer 1 ms", lat_ok,
-                    f"latency_timer = {a.latency_ms} ms" + ("" if lat_ok else
-                                                            "; see the udev rule below"))
-    report.step("open port", True, f"USB latency {lat:g} ms", _ms(t, clock))
+                    f"latency_timer = {a.latency_ms if a.latency_ms is not None else '?'} ms"
+                    + ("" if lat_ok else f"; {where}"))
+    report.step("open port", True, f"USB latency {lat:g} ms{lat_note}", _ms(t, clock))
 
     try:
         _run_open(report, tr, amap, framing, clock, iso, quick, listen_s, say)
@@ -495,7 +523,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Find out which protocol the ECU answers and write a report. Read-only: "
                     "sends read requests and OBD2 read services, never writes or clears.")
     ap.add_argument("--port", default=None,
-                    help="serial port (default: the first FTDI adapter, else /dev/hondalog); "
+                    help="serial port (default: the first FTDI adapter, e.g. COM21 on Windows, "
+                         "else /dev/hondalog); "
                          "'sim:' for the built-in simulator")
     ap.add_argument("-o", "--out", default=None, help="report file (.md); '-' = stdout")
     ap.add_argument("--no-iso", action="store_true", help="skip the ISO 9141-2 init")
@@ -506,6 +535,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--udev", action="store_true",
                     help="print the udev rule (stable name + 1 ms latency) and exit")
     args = ap.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):     # cp1252 consoles: never crash on a symbol
+        try:
+            stream.reconfigure(errors="replace")   # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
 
     if args.udev:
         print(ftdi.udev_rule(), end="")
@@ -513,12 +547,9 @@ def main(argv: list[str] | None = None) -> int:
                                                 ftdi.udev_install_hint().splitlines()))
         return 0
     from ..addressmap import load
-    from ..transport import list_ports
+    from ..transport import default_port
     amap = load(args.map) if args.map else load_default()
-    port = args.port
-    if port is None:
-        ftdis = [p.device for p in list_ports() if p.is_ftdi]
-        port = ftdis[0] if ftdis else "/dev/hondalog"
+    port = args.port or default_port()
 
     def progress(text: str) -> None:
         print(f"  .. {text}", file=sys.stderr, flush=True)

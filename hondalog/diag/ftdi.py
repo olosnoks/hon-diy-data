@@ -1,6 +1,9 @@
 """What is the USB serial adapter, and is its latency timer set right?
 
-Everything is read from sysfs, so it needs no root and no extra library.
+On Linux everything is read from sysfs, so it needs no root and no extra
+library. Where there is no sysfs (Windows, macOS) the adapter is identified
+through pyserial's ``list_ports``; on Windows the latency timer is read (never
+written) from the FTDI driver's registry entry.
 
 The FT232R holds received bytes for ``latency_timer`` milliseconds (16 by
 default) before passing them to the PC unless its buffer fills first. At 9600
@@ -15,6 +18,7 @@ do; it reports what the descriptors suggest and says so.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 
 FTDI_VID = 0x0403
@@ -26,6 +30,12 @@ _FTDI_CHIPS = {0x0200: "FT232AM", 0x0400: "FT232BM", 0x0500: "FT2232C/D", 0x0600
                0x0700: "FT2232H", 0x0800: "FT4232H", 0x0900: "FT232H", 0x1000: "FT-X series"}
 _OTHER = {(0x1A86, 0x7523): "CH340", (0x1A86, 0x5523): "CH341", (0x10C4, 0xEA60): "CP210x",
           (0x067B, 0x2303): "PL2303"}
+#: FTDI product ids, for when the bcdDevice (and so the exact chip) is not known
+_FTDI_PIDS = {0x6001: "FT232R", 0x6010: "FT2232", 0x6011: "FT4232H", 0x6014: "FT232H",
+              0x6015: "FT-X series"}
+FTDIBUS_KEY = r"SYSTEM\CurrentControlSet\Enum\FTDIBUS"
+WINDOWS_LATENCY_HINT = ("Device Manager > Ports (COM & LPT) > the cable's COM port > "
+                        "Port Settings > Advanced > Latency Timer (msec) = 1, OK, then replug")
 # Serial numbers that thousands of counterfeit FT232RL share.
 _CLONE_SERIALS = {"A50285BI", "00000000", "A9007ZSO", "A600CVYX"}
 
@@ -75,8 +85,80 @@ def _port_dir(port: str, sysfs: str = "/sys") -> tuple[str, str]:
     return tty, os.path.realpath(link)
 
 
+def is_windows() -> bool:
+    return sys.platform == "win32"
+
+
+def find_comport(port: str):
+    """pyserial's ListPortInfo for ``port`` (COM21, com21, /dev/ttyUSB0 ...), or None."""
+    try:
+        from serial.tools import list_ports as lp
+        ports = list(lp.comports())
+    except Exception:
+        return None
+    want = port.upper()
+    try:
+        real = os.path.realpath(port)
+    except OSError:
+        real = port
+    for p in ports:
+        if str(p.device).upper() == want or p.device == real:
+            return p
+    return None
+
+
+def read_registry_latency_ms(port: str, vid: int = FTDI_VID, pid: int | None = None,
+                             serial: str = "") -> int | None:
+    """The latency timer the Windows FTDI driver uses for ``port``, or None.
+
+    Looks through the FTDIBUS keys (HKLM, Enum/FTDIBUS/VID_xxxx+PID_xxxx+<serial>/0000/Device
+    Parameters) for the entry whose PortName is ``port`` (the serial number is
+    the fallback match). Read-only: the registry is never written.
+    """
+    try:
+        import winreg  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    prefix = f"VID_{vid:04X}+PID_{pid:04X}+" if pid is not None else f"VID_{vid:04X}+"
+    by_serial: int | None = None
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, FTDIBUS_KEY, 0, winreg.KEY_READ) as root:
+            i = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(root, i)
+                except OSError:
+                    break
+                i += 1
+                if not name.upper().startswith(prefix):
+                    continue
+                try:
+                    with winreg.OpenKey(root, name + r"\0000\Device Parameters", 0,
+                                        winreg.KEY_READ) as params:
+                        value = int(winreg.QueryValueEx(params, "LatencyTimer")[0])
+                        try:
+                            port_name = str(winreg.QueryValueEx(params, "PortName")[0])
+                        except OSError:
+                            port_name = ""
+                except (OSError, ValueError, TypeError):
+                    continue
+                if port_name and port_name.upper() == port.upper():
+                    return value
+                rest = name[len(prefix):].upper() if pid is not None else ""
+                if serial and rest in (serial.upper(), serial.upper() + "A"):
+                    by_serial = value
+    except OSError:
+        return None
+    return by_serial
+
+
 def read_latency_ms(port: str, sysfs: str = "/sys") -> int | None:
     """The FTDI latency timer in ms, or None if this port has none."""
+    if is_windows():
+        p = find_comport(port)
+        if p is None or p.vid != FTDI_VID:
+            return None
+        return read_registry_latency_ms(str(p.device), p.vid, p.pid, p.serial_number or "")
     _, directory = _port_dir(port, sysfs)
     text = _read(os.path.join(directory, "latency_timer")) if directory else ""
     return int(text) if text.isdigit() else None
@@ -107,6 +189,8 @@ def detect(port: str, sysfs: str = "/sys") -> AdapterInfo:
         info.kind, info.verdict = "simulator", "not-ftdi"
         info.notes.append("built-in simulator, no hardware involved")
         return info
+    if is_windows():
+        return _detect_listports(info)
     info.real_port = os.path.realpath(port)
     if info.real_port.startswith("/dev/pts/"):
         info.kind, info.verdict = "pty", "not-ftdi"
@@ -117,6 +201,8 @@ def detect(port: str, sysfs: str = "/sys") -> AdapterInfo:
         return info
     info.tty, directory = _port_dir(port, sysfs)
     if not directory:
+        if find_comport(port) is not None:      # no sysfs (macOS): ask pyserial
+            return _detect_listports(info)
         info.notes.append("no sysfs entry for this port; cannot identify the adapter")
         return info
     info.kind = "usb-serial"
@@ -142,6 +228,31 @@ def detect(port: str, sysfs: str = "/sys") -> AdapterInfo:
     return info
 
 
+def _detect_listports(info: AdapterInfo) -> AdapterInfo:
+    """Identify the adapter from pyserial's port list (no sysfs: Windows, macOS)."""
+    p = find_comport(info.port)
+    if p is None:
+        info.notes.append(f"{info.port} is not among the serial ports this computer lists: "
+                          "cable not plugged in, or no driver installed"
+                          + (" (look under Ports (COM & LPT) in Device Manager)"
+                             if is_windows() else ""))
+        return info
+    info.real_port = info.tty = str(p.device)
+    if p.vid is None:
+        info.notes.append(f"{p.device} is not a USB serial port ({p.description or '?'})")
+        return info
+    info.kind = "usb-serial"
+    info.vid, info.pid = p.vid, p.pid
+    info.manufacturer = p.manufacturer or ""
+    info.product = p.product or p.description or ""
+    info.serial = p.serial_number or ""
+    if p.vid == FTDI_VID:
+        info.driver = "FTDI (Windows)" if is_windows() else ""
+        info.latency_ms = read_latency_ms(info.port)
+    _judge(info)
+    return info
+
+
 def _judge(info: AdapterInfo) -> None:
     notes = info.notes
     if info.vid != FTDI_VID:
@@ -153,7 +264,9 @@ def _judge(info: AdapterInfo) -> None:
                      "there is no latency timer to tune.")
         return
     info.is_ftdi = True
-    info.chip = _FTDI_CHIPS.get(info.bcd_device or 0, "FTDI (unknown type)")
+    info.chip = (_FTDI_CHIPS.get(info.bcd_device or 0, "FTDI (unknown type)")
+                 if info.bcd_device is not None
+                 else _FTDI_PIDS.get(info.pid or 0, "FTDI (unknown type)"))
     suspicious: list[str] = []
     if info.pid == 0x0000:
         suspicious.append("product id 0000: a counterfeit that an old Windows FTDI driver "
@@ -165,18 +278,35 @@ def _judge(info: AdapterInfo) -> None:
         suspicious.append("no serial number; genuine FT232R chips carry one")
     if info.manufacturer and info.manufacturer.upper() != "FTDI":
         suspicious.append(f"manufacturer string is {info.manufacturer!r}, not 'FTDI'")
-    if info.driver and info.driver != "ftdi_sio":
+    if info.driver and info.driver != "ftdi_sio" and not is_windows():
         notes.append(f"bound to driver {info.driver!r}, expected ftdi_sio")
+    win = is_windows()
     if suspicious:
         info.verdict = "clone-suspected"
         notes.extend(suspicious)
-        notes.append("Clones are fine on Linux: ftdi_sio treats them like the real chip. "
-                     "Some clones are sloppy at non-standard baud rates such as 10400 "
-                     "(ISO 9141-2); if the ISO init fails with a clone, suspect that.")
+        if win:
+            notes.append("FTDI's Windows driver can refuse counterfeit chips (garbage data, "
+                         "or product id set to 0000). If the cable misbehaves, suspect that. "
+                         "Some clones are also sloppy at 10400 baud (ISO 9141-2).")
+        else:
+            notes.append("Clones are fine on Linux: ftdi_sio treats them like the real chip. "
+                         "Some clones are sloppy at non-standard baud rates such as 10400 "
+                         "(ISO 9141-2); if the ISO init fails with a clone, suspect that.")
     else:
         info.verdict = "genuine-looking"
         notes.append("Descriptors look like a genuine FTDI chip. Good clones copy them, "
-                     "so this is not proof; it does not matter on Linux.")
+                     "so this is not proof" + ("." if win else "; it does not matter on Linux."))
+    if win:
+        if info.latency_ms is None:
+            notes.append("could not read the latency timer from the registry; if it is the "
+                         f"default 16 ms, set it to 1: {WINDOWS_LATENCY_HINT}.")
+        elif info.latency_ms > 1:
+            notes.append(f"latency timer is {info.latency_ms} ms: every request waits up to "
+                         "that long for nothing. hondalog cannot change it on Windows; set "
+                         f"it once: {WINDOWS_LATENCY_HINT}.")
+        else:
+            notes.append("latency timer is 1 ms (best).")
+        return
     if info.latency_ms is None:
         notes.append("no latency_timer in sysfs (driver not ftdi_sio?)")
     elif info.latency_ms > 1:

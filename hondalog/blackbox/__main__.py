@@ -8,8 +8,19 @@ import time
 from pathlib import Path
 
 
-def _connect(port: str):
+def _default_port() -> str:
+    """/dev/hondalog-bb if present; else the first real port found (COMn on Windows)."""
+    import os
+    from .reader import UDEV_SYMLINK, list_ports
+    if os.path.exists(UDEV_SYMLINK) or sys.platform != "win32":
+        return UDEV_SYMLINK
+    real = [dev for dev, _ in list_ports() if not dev.startswith("bbsim")]
+    return real[0] if real else UDEV_SYMLINK
+
+
+def _connect(port: str | None):
     from .reader import BlackboxReader
+    port = port or _default_port()
     reader = BlackboxReader(port)
     reader.start()
     reader.ready.wait(4)
@@ -133,7 +144,8 @@ def cmd_cal(args) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="hondalog-bb", description="hondalog black box tools")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    port = dict(default="/dev/hondalog-bb", help="serial port, or bbsim: (default /dev/hondalog-bb)")
+    port = dict(default=None, help="serial port, or bbsim: (default /dev/hondalog-bb; on "
+                                   "Windows the black box's COM port)")
 
     p = sub.add_parser("info", help="show a capture: events, order, verdict")
     p.add_argument("files", nargs="+")
