@@ -213,6 +213,9 @@ class Shell(QMainWindow):
                 menu.addAction(part).setEnabled(False)      # rates per class, wire load, errors
             menu.addSeparator()
         if s.connected:
+            if getattr(s.ecu, "handheld_map_differs", lambda: False)():
+                menu.addAction("Send my map to the handheld (for relay)",
+                               lambda: self.say(s.ecu.push_handheld_map()))
             menu.addAction(f"Disconnect {s.port}", s.disconnect)
         else:
             last = str(self.settings.value("port/last", ""))

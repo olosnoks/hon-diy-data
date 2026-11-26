@@ -92,18 +92,23 @@ class LinkSource(be.PollerSource):
     own rate (fast / medium / slow) and carries its own age.
     """
 
-    def __init__(self, load_map=None, out_dir=None, handheld: str | None = None):
+    def __init__(self, load_map=None, out_dir=None, handheld: str | None = None, relay: str = "on"):
         super().__init__(load_map)
         self.out_dir = out_dir
+        #: relay the laptop's ECU reads to that handheld: "on" (when it can take them), "off", "force"
+        self.relay = relay
         #: the handheld next to a laptop cable: "auto" (default; HONDALOG_HANDHELD overrides), "off", a port
         self.handheld = handheld or os.environ.get("HONDALOG_HANDHELD") or "auto"
-        self.live = LiveSession(self.amap, out_dir=out_dir, handheld=self.handheld)
+        self.live = LiveSession(self.amap, out_dir=out_dir, handheld=self.handheld, **self._relay_opts())
         self.frames: collections.deque = collections.deque(maxlen=4000)   # for PipelineAlarms
         self.listeners: list = []           # objects with on_connect(source) / on_disconnect()
         self.first_contact_report = None
         self._fc_thread: threading.Thread | None = None
         self._fc_progress = ""
         self._notice_said = ""
+
+    def _relay_opts(self) -> dict:
+        return {"relay": self.relay != "off", "relay_force": self.relay == "force"}
 
     # -- specs --
 
@@ -153,8 +158,14 @@ class LinkSource(be.PollerSource):
 
     def take_notice(self) -> str:
         """A message for the status line, once: the handheld's map is not this one, ..."""
+        if self._push_result:
+            text, self._push_result = self._push_result, ""
+            return text
         p = self.poller
         text = getattr(p, "warning", "") if p is not None else ""
+        relay = self.live.relay if p is not None and not self.is_cyd else None
+        if relay is not None and relay.status:
+            text = relay.status.removeprefix("handheld: ").removeprefix("handheld ")
         if not text or text == self._notice_said:
             return ""
         self._notice_said = text
@@ -164,7 +175,7 @@ class LinkSource(be.PollerSource):
         """Read the map file again (after an edit or a verified mark)."""
         self.amap = self._load_map()
         if self.poller is None:
-            self.live = LiveSession(self.amap, out_dir=self.out_dir, handheld=self.handheld)
+            self.live = LiveSession(self.amap, out_dir=self.out_dir, handheld=self.handheld, **self._relay_opts())
         else:                               # connected: new labels and marks now, decoding on reconnect
             self.live.amap = self.amap
         if self.bus is not None:
@@ -178,7 +189,7 @@ class LinkSource(be.PollerSource):
         if self.poller is not None or not port:
             return
         self.amap = self._load_map()
-        self.live = LiveSession(self.amap, out_dir=self.out_dir, handheld=self.handheld)
+        self.live = LiveSession(self.amap, out_dir=self.out_dir, handheld=self.handheld, **self._relay_opts())
         self.live.on_read = self._on_read
         self.live.on_frame = self._on_frame
         self.live.on_gps = self._on_gps
@@ -232,10 +243,28 @@ class LinkSource(be.PollerSource):
         if p is not None and getattr(p, "source", "") == "cyd":
             return p.link_text()            # the handheld's link: frames, losses, its SD, the map
         text = self._ecu_link_text()
-        companion = self.live.handheld if p is not None else None
-        if companion is not None and companion.hello is not None:
-            text = " · ".join(t for t in (text, companion.status_text()) if t)
+        if p is not None:
+            text = " · ".join(t for t in (text, self.live.handheld_text()) if t)
         return text
+
+    def handheld_map_differs(self) -> bool:
+        """The handheld next to the laptop's cable runs another map: nothing is relayed until it gets this one."""
+        from ..handheld.relay import MAP_DIFFERS
+        relay = self.live.relay if self.poller is not None else None
+        return relay is not None and relay.status == MAP_DIFFERS
+
+    def push_handheld_map(self) -> str:
+        """The connection menu's "Send map to handheld": hondalog-handheld push-map from the app."""
+        if self.poller is None or self.live.handheld is None:
+            return "No handheld next to the laptop's cable"
+        live = self.live
+
+        def work() -> None:                 # seconds of serial traffic: not on the UI thread
+            self._push_result = "Handheld: " + live.push_handheld_map()
+        threading.Thread(target=work, name="hondalog-push-map", daemon=True).start()
+        return f"Sending map #{self.amap.version_hash} to the handheld\u2026"
+
+    _push_result = ""
 
     def _ecu_link_text(self) -> str:
         p = self.poller

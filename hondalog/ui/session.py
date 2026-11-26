@@ -245,7 +245,7 @@ class Session:
 
 def build_session(demo: bool = False, log_dir=None, writable_tables: bool = False,
                   demo_clock=None, rom=None, definition=None, blackbox_port=None,
-                  handheld: str | None = None) -> Session:
+                  handheld: str | None = None, relay: str = "on") -> Session:
     """Wire one object per adapter role.
 
     Real use binds the tracks' backends (``wired.py``): the W1 link through
@@ -259,6 +259,7 @@ def build_session(demo: bool = False, log_dir=None, writable_tables: bool = Fals
 
     ``handheld``: the handheld on USB next to a laptop cable ("auto", "off" or
     a port; None = $HONDALOG_HANDHELD or "auto"): its GPS beats the laptop's.
+    ``relay``: "on" sends the laptop's ECU reads to it when it can take them, "off", "force".
     """
     from . import backends as be
 
@@ -276,7 +277,7 @@ def build_session(demo: bool = False, log_dir=None, writable_tables: bool = Fals
 
     from . import wired
 
-    ecu = wired.LinkSource(out_dir=log_dir, handheld=handheld)
+    ecu = wired.LinkSource(out_dir=log_dir, handheld=handheld, relay=relay)
     tables = wired.RomTableModel(be.DemoTableModel(writable=writable_tables))
     if rom:
         tables.open(rom, definition)

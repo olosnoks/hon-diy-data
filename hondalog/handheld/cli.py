@@ -223,15 +223,23 @@ def _sync(args: argparse.Namespace) -> int:
     return 1 if any(r.status == "failed" for r in report.imported) else 0
 
 
-def _push_map(args: argparse.Namespace) -> int:
+def push_map_to(cyd, amap) -> int:
+    """Send ``amap`` as HANDHELD.MAP through an open ``CydClient``; returns its size. The
+    handheld uses it from its next power-up. (The app's "push map" for relaying uses this too.)"""
     from . import serial_proto as P
     from .mapfile import build_map
-    amap = _load_map(args)
     data = build_map(amap)
+    cyd.push(P.F_MAP, data)
+    return len(data)
+
+
+def _push_map(args: argparse.Namespace) -> int:
+    from . import serial_proto as P
+    amap = _load_map(args)
     cyd = _client(args)
     try:
-        cyd.push(P.F_MAP, data)
-        print(f"HANDHELD.MAP: map #{amap.version_hash} sent ({len(data)} bytes); the handheld uses it from its "
+        size = push_map_to(cyd, amap)
+        print(f"HANDHELD.MAP: map #{amap.version_hash} sent ({size} bytes); the handheld uses it from its "
               "next power-up")
         if args.cfg:
             skipped = cyd.push(P.F_CFG, Path(args.cfg).read_bytes())

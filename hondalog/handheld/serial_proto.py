@@ -30,6 +30,8 @@ BAUDS = (921600, 460800, 115200)        # tried in this order when the port stay
 (SC_GET_HELLO, SC_TIME_REQ, SC_TIME_SET, SC_MARK, SC_ACK_ALARM, SC_DRIVE, SC_LIST_FILES, SC_READ_FILE,
  SC_PUT_BEGIN, SC_PUT_DATA, SC_PUT_END, SC_DTC, SC_MAPUP_OPEN, SC_MAPUP_WRITE, SC_MAPUP_STATUS,
  SC_MAPUP_COMMIT) = range(0x60, 0x70)
+# laptop -> handheld: the laptop's own ECU reads relayed (two-way, HELLO capability CAP_RELAY)
+SR_RELAY_READ, SR_RELAY_ISO, SR_RELAY_TICK, SR_RELAY_LINK = range(0x50, 0x54)
 FRAME_NAMES = {SF_HELLO: "hello", SF_READ: "read", SF_TICK: "tick", SF_LINK: "link", SF_GPS: "gps",
                SF_EVENT: "event", SF_STATS: "stats", SF_LOG: "log", SF_ISO: "iso", SF_TIME_RSP: "time_rsp",
                SF_ACK: "ack", SF_FILE_INFO: "file_info", SF_FILE_DATA: "file_data", SF_MAPUP: "mapup"}
@@ -37,6 +39,7 @@ FRAME_NAMES = {SF_HELLO: "hello", SF_READ: "read", SF_TICK: "tick", SF_LINK: "li
 VARIANT_DEFAULT, VARIANT_GPS_P1 = 0, 1
 VARIANTS = {VARIANT_DEFAULT: "default", VARIANT_GPS_P1: "gps-p1"}
 CAP_RX, CAP_FILES, CAP_PUT, CAP_LOG, CAP_MAPUP, CAP_HL = 1, 2, 4, 8, 0x10, 0x20      # CAP_HL: the HL text session
+CAP_RELAY = 0x40                        # RELAY_* frames are understood (HH_SER_CAP_RELAY)
 F_DRIVE, F_CAPTURE, F_MAP, F_CFG = 1, 2, 3, 4
 FILE_KINDS = {F_DRIVE: "drive", F_CAPTURE: "capture", F_MAP: "map", F_CFG: "cfg"}
 OK, IGNORED, E_ARG, E_IO, E_CRC, E_STATE, E_REFUSED, E_BUSY, E_UNSUPPORTED, E_OFFSET = 0, 1, -1, -2, -3, -4, -5, -6, -7, -8
@@ -44,9 +47,9 @@ STATUS_TEXT = {OK: "ok", IGNORED: "ignored", E_ARG: "bad argument", E_IO: "card 
                E_STATE: "not expected now", E_REFUSED: "refused: the handheld could not load it",
                E_BUSY: "busy", E_UNSUPPORTED: "not supported (no card, or an older firmware)",
                E_OFFSET: "wrong offset"}
-LINK_OFF, LINK_CONNECTING, LINK_OK, LINK_ISO_ONLY, LINK_ERROR = range(5)
+LINK_OFF, LINK_CONNECTING, LINK_OK, LINK_ISO_ONLY, LINK_ERROR, LINK_RELAY = range(6)
 LINK_NAMES = {LINK_OFF: "no reply from the ECU", LINK_CONNECTING: "connecting", LINK_OK: "ok",
-              LINK_ISO_ONLY: "OBD2 only", LINK_ERROR: "K-line cable not found"}
+              LINK_ISO_ONLY: "OBD2 only", LINK_ERROR: "K-line cable not found", LINK_RELAY: "via laptop"}
 # where the handheld's wall clock comes from (STATS time_source)
 TS_NONE, TS_NMEA, TS_PPS, TS_HOST = range(4)
 TS_NAMES = {TS_NONE: "none", TS_NMEA: "GPS sentences", TS_PPS: "GPS PPS", TS_HOST: "set by the laptop"}
@@ -77,10 +80,16 @@ MAPUP_OPEN = struct.Struct("<BBxxII")                           # 12, then the n
 MAPUP_WRITE = struct.Struct("<II")                              # 8, then the data: offset, crc32 of the data
 MAPUP_COMMIT = struct.Struct("<B3x")                            # 4
 MAPUP_INFO = struct.Struct("<BxxxIII16s")                       # 32: state, got, size, crc32, name (answer to STATUS)
+RELAY_READ = struct.Struct("<QBBH")                             # 12, then len raw ECU bytes
+RELAY_ISO = struct.Struct("<QBBBB")                             # 12, then len bytes
+RELAY_TICK = struct.Struct("<QHHI")                             # 16
+RELAY_LINK = struct.Struct("<QBBBB")                            # 12, then up to 10 bytes ECU id
+RELAY_LEN_MAX = 64                                              # longer reads are refused by the handheld
 MU_NONE, MU_OPEN, MU_PAUSED = 0, 1, 2
 assert HELLO.size == 96 and STATS.size == 96 and READ.size == 12 and TICK.size == 16 and LINK.size == 12
 assert ACK.size == 8 and FILE_INFO.size == 12 and FILE_DATA.size == 16 and LIST.size == 8
 assert READ_FILE.size == 12 and PUT_BEGIN.size == 12 and TIME_RSP.size == 24
+assert RELAY_READ.size == 12 and RELAY_ISO.size == 12 and RELAY_TICK.size == 16 and RELAY_LINK.size == 12
 assert MAPUP_OPEN.size == 12 and MAPUP_WRITE.size == 8 and MAPUP_COMMIT.size == 4 and MAPUP_INFO.size == 32
 
 
@@ -135,6 +144,35 @@ class Hello:
                           self.ecu_id[:10].ljust(10, b"\0"), min(len(self.ecu_id), 10), self.link_state,
                           self.backend, self.link_mode, self.n_ch, self.flags, self.boot_no, self.baud, self.t_us,
                           self.unix_us, self.hello_ms, self.max_payload)
+
+
+def _u16(x: float) -> int:
+    return max(0, min(0xFFFF, int(round(x))))
+
+
+def _u64(x: float) -> int:
+    return max(0, int(x)) & 0xFFFFFFFFFFFFFFFF
+
+
+def pack_relay_read(host_us: int, addr: int, data: bytes, latency_us: float) -> bytes:
+    """RELAY_READ: one Honda block read on the laptop (``host_us`` when the request went out)."""
+    return RELAY_READ.pack(_u64(host_us), addr & 0xFF, len(data), _u16(latency_us)) + bytes(data)
+
+
+def pack_relay_iso(host_us: int, pid: int, data: bytes, mode: int = 0x41, flags: int = 0) -> bytes:
+    """RELAY_ISO: one OBD2 reply (Mode 01 = 0x41) in OBD2-only mode."""
+    return RELAY_ISO.pack(_u64(host_us), mode & 0xFF, pid & 0xFF, len(data), flags & 0xFF) + bytes(data)
+
+
+def pack_relay_tick(host_us: int, latency_us: float, hz: float, n: int) -> bytes:
+    """RELAY_TICK: one laptop sample done; ``hz`` is the sample rate (sent x 100)."""
+    return RELAY_TICK.pack(_u64(host_us), _u16(latency_us), _u16(hz * 100), n & 0xFFFFFFFF)
+
+
+def pack_relay_link(host_us: int, state: int, up: bool, iso: bool, ecu_id: bytes = b"") -> bytes:
+    """RELAY_LINK: the laptop's link state (LINK_OFF / CONNECTING / OK / ISO_ONLY)."""
+    ecu = bytes(ecu_id or b"")[:10]
+    return RELAY_LINK.pack(_u64(host_us), state & 0xFF, 1 if up else 0, 1 if iso else 0, len(ecu)) + ecu
 
 
 def hash12(text: str) -> bytes:
@@ -197,4 +235,4 @@ def status_text(status: int) -> str:
 
 
 __all__ = ["Deframer", "cobs_decode", "cobs_encode", "crc16", "frame_encode"] + [n for n in dir() if n.isupper()] + [
-    "Hello", "hash12", "mapup_name_ok", "parse_hello", "parse_stats", "pack_stats", "status_text", "time_text"]
+    "Hello", "hash12", "mapup_name_ok", "pack_relay_iso", "pack_relay_link", "pack_relay_read", "pack_relay_tick", "parse_hello", "parse_stats", "pack_stats", "status_text", "time_text"]

@@ -187,6 +187,9 @@ def test_app_shows_handheld_gps_in_the_info_bar(tmp_path, monkeypatch):
         assert wait(ready, 8)
         assert abs(s.bus.channel("gps_lat").value - PEARL[0]) < 0.01
         assert "handheld HH-1373A0 fw 0.1.0" in s.ecu.link_text()
+        assert "handheld: firmware too old for relay" in s.ecu.link_text()     # fw 0.1.0 has no capability 64
+        assert s.ecu.take_notice() == "Handheld: firmware too old for relay"
+        assert not s.ecu.handheld_map_differs()
         assert src.status().detail == "GPS: handheld (9 sats)"
     finally:
         s.close()

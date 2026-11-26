@@ -172,6 +172,10 @@ class CydSim(HlMixin):
         self._hl_init(logs, sd_kbps)
         self.tx_frames = self.tx_bytes = self.rx_frames = 0
         self.rx_ignored = 0                 # bytes the laptop wrote to a tx-only handheld
+        #: RELAY_* frames the laptop sent (type, parsed fields), and the malformed ones (STATS rx_bad)
+        self.relayed: list[tuple[int, tuple]] = []
+        self.relay_bad = 0
+        self.relay_last: float | None = None
         self._last_rx: float | None = None
         self._damage = damage
         self._rng = random.Random(seed)
@@ -261,7 +265,7 @@ class CydSim(HlMixin):
         return data
 
     def hello(self) -> P.Hello:
-        caps = P.CAP_LOG if self.tx_only else P.CAP_RX | P.CAP_LOG | P.CAP_HL | (P.CAP_FILES | P.CAP_PUT | P.CAP_MAPUP if self.sd else 0)
+        caps = P.CAP_LOG if self.tx_only else P.CAP_RX | P.CAP_LOG | P.CAP_HL | P.CAP_RELAY | (P.CAP_FILES | P.CAP_PUT | P.CAP_MAPUP if self.sd else 0)
         unix = self.unix_us(self.now)
         state = P.LINK_OK if self._up else P.LINK_OFF if self._down_since is not None else P.LINK_CONNECTING
         return P.Hello(P.REV, P.VARIANT_GPS_P1 if self.tx_only else P.VARIANT_DEFAULT, caps, FW, self.device,
@@ -424,8 +428,31 @@ class CydSim(HlMixin):
     def _busy(self, kind: int, no: int) -> bool:
         return kind == P.F_DRIVE and self._drive is not None and self._drive.file_no == no
 
+    def _relay(self, ftype: int, p: bytes) -> None:
+        """A RELAY_* frame: checked as hh_relay.c checks it and kept (the sim's own ECU model goes on)."""
+        if ftype in (P.SR_RELAY_READ, P.SR_RELAY_ISO) and len(p) >= 12:
+            head = (P.RELAY_READ if ftype == P.SR_RELAY_READ else P.RELAY_ISO).unpack(p[:12])
+            n = head[2]
+            data = p[12:12 + n]
+            if len(data) != n or n > P.RELAY_LEN_MAX or (ftype == P.SR_RELAY_READ and head[1] + n > 0x100):
+                self.relay_bad += 1
+                return
+            fields = (*head, data)
+        elif ftype == P.SR_RELAY_TICK and len(p) >= P.RELAY_TICK.size:
+            fields = P.RELAY_TICK.unpack(p[:P.RELAY_TICK.size])
+        elif ftype == P.SR_RELAY_LINK and len(p) >= P.RELAY_LINK.size:
+            head = P.RELAY_LINK.unpack(p[:P.RELAY_LINK.size])
+            fields = (*head, p[12:12 + min(head[4], 10)])
+        else:
+            self.relay_bad += 1
+            return
+        self.relay_last = self.now
+        self.relayed.append((ftype, fields))
+
     def _command(self, ftype: int, seq: int, p: bytes) -> None:
-        if ftype == P.SC_GET_HELLO:
+        if P.SR_RELAY_READ <= ftype <= P.SR_RELAY_LINK:
+            self._relay(ftype, p)
+        elif ftype == P.SC_GET_HELLO:
             self._send(P.SF_HELLO, self.hello().pack())
         elif ftype == P.SC_TIME_REQ and len(p) >= 8:
             self._send(P.SF_TIME_RSP, P.TIME_RSP.pack(struct.unpack("<q", p[:8])[0], _us(self.now), _us(self.now)))

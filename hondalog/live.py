@@ -48,6 +48,7 @@ from .mathch import MathChannel, MathEngine
 if TYPE_CHECKING:
     from .blackbox.reader import BBEvent, BlackboxReader
     from .handheld.companion import HandheldCompanion
+    from .handheld.relay import Relay
     from .logger import Recorder
     from .poller import BlockRead, Poller, Sample
     from .triggers import Fired
@@ -135,7 +136,8 @@ class LiveSession:
     """
 
     def __init__(self, amap: AddressMap, out_dir: str | Path | None = None,
-                 max_frames: int = 2000, handheld: Any = "off", **recorder_opts: Any):
+                 max_frames: int = 2000, handheld: Any = "off", relay: bool = True,
+                 relay_force: bool = False, **recorder_opts: Any):
         self.amap = amap
         self.pipeline = LivePipeline(amap)
         self.out_dir = Path(out_dir) if out_dir else None
@@ -146,6 +148,17 @@ class LiveSession:
         #: "auto", "off" or a port; opened by ``connect`` for a non-``cyd:`` port
         self.handheld_spec = handheld
         self.handheld: HandheldCompanion | None = None
+        #: relay the laptop's ECU reads to that handheld (``hondalog.handheld.relay``); ``relay_force``
+        #: skips its capability and map checks (testing)
+        self.relay_enabled = relay
+        self.relay_force = relay_force
+        self.relay: Relay | None = None
+        #: extra listeners on the poller thread, called after the session's own work
+        #: (``add_listener``); the poller's own callbacks are chained, never dropped
+        self.block_listeners: list[Callable[[BlockRead], None]] = []
+        self.pid_listeners: list[Callable[[float, int, bytes], None]] = []
+        self.sample_listeners: list[Callable[[Sample], None]] = []
+        self._chained: dict[str, Callable | None] = {}
         self.recorder: Recorder | None = None
         self.frames: collections.deque[LiveFrame] = collections.deque(maxlen=max_frames)
         self.on_frame: Callable[[LiveFrame], None] | None = None
@@ -206,15 +219,92 @@ class LiveSession:
         companion = HandheldCompanion(spec, self.amap, exclude=exclude, t0=self.t0,
                                       on_fix=self._on_handheld_gps)
         self.handheld = companion
+        if self.relay_enabled:
+            self._start_relay(companion)
         if start:
             companion.start()
         return companion
 
     def close_handheld(self) -> None:
+        self._stop_relay()
         companion, self.handheld = self.handheld, None
         if companion is not None:
             companion.on_fix = None
             companion.stop()
+
+    def add_listener(self, on_block: Callable[[BlockRead], None] | None = None,
+                     on_pid: Callable[[float, int, bytes], None] | None = None,
+                     on_sample: Callable[[Sample], None] | None = None) -> Callable[[], None]:
+        """Listen to the poller next to the session (on the poller thread: be quick).
+        Returns a function that removes the listeners again."""
+        added = [(lst, fn) for lst, fn in ((self.block_listeners, on_block), (self.pid_listeners, on_pid),
+                                          (self.sample_listeners, on_sample)) if fn is not None]
+        for lst, fn in added:
+            lst.append(fn)
+
+        def remove() -> None:
+            for lst, fn in added:
+                if fn in lst:
+                    lst.remove(fn)
+        return remove
+
+    def _start_relay(self, companion: HandheldCompanion) -> None:
+        from .handheld.relay import Relay
+        if self.poller is None:
+            return
+        relay = Relay(companion, self.poller, self.amap, force=self.relay_force)
+        self._relay_remove = self.add_listener(relay.on_block, relay.on_pid, relay.on_sample)
+        self.relay = relay.start()
+
+    def _stop_relay(self) -> None:
+        relay, self.relay = self.relay, None
+        if relay is not None:
+            self._relay_remove()
+            relay.stop()
+
+    _relay_remove: Callable[[], None] = staticmethod(lambda: None)
+
+    def handheld_text(self) -> str:
+        """For the info bar: which handheld, and the relay's state ("handheld: firmware too old for relay")."""
+        companion = self.handheld
+        if companion is None or companion.hello is None:
+            return ""
+        relay = self.relay
+        parts = [companion.status_text()]
+        if relay is not None and relay.text():
+            parts.append(relay.text())
+        return " · ".join(parts)
+
+    def push_handheld_map(self, client_factory: Callable[[Any], Any] | None = None) -> str:
+        """Send the laptop's map to the handheld (``hondalog-handheld push-map``'s code), so it
+        can be relayed to. The handheld's link is closed for it and opened again after; the
+        handheld uses the map from its next power-up. Returns what happened, for the status line."""
+        from .handheld.cli import push_map_to
+        from .handheld.serial_link import CydClient
+        companion = self.handheld
+        if companion is None:
+            return "no handheld next to the laptop's cable"
+        # a port object given to open_handheld is used again; a named port by its name (auto: the one found)
+        port = companion.spec if not isinstance(companion.spec, str) else companion.port_name
+        if not isinstance(port, str) or port in ("", "cyd:"):
+            port = companion.port if companion.port is not None else port
+        spec = companion.spec
+        exclude = companion.exclude
+        self.close_handheld()
+        try:
+            client = (client_factory or CydClient)(port)
+            try:
+                client.open()
+                size = push_map_to(client, self.amap)
+            finally:
+                client.close()
+            text = (f"map #{self.amap.version_hash} sent to the handheld ({size} bytes): restart the handheld "
+                    "to use it")
+        except Exception as exc:
+            text = f"push-map to the handheld failed: {exc}"
+        if self.poller is not None:
+            self.open_handheld(spec, exclude=exclude)
+        return text
 
     def attach(self, poller: Poller) -> None:
         """Take over a poller's two callbacks. Call before ``poller.start()``
@@ -223,10 +313,14 @@ class LiveSession:
             self.pipeline.reset()
             self.frames.clear()
         self.poller = poller
-        poller.on_block = self._on_block
-        poller.on_sample = self._on_sample
-        if hasattr(poller, "on_pid"):            # OBD2-only mode: raw PID replies
-            poller.on_pid = self._on_pid
+        # whatever the poller already called is kept and called after the session's work
+        self._chained = {}
+        for name, mine in (("on_block", self._on_block), ("on_sample", self._on_sample), ("on_pid", self._on_pid)):
+            if name == "on_pid" and not hasattr(poller, "on_pid"):
+                continue                        # OBD2-only mode: raw PID replies (a Poller has it)
+            before = getattr(poller, name, None)
+            self._chained[name] = before if before is not None and getattr(before, "__self__", None) is not self else None
+            setattr(poller, name, mine)
         if hasattr(poller, "on_event"):          # the handheld: its GPS and its own events too
             poller.on_gps = self._on_cyd_gps
             poller.on_event = self._on_cyd_event
@@ -367,6 +461,14 @@ class LiveSession:
 
     # ---- poller thread ----
 
+    def _notify(self, listeners: list[Callable[..., None]], chained: str, *args: Any) -> None:
+        before = self._chained.get(chained)
+        for fn in ([before] if before is not None else []) + listeners:
+            try:
+                fn(*args)
+            except Exception as exc:            # a listener's problem must not stop the session
+                self.last_error = f"{chained} listener: {exc!r}"
+
     def _on_block(self, read: BlockRead) -> None:
         recorder = self.recorder
         if recorder is not None:
@@ -374,11 +476,15 @@ class LiveSession:
             recorder.feed_read(read.t - read.latency_s, read.addr, read.data, read.latency_s)
         if self.on_read is not None:
             self.on_read(read)
+        if self.block_listeners or self._chained.get("on_block"):
+            self._notify(self.block_listeners, "on_block", read)
 
     def _on_pid(self, t: float, pid: int, data: bytes) -> None:
         recorder = self.recorder
         if recorder is not None:
             recorder.feed_pid(t, pid, data)
+        if self.pid_listeners or self._chained.get("on_pid"):
+            self._notify(self.pid_listeners, "on_pid", t, pid, data)
 
     def _on_sample(self, sample: Sample) -> None:
         with self._lock:
@@ -398,6 +504,8 @@ class LiveSession:
         self.frames.append(frame)
         if self.on_frame is not None:
             self.on_frame(frame)
+        if self.sample_listeners or self._chained.get("on_sample"):
+            self._notify(self.sample_listeners, "on_sample", sample)
 
     _math_columns: list[Any] | None = None
 

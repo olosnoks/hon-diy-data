@@ -23,6 +23,10 @@ def main(argv=None) -> int:
                     help="the handheld (CYD) on USB next to the laptop's own K-line cable: its GPS "
                          "beats the laptop's location. auto (default) finds a CH340 1a86:7523 "
                          "that is not the ECU's port")
+    ap.add_argument("--relay", choices=("on", "off", "force"), default="on",
+                    help="send the laptop's ECU reads to that handheld (its screen, alarms, stall "
+                         "rules and SD log): on (if its firmware takes them and its map is yours), "
+                         "off, force (skip those checks: testing)")
     ap.add_argument("--rom", metavar="BIN", help="ROM image to edit on the Tune screen")
     ap.add_argument("--definition", metavar="FILE",
                     help="ROM definition for --rom (.toml or TunerPro .xdf)")
@@ -55,7 +59,7 @@ def main(argv=None) -> int:
     signal.signal(signal.SIGINT, signal.SIG_DFL)      # Ctrl+C in the terminal quits
 
     session = build_session(demo=args.demo, rom=args.rom, definition=args.definition,
-                            blackbox_port=args.bb, handheld=args.handheld)
+                            blackbox_port=args.bb, handheld=args.handheld, relay=args.relay)
     problem = getattr(session.tables, "problem", "")
     if problem:
         print(f"hondalog: {problem}; showing the sample tables", file=sys.stderr)
