@@ -45,7 +45,7 @@ def test_iso_only_ecu_gets_live_values_through_obd2_pids():
         poller.stop()
     assert poller.mode == OBD2 and "5-baud" in poller.iso_link
     up = [s for s in poller.samples if s.link]
-    assert up and up[0].t > 6                                       # only after Honda stayed silent
+    assert up and up[0].t > 12                                       # only after Honda stayed silent
     last = up[-1]
     assert last.values["rpm"] == pytest.approx(model.rpm, abs=80)
     for name in ("map", "tps", "ect", "iat", "stft", "ltft", "o2", "ign", "vss"):
@@ -82,33 +82,33 @@ def test_fallback_can_be_switched_off():
 
 
 def test_stall_reads_zero_rpm_with_the_link_up():
-    clock, model, poller = rig(honda_protocol=False, stall_after_s=14.0, restart_after_s=None)
+    clock, model, poller = rig(honda_protocol=False, stall_after_s=22.0, restart_after_s=None)
     poller.start()
     try:
-        run_until(clock, 22)
+        run_until(clock, 30)
     finally:
         poller.stop()
     samples = list(poller.samples)
-    assert any(s.link and s.t < 14 and s.values["rpm"] > 500 for s in samples)
-    after = [s for s in samples if s.t > 17]
+    assert any(s.link and s.t < 22 and s.values["rpm"] > 500 for s in samples)
+    after = [s for s in samples if s.t > 25]
     assert after and all(s.link for s in after)                     # the ECU kept answering
     assert after[-1].values["rpm"] == 0
 
 
 def test_key_off_drops_the_session_and_key_on_brings_it_back():
-    clock, model, poller = rig(honda_protocol=False, stall_after_s=14.0, stall_mode="power",
+    clock, model, poller = rig(honda_protocol=False, stall_after_s=22.0, stall_mode="power",
                                restart_after_s=6.0)
     errors = []
     poller.on_sample = lambda s: errors.append(poller.last_error)
     poller.start()
     try:
-        run_until(clock, 45)
+        run_until(clock, 55)
     finally:
         poller.stop()
     samples = list(poller.samples)
-    before = [s for s in samples if s.link and s.t < 14]
-    down = [s for s in samples if not s.link and 14 < s.t < 20]
-    back = [s for s in samples if s.link and s.t > 20]
+    before = [s for s in samples if s.link and s.t < 22]
+    down = [s for s in samples if not s.link and 22 < s.t < 28]
+    back = [s for s in samples if s.link and s.t > 28]
     assert before and down and back                                 # up, lost, up again
     assert any("OBD2 session lost" in e for e in errors)
     assert back[-1].values["rpm"] > 0 and poller.mode == OBD2
@@ -119,7 +119,7 @@ def test_jobs_in_obd2_mode():
     clock, model, poller = rig(honda_protocol=False, dtcs=("P0135",))
     poller.start()
     try:
-        run_until(clock, 14)
+        run_until(clock, 20)
         assert poller.mode == OBD2
         inits = model.iso_inits
         codes = poller.obd2(lambda session: [d.code for d in session.read_dtcs()]).result(20)
@@ -140,7 +140,7 @@ def test_sim_iso_port():
 def test_recording_and_stall_capture_in_obd2_mode(tmp_path):
     clock = VirtualClock()
     amap = addressmap.load_default()
-    model = EcuModel(clock=clock.now, honda_protocol=False, rev_every_s=0, stall_after_s=16.0,
+    model = EcuModel(clock=clock.now, honda_protocol=False, rev_every_s=0, stall_after_s=22.0,
                      restart_after_s=None)
     session = LiveSession(amap, out_dir=tmp_path, sync_captures=True, fsync=False, pre_s=3, post_s=2)
     poller = Poller(LoopbackTransport(model, clock, byte_timing=True), amap, clock=clock)
@@ -148,7 +148,7 @@ def test_recording_and_stall_capture_in_obd2_mode(tmp_path):
     session.start_recording()
     poller.start()
     try:
-        run_until(clock, 24)
+        run_until(clock, 30)
     finally:
         recorder = session.recorder
         session.close()
@@ -161,7 +161,7 @@ def test_recording_and_stall_capture_in_obd2_mode(tmp_path):
         assert rpm.rate_hz > 3 and np.nanmax(rpm.v) > 500 and rpm.v[-1] == 0
         assert log.series("ect").units == "°C"
     event = recorder.events.get_nowait()
-    assert event.rule == "stall" and 16.0 <= event.t < 19.0
+    assert event.rule == "stall" and 22.0 <= event.t < 25.0
 
 
 def test_honda_ecu_keyed_off_is_probed_not_switched_to_obd2():
