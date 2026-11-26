@@ -162,3 +162,15 @@ def test_recording_and_stall_capture_in_obd2_mode(tmp_path):
         assert log.series("ect").units == "°C"
     event = recorder.events.get_nowait()
     assert event.rule == "stall" and 16.0 <= event.t < 19.0
+
+
+def test_honda_ecu_keyed_off_is_probed_not_switched_to_obd2():
+    clock, model, poller = rig(stall_after_s=5.0, stall_mode="power", restart_after_s=12.0)
+    poller.start()
+    try:
+        run_until(clock, 30)
+    finally:
+        poller.stop()
+    samples = list(poller.samples)
+    assert any(not s.link for s in samples) and samples[-1].link      # lost at key off, back at key on
+    assert model.iso_inits == 0 and poller.mode == HONDA

@@ -26,8 +26,10 @@ Recovery
 OBD2-only live mode
 -------------------
 Some ECUs answer standard OBD2 (ISO 9141-2) on the K-line but not Honda reads.
-When Honda reads have gone unanswered for ``_ISO_AFTER_S`` (and
-``iso_fallback`` is on), the thread tries the 5-baud ISO init. If the ECU
+When Honda reads have gone unanswered for ``_ISO_AFTER_S`` and have not
+worked once on this connection (and ``iso_fallback`` is on), the thread
+tries the 5-baud ISO init. An ECU that answered Honda reads and then went
+quiet is keyed off, and is only probed. If the ECU
 answers, ``mode`` becomes OBD2 and the thread polls the Mode 01 PIDs that
 are the same quantity as a map channel (``obd2.PID_CHANNEL``), RPM on every
 other request, and emits a Sample after each pair. It is slow (a few Samples
@@ -171,6 +173,8 @@ class Poller(threading.Thread):
         self._iso_i = 0
         self._iso_fails = 0
         self._honda_last_ok = self.clock.now()
+        #: Honda reads have worked on this connection: silence is key off, not an OBD2-only ECU
+        self._honda_seen = False
         self._next_iso_try = 0.0
 
     # -- plan --
@@ -347,6 +351,7 @@ class Poller(threading.Thread):
             raise
         self.reads += 1
         self._honda_last_ok = self.clock.now()
+        self._honda_seen = True
         return result
 
     # -- the hot loop: one block per call --
@@ -606,7 +611,7 @@ class Poller(threading.Thread):
     # -- OBD2-only live mode --
 
     def _iso_due(self) -> bool:
-        if not self.iso_fallback:
+        if not self.iso_fallback or self._honda_seen:
             return False
         now = self.clock.now()
         return (now >= self._quiet_until and now - self._honda_last_ok >= _ISO_AFTER_S
