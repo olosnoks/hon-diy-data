@@ -128,7 +128,10 @@ for t in "${TARGETS[@]}"; do
       # the UI on the PC: LVGL into memory, then the logic, contrast and layout checks
       log="$LOGS/$t-sim.log"
       [ $CLEAN -eq 1 ] && make -C "$SIM" clean >/dev/null 2>&1
-      if make -C "$SIM" ${LVGL:+LVGL_DIR="$LVGL"} lvgl test >"$log" 2>&1; then
+      # two make runs: the Makefile lists LVGL's sources when it starts, so a fresh
+      # clone made by 'make lvgl test' in one run is not seen and the link fails
+      if make -C "$SIM" ${LVGL:+LVGL_DIR="$LVGL"} lvgl >"$log" 2>&1 &&
+         make -C "$SIM" ${LVGL:+LVGL_DIR="$LVGL"} test >>"$log" 2>&1; then
         ok "simulator checks ($(grep -v '^make' "$log" | tail -1))"
       else
         bad "$t simulator checks" "$log"
