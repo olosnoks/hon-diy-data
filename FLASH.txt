@@ -1,0 +1,27 @@
+hondalog handheld firmware (esp32s3), Sunton ESP32-4827S043N (ESP32-S3 N16R8)
+source: /home/claude/hon-diy-data  obd2-live @ 8868999
+built:  2026-11-26T00:58Z with ESP-IDF v5.3.1, LVGL 9.2.2
+tests:  FAILED, see /home/claude/hon-diy-data/build-logs/ (image built anyway)
+flash:  mode dio, freq 80m, size 16MB
+
+Merged image (bootloader + partition table + app), written at 0x0. On Windows, esptool 5:
+
+  python -m esptool --chip esp32s3 --port COM22 --baud 460800 --before default-reset --after hard-reset write-flash --flash-mode keep --flash-freq keep --flash-size keep 0x0 hondalog-handheld-merged.bin
+
+or the laptop app's CLI (same thing):
+
+  hondalog-handheld flash --port COM22 hondalog-handheld-merged.bin
+
+Separate files instead (same result):
+
+  python -m esptool --chip esp32s3 --port COM22 --baud 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-freq 80m --flash-size 16MB 0x0 bootloader.bin 0x8000 partition-table.bin 0x10000 hondalog_handheld.bin
+
+esptool 4 spells it write_flash / --flash_mode / default_reset / hard_reset.
+If it does not connect: hold BOOT, tap RESET (or plug in), release BOOT, run it again;
+or try --baud 115200.
+
+SHA-256:
+  3a2fafc54670fa6b86bf89250f71983cefe380b623e8ce38d502420a1e79a811  bootloader.bin
+  022a36ebd999cc22b2b8fcfc32b8ff471173b9771f6c36e1d7d3eeb7b0e7ba78  hondalog-handheld-merged.bin
+  c126a2232be874f83d12430288d4b8e0e77847360ae2ff3484653ed197954402  hondalog_handheld.bin
+  73c0b5c3e5fcba3a151cc70c453c93dd5f4798899e7f2f8cca76da1f32ffc501  partition-table.bin
