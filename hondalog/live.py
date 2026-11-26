@@ -47,6 +47,7 @@ from .mathch import MathChannel, MathEngine
 
 if TYPE_CHECKING:
     from .blackbox.reader import BBEvent, BlackboxReader
+    from .handheld.companion import HandheldCompanion
     from .logger import Recorder
     from .poller import BlockRead, Poller, Sample
     from .triggers import Fired
@@ -134,13 +135,17 @@ class LiveSession:
     """
 
     def __init__(self, amap: AddressMap, out_dir: str | Path | None = None,
-                 max_frames: int = 2000, **recorder_opts: Any):
+                 max_frames: int = 2000, handheld: Any = "off", **recorder_opts: Any):
         self.amap = amap
         self.pipeline = LivePipeline(amap)
         self.out_dir = Path(out_dir) if out_dir else None
         self.recorder_opts = recorder_opts
         self.poller: Poller | None = None
         self.blackbox: BlackboxReader | None = None
+        #: the handheld on USB next to the laptop's own cable (``hondalog.handheld.companion``):
+        #: "auto", "off" or a port; opened by ``connect`` for a non-``cyd:`` port
+        self.handheld_spec = handheld
+        self.handheld: HandheldCompanion | None = None
         self.recorder: Recorder | None = None
         self.frames: collections.deque[LiveFrame] = collections.deque(maxlen=max_frames)
         self.on_frame: Callable[[LiveFrame], None] | None = None
@@ -185,7 +190,31 @@ class LiveSession:
         self.attach(poller)
         if start:
             poller.start()
+        if not is_cyd_port(port) and str(self.handheld_spec or "off").lower() != "off":
+            self.open_handheld(self.handheld_spec, exclude=port, start=start)
         return poller
+
+    def open_handheld(self, spec: Any = "auto", exclude: str = "", start: bool = True) -> HandheldCompanion:
+        """Open the handheld's link next to the laptop's own ECU port (``exclude``,
+        never opened): its GPS fixes come in on the poller's time axis, are
+        recorded in the ``gps`` stream as source "handheld" and, with a fix, win
+        over the laptop's location. ``spec`` is "auto", a port name or a port object."""
+        from .handheld.companion import HandheldCompanion
+        self.close_handheld()
+        if not exclude and self.poller is not None:
+            exclude = getattr(self.poller, "port_name", "") or ""
+        companion = HandheldCompanion(spec, self.amap, exclude=exclude, t0=self.t0,
+                                      on_fix=self._on_handheld_gps)
+        self.handheld = companion
+        if start:
+            companion.start()
+        return companion
+
+    def close_handheld(self) -> None:
+        companion, self.handheld = self.handheld, None
+        if companion is not None:
+            companion.on_fix = None
+            companion.stop()
 
     def attach(self, poller: Poller) -> None:
         """Take over a poller's two callbacks. Call before ``poller.start()``
@@ -219,7 +248,8 @@ class LiveSession:
         reader.on_event = self._on_bb_event
 
     def close(self) -> None:
-        """Stop recording, the black box and the poller."""
+        """Stop recording, the handheld, the black box and the poller."""
+        self.close_handheld()
         poller, reader = self.poller, self.blackbox
         if poller is not None:
             poller.stop()
@@ -254,6 +284,9 @@ class LiveSession:
             meta["cyd"] = poller.cyd_meta()
             if poller.warning:
                 meta["cyd_warning"] = poller.warning
+        companion = self.handheld
+        if companion is not None and companion.hello is not None:
+            meta["handheld"] = companion.cyd_meta()
         reader = self.blackbox
         if reader is not None and reader.hello is not None:
             meta["blackbox"] = reader.device_text
@@ -404,11 +437,27 @@ class LiveSession:
     def _on_cyd_gps(self, t: float, fix: Mapping[str, Any]) -> None:
         self.feed_gps(t, fix)
 
+    def _on_handheld_gps(self, t: float, fix: Mapping[str, Any]) -> None:
+        from .handheld.companion import SOURCE
+        self.feed_gps(t, fix, source=SOURCE)
+
+    @property
+    def handheld_gps(self) -> bool:
+        """The handheld next to the laptop's cable gives the position: it has a
+        fresh fix, or was opened a moment ago and may be about to."""
+        companion = self.handheld
+        if companion is None:
+            return False
+        return companion.gps_ok or companion.starting
+
     def laptop_fix(self, fix: Any) -> None:
         """A fix from the laptop's own location (``hondalog.geo.laptop.Fix``),
         when no handheld GPS is connected: the same path as the handheld's, its
-        ``gps`` stream marked source "laptop" with altitude and accuracy."""
+        ``gps`` stream marked source "laptop" with altitude and accuracy. Dropped
+        while the handheld's GPS has a fix (``handheld_gps``)."""
         from .geo.laptop import SOURCE, laptop_columns
+        if self.handheld_gps:
+            return
         self.feed_gps(self.now(), fix.values(), source=SOURCE, columns=laptop_columns)
 
     def feed_gps(self, t: float, fix: Mapping[str, Any], source: str = "gps",

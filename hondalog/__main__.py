@@ -19,6 +19,10 @@ def main(argv=None) -> int:
                                                     "capture (.bbx) in the replay screen")
     ap.add_argument("--bb", metavar="PORT", help="black box port (default: /dev/hondalog-bb if "
                                                  "present; the simulator next to a simulated ECU)")
+    ap.add_argument("--handheld", metavar="PORT|auto|off",
+                    help="the handheld (CYD) on USB next to the laptop's own K-line cable: its GPS "
+                         "beats the laptop's location. auto (default) finds a CH340 1a86:7523 "
+                         "that is not the ECU's port")
     ap.add_argument("--rom", metavar="BIN", help="ROM image to edit on the Tune screen")
     ap.add_argument("--definition", metavar="FILE",
                     help="ROM definition for --rom (.toml or TunerPro .xdf)")
@@ -51,7 +55,7 @@ def main(argv=None) -> int:
     signal.signal(signal.SIGINT, signal.SIG_DFL)      # Ctrl+C in the terminal quits
 
     session = build_session(demo=args.demo, rom=args.rom, definition=args.definition,
-                            blackbox_port=args.bb)
+                            blackbox_port=args.bb, handheld=args.handheld)
     problem = getattr(session.tables, "problem", "")
     if problem:
         print(f"hondalog: {problem}; showing the sample tables", file=sys.stderr)

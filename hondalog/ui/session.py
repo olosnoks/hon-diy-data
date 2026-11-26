@@ -244,7 +244,8 @@ class Session:
 
 
 def build_session(demo: bool = False, log_dir=None, writable_tables: bool = False,
-                  demo_clock=None, rom=None, definition=None, blackbox_port=None) -> Session:
+                  demo_clock=None, rom=None, definition=None, blackbox_port=None,
+                  handheld: str | None = None) -> Session:
     """Wire one object per adapter role.
 
     Real use binds the tracks' backends (``wired.py``): the W1 link through
@@ -255,6 +256,9 @@ def build_session(demo: bool = False, log_dir=None, writable_tables: bool = Fals
 
     ``rom`` / ``definition`` open a ROM image for the Tune screen; without
     them (or if they cannot be read) the sample tables stay.
+
+    ``handheld``: the handheld on USB next to a laptop cable ("auto", "off" or
+    a port; None = $HONDALOG_HANDHELD or "auto"): its GPS beats the laptop's.
     """
     from . import backends as be
 
@@ -272,7 +276,7 @@ def build_session(demo: bool = False, log_dir=None, writable_tables: bool = Fals
 
     from . import wired
 
-    ecu = wired.LinkSource(out_dir=log_dir)
+    ecu = wired.LinkSource(out_dir=log_dir, handheld=handheld)
     tables = wired.RomTableModel(be.DemoTableModel(writable=writable_tables))
     if rom:
         tables.open(rom, definition)

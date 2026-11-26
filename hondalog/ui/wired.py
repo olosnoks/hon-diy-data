@@ -92,10 +92,12 @@ class LinkSource(be.PollerSource):
     own rate (fast / medium / slow) and carries its own age.
     """
 
-    def __init__(self, load_map=None, out_dir=None):
+    def __init__(self, load_map=None, out_dir=None, handheld: str | None = None):
         super().__init__(load_map)
         self.out_dir = out_dir
-        self.live = LiveSession(self.amap, out_dir=out_dir)
+        #: the handheld next to a laptop cable: "auto" (default; HONDALOG_HANDHELD overrides), "off", a port
+        self.handheld = handheld or os.environ.get("HONDALOG_HANDHELD") or "auto"
+        self.live = LiveSession(self.amap, out_dir=out_dir, handheld=self.handheld)
         self.frames: collections.deque = collections.deque(maxlen=4000)   # for PipelineAlarms
         self.listeners: list = []           # objects with on_connect(source) / on_disconnect()
         self.first_contact_report = None
@@ -162,7 +164,7 @@ class LinkSource(be.PollerSource):
         """Read the map file again (after an edit or a verified mark)."""
         self.amap = self._load_map()
         if self.poller is None:
-            self.live = LiveSession(self.amap, out_dir=self.out_dir)
+            self.live = LiveSession(self.amap, out_dir=self.out_dir, handheld=self.handheld)
         else:                               # connected: new labels and marks now, decoding on reconnect
             self.live.amap = self.amap
         if self.bus is not None:
@@ -176,7 +178,7 @@ class LinkSource(be.PollerSource):
         if self.poller is not None or not port:
             return
         self.amap = self._load_map()
-        self.live = LiveSession(self.amap, out_dir=self.out_dir)
+        self.live = LiveSession(self.amap, out_dir=self.out_dir, handheld=self.handheld)
         self.live.on_read = self._on_read
         self.live.on_frame = self._on_frame
         self.live.on_gps = self._on_gps
@@ -229,6 +231,14 @@ class LinkSource(be.PollerSource):
         p = self.poller
         if p is not None and getattr(p, "source", "") == "cyd":
             return p.link_text()            # the handheld's link: frames, losses, its SD, the map
+        text = self._ecu_link_text()
+        companion = self.live.handheld if p is not None else None
+        if companion is not None and companion.hello is not None:
+            text = " · ".join(t for t in (text, companion.status_text()) if t)
+        return text
+
+    def _ecu_link_text(self) -> str:
+        p = self.poller
         if p is None or p.state != pl.OK:
             return ""
         if getattr(p, "mode", "") == pl.OBD2:
@@ -309,9 +319,15 @@ class LinkSource(be.PollerSource):
             bus.publish(read.values, t=bus.bus_time(read.mono - read.latency_s),
                         wire=read.mono, source="ECU")
 
+    @property
+    def handheld_gps(self) -> bool:
+        """The handheld next to the laptop's cable has the position (its fix wins over the laptop's)."""
+        return self.poller is not None and not self.is_cyd and self.live.handheld_gps
+
     def _on_gps(self, t: float, fix) -> None:
-        """The handheld's GPS fix (``cyd:`` ports): onto the bus as source
-        "GPS" for the Map screen. The channels appear with the first fix."""
+        """A GPS fix (the handheld's, on a ``cyd:`` port or next to the laptop's
+        cable, or the laptop's location): onto the bus as source "GPS" for the
+        Map screen. The channels appear with the first fix."""
         bus, poller = self.bus, self.poller
         if bus is None or poller is None:
             return
@@ -561,13 +577,21 @@ class LaptopGpsSource:
         bus.publish({k: values.get(k) for k in be.GPS_IDS}, t=bus.now(), source="GPS")
 
     def info_text(self) -> str:
-        """For the info bar: "GPS: laptop ±40 m" or why there is none."""
+        """For the info bar: "GPS: handheld (9 sats)", "GPS: laptop ±40 m" or why there is none."""
         if self.ecu.is_cyd and self.ecu.poller is not None:
             return ""
+        companion = self.ecu.live.handheld if self.ecu.poller is not None else None
+        if companion is not None and companion.gps_ok:
+            return companion.gps_text()
         return "GPS: " + self.gps.status
 
     def status(self) -> ad.SourceStatus:
         gps = self.gps
+        if self.ecu.handheld_gps:
+            if self.bus is not None:
+                self.bus.set_timeout("GPS", be.GPS_TIMEOUT_S)
+            companion = self.ecu.live.handheld
+            return ad.SourceStatus(ad.OK, 1.0, detail=companion.gps_text() if companion else "handheld")
         if self.bus is not None and gps.last is not None and not self.ecu.is_cyd:
             self.bus.set_timeout("GPS", LAPTOP_GPS_TIMEOUT_S)
         if not gps.running:

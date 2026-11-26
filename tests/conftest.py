@@ -13,6 +13,9 @@ os.environ["HONDALOG_DIR"] = os.path.join(_TMP, "logs")
 # the Map screen never reaches a real tile server from the tests, and caches nothing in ~/.cache
 os.environ["HONDALOG_TILES"] = "offline"
 os.environ["HONDALOG_TILE_CACHE"] = os.path.join(_TMP, "tiles")
+# no handheld is looked for next to a laptop cable unless a test asks (another
+# process's hondalog-cydsim pty must not be picked up)
+os.environ["HONDALOG_HANDHELD"] = "off"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
