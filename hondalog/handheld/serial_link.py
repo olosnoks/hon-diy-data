@@ -25,6 +25,8 @@ laptop's TX pin is wired to the GPS's line.
 
 from __future__ import annotations
 
+import sys
+
 import collections
 import os
 import struct
@@ -83,8 +85,15 @@ class SerialPort:
             # button). Linux raises both when the port opens, which is harmless;
             # RTS on with DTR off is a reset. So RTS is released first, then DTR
             # (dsrdtr=True keeps pyserial from setting DTR during open()).
-            ser.dsrdtr = True
-            ser.rts = False
+            if sys.platform == "win32":
+                # On Windows dsrdtr=True is real DSR/DTR flow control: every
+                # write waits for a DSR the CH340 never raises (write timeout).
+                # Windows applies both line states at open, so set them first.
+                ser.dtr = False
+                ser.rts = False
+            else:
+                ser.dsrdtr = True
+                ser.rts = False
             ser.open()
             try:
                 ser.dtr = False
