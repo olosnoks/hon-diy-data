@@ -107,6 +107,12 @@ def spec_from_channel(ch) -> ChannelSpec:
     return replace(spec, **own) if own else with_limits(spec)
 
 
+def obd2_specs(amap) -> list[ChannelSpec]:
+    """Tiles for the map's OBD2-only channels (``[[obd2]]`` with gauge = true).
+    Empty in Honda mode: nothing there can read them."""
+    return [spec_from_channel(ch) for ch in getattr(amap, "obd2", ()) if ch.gauge]
+
+
 def is_sim_port(port: str) -> bool:
     return port in (BUILTIN_SIM, BUILTIN_SIM_ISO, SIM_SYMLINK)
 
@@ -145,6 +151,7 @@ class PollerSource:
             if ch.name in self._verified:
                 spec.verified = True
             out.append(spec)
+        out += obd2_specs(self.amap)
         have = {s.id for s in out}
         return out + [p for p in PLACEHOLDERS if p.id not in have]
 

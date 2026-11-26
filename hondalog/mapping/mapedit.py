@@ -28,15 +28,15 @@ from typing import Any, Iterable, Mapping, Sequence
 import numpy as np
 
 from .. import addressmap
-from ..addressmap import AddressMap, Channel, Evidence, MapError
+from ..addressmap import AddressMap, Channel, Evidence, MapError, Obd2Channel
 from ..alarms import AlarmRule
 from ..mathch import MathChannel
 
 _HEADER = re.compile(r"^\s*(\[\[?)\s*([^\[\]]+?)\s*\]\]?\s*(#.*)?$")
 _KEY_LINE = re.compile(r"^(\s*)([A-Za-z0-9_-]+)(\s*=\s*)(.*)$")
 _BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
-_HEX_KEYS = {"addr"}
-ARRAYS = ("channel", "math", "alarm")
+_HEX_KEYS = {"addr", "pid"}
+ARRAYS = ("channel", "obd2", "math", "alarm")
 
 
 # ---- TOML output ------------------------------------------------------------
@@ -95,7 +95,7 @@ def _emit(lines: list[str], table: Mapping[str, Any], path: list[str]) -> None:
 
 
 _ORDER = ("schema", "version", "ecu", "ecu_variant", "base_variant", "variants", "ecu_id",
-          "protocol", "constants", "channel", "math", "alarm")
+          "protocol", "constants", "channel", "obd2", "math", "alarm")
 
 
 def dumps(doc: Mapping[str, Any]) -> str:
@@ -141,6 +141,13 @@ def channel_table(ch: Channel) -> dict[str, Any]:
     return table
 
 
+def obd2_table(ch: Obd2Channel) -> dict[str, Any]:
+    table = _table_of(ch, ("name", "pid"))
+    if table.get("label") == ch.name:
+        del table["label"]
+    return table
+
+
 def math_table(ch: MathChannel) -> dict[str, Any]:
     table = _table_of(ch, ("name", "expr"))
     if table.get("label") == ch.name:
@@ -171,6 +178,8 @@ def to_doc(amap: AddressMap) -> dict[str, Any]:
     if amap.constants:
         doc["constants"] = dict(amap.constants)
     doc["channel"] = [channel_table(c) for c in amap.base_channels]
+    if amap.obd2:
+        doc["obd2"] = [obd2_table(c) for c in amap.obd2]
     if amap.math:
         doc["math"] = [math_table(m) for m in amap.math]
     if amap.alarms:
@@ -571,7 +580,7 @@ def update_channel(path: str | Path, channel: str, variant: str | None = None,
 def upgrade_to_v2(path: str | Path) -> tuple[AddressMap, list[str]]:
     """Bring a schema 1 map file up to schema 2 in place.
 
-    Adds ``schema = 2`` and the shipped constants, math channels and alarms
+    Adds ``schema = 2`` and the shipped constants, OBD2-only channels, math channels and alarms
     that fit the file's channels. Returns the map and the names that were
     skipped because an input channel is missing. A schema 2 file is left alone.
     """
@@ -584,7 +593,7 @@ def upgrade_to_v2(path: str | Path) -> tuple[AddressMap, list[str]]:
         if name not in mf.doc.get("constants", {}) and name not in mf.names("channel"):
             mf.set_constant(name, value)
     skipped: list[str] = []
-    for kind in ("math", "alarm"):
+    for kind in ("obd2", "math", "alarm"):
         for table in default.get(kind, []):
             if table["name"] in mf.names(kind):
                 continue

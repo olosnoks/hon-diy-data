@@ -66,12 +66,35 @@ def test_status_chip_and_link_line_say_obd2_not_honda(obd2_session):
 def test_pid_channels_are_shown_as_standard_values_and_put_back_after(obd2_session):
     s = obd2_session
     for cid in PID_CHANNEL.values():
+        if cid == "calc_load":                                # feeds the load math tile, no tile of its own
+            assert s.bus.channel(cid) is None
+            continue
         assert s.bus.channel(cid).spec.verified, cid
-    for cid in ("batt", "inj", "iacv", "knock"):              # no PID for these: map's mark, and no value
+    assert s.bus.channel("load").spec.verified                # PID 04 in OBD2 mode
+    for cid in ("batt", "inj", "iacv", "knock", "baro", "eld", "alt_fr", "ign_limit", "vtec",
+                "ac_sw", "fan", "fuel_pump"):                 # no PID for these: map's mark, and no value
         st = s.bus.channel(cid)
         assert not st.spec.verified and st.stale(s.bus.now()), cid
     s._mark_obd2(False)
     assert not s.bus.channel("rpm").spec.verified
+    assert not s.bus.channel("load").spec.verified
+
+
+def test_obd2_fills_flag_load_and_o2_post_tiles(obd2_session):
+    s = obd2_session
+    ecu = s.ecu
+    for sample in [x for x in ecu.poller.samples if x.link][-40:]:   # the link's own path to the bus
+        ecu._on_frame(ecu.live.pipeline.feed(sample))
+    for cid in ("mil", "closed_loop", "o2_post", "rpm"):
+        assert s.bus.channel(cid).value == s.bus.channel(cid).value, cid   # not NaN: filled
+    assert s.bus.channel("mil").value == 0 and s.bus.channel("o2_post").value == pytest.approx(0.6)
+    assert s.bus.channel("o2_post").spec.source == "ECU"
+    assert 0 <= s.bus.channel("load").value <= 100
+    for cid in ("batt", "iacv", "knock", "baro", "inj_duty", "fuel_flow", "afr_est", "batt_min_5s"):
+        v = s.bus.channel(cid).value
+        assert v != v, cid                                    # still blank: no PID behind them
+    ids = [st.spec.id for st in s.ordered("ECU")]
+    assert ids.index("o2_post") == ids.index("o2") + 1
 
 
 def test_raw_tools_say_obd2_only_instead_of_failing(obd2_session):

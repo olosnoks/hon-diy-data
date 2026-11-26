@@ -115,13 +115,26 @@ def obd2_stream(amap: Any, pid: int, pv: Any) -> tuple[str, Column, dict[str, An
     ``hondalog.obd2.PidValue``). A PID that is the same quantity as a map
     channel gets that channel's name, with the PID's own (standard) units."""
     from .obd2 import PID_CHANNEL
-    ch = amap.channel(PID_CHANNEL.get(pid, ""))
+    cid = PID_CHANNEL.get(pid, "")
+    ch = amap.channel(cid) or amap.obd2_channel(cid)
     if ch is None:
         column = Column(f"pid_{pid:02x}", "f4", pv.units, pv.name)
     else:
         column = Column(ch.name, "f4", pv.units or ch.units, ch.label if ch.label != ch.name else "",
                         ch.kind, ch.decimals, float(ch.min), float(ch.max))
     return f"obd2/{pid:02X}", column, {"mode": 1, "pid": pid, "name": pv.name}
+
+
+def obd2_value(amap: Any, pid: int, data: bytes, pv: Any) -> float | None:
+    """What an ``obd2/XX`` stream stores for one reply: the channel's value
+    (``obd2.channel_value``: status bytes become 0/1 flags) when the PID fills
+    a map channel, else the PID's own decoded number. The raw bytes are kept
+    alongside either way."""
+    from .obd2 import PID_CHANNEL, channel_value
+    cid = PID_CHANNEL.get(pid, "")
+    if cid and (amap.channel(cid) or amap.obd2_channel(cid)):
+        return channel_value(pid, data)
+    return pv.value
 
 
 class Recorder:
@@ -352,11 +365,12 @@ class Recorder:
             name, column, attrs = obd2_stream(self.amap, pid, pv)
             if log.stream(name) is None:
                 log.add_stream(name, [column], source="obd2", raw_len=len(data), attrs=attrs)
+            value = obd2_value(self.amap, pid, data, pv)
             try:
-                log.append(name, t, [pv.value], bytes(data))
+                log.append(name, t, [value], bytes(data))
             except ValueError:      # another length than the first reply: keep the stream consistent
                 pass
-            changed: dict[str, Any] = {column.name: pv.value}
+            changed: dict[str, Any] = {column.name: value}
             changed.update(self._set_link(t, True))
             self._after(t, changed)
 

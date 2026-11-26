@@ -10,7 +10,7 @@ math channel or alarm out.
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from typing import Collection, Mapping, Sequence
 
 from ..expr import parse
 from ..expr import funcs
@@ -20,6 +20,10 @@ from . import format as F
 
 class Unsupported(ValueError):
     """The expression needs something the handheld's machine does not have."""
+
+
+class _Absent(Unsupported):
+    """A name the handheld never has a value for (an OBD2-only channel)."""
 
 
 class Pool:
@@ -45,8 +49,11 @@ class Compiler:
     formula=True allows ``x`` and ``b[i]`` of a ``raw_len``-byte channel."""
 
     def __init__(self, pool: Pool, names: Mapping[str, int] | None = None,
-                 constants: Mapping[str, float] | None = None, formula: bool = False, raw_len: int = 0):
+                 constants: Mapping[str, float] | None = None, formula: bool = False, raw_len: int = 0,
+                 absent: Collection[str] = ()):
         self.pool = pool
+        #: names that never have a value here: a coalesce() argument using one is left out
+        self.absent = frozenset(absent)
         self.names = dict(names or {})
         self.constants = dict(constants or {})
         self.formula = formula
@@ -138,6 +145,8 @@ class Compiler:
             return self._push(depth)
         if name in self.constants:
             return self._const(self.constants[name], out, depth)
+        if name in self.absent:
+            raise _Absent(f"{name!r} is OBD2-only: the handheld has no value for it")
         raise Unsupported(f"unknown name {name!r}")
 
     def _index(self, node: Index, out: bytearray, depth: int) -> int:
@@ -168,6 +177,16 @@ class Compiler:
             out.append(F.OP_VALID)
             return depth
         if name == "coalesce":
+            kept = []
+            for arg in args:                    # an argument that can never have a value adds nothing
+                try:
+                    self._emit(arg, bytearray(), depth)
+                except _Absent:
+                    continue
+                kept.append(arg)
+            if not kept:
+                raise Unsupported("coalesce(): no argument has a value on the handheld")
+            args = kept
             depth = self._emit(args[0], out, depth)
             for arg in args[1:]:
                 depth = self._emit(arg, out, depth)
@@ -195,8 +214,10 @@ def compile_formula(text: str, pool: Pool, constants: Mapping[str, float], raw_l
 
 
 def compile_condition(text: str, pool: Pool, names: Mapping[str, int],
-                      constants: Mapping[str, float]) -> tuple[bytes, set[str]]:
+                      constants: Mapping[str, float],
+                      absent: Collection[str] = ()) -> tuple[bytes, set[str]]:
     """A math channel or alarm condition over channel values. Returns the
-    program and the channel names it reads."""
-    comp = Compiler(pool, names=names, constants=constants)
+    program and the channel names it reads. ``absent`` names channels the
+    handheld never has (OBD2-only): ``coalesce()`` leaves them out."""
+    comp = Compiler(pool, names=names, constants=constants, absent=absent)
     return comp.compile(text), comp.deps

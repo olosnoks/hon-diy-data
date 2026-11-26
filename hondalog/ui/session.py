@@ -18,10 +18,12 @@ from .bus import ChannelBus
 
 # Row-major order of the ECU grid (HANDOFF 5.1). Anything else a source
 # delivers (math channels, new map entries) is appended.
-ECU_ORDER = ("rpm", "vss", "map", "tps", "inj", "ign", "o2", "stft", "ltft", "ect", "iat",
+ECU_ORDER = ("rpm", "vss", "map", "tps", "inj", "ign", "o2", "o2_post", "stft", "ltft", "ect", "iat",
              "baro", "batt", "alt_fr", "eld", "iacv", "knock", "ign_limit", "closed_loop",
              "vtec", "ac_sw", "fan", "fuel_pump", "mil")
 DRIVE_DEFAULT = ("rpm", "vss", "ect", "batt", "fpv", "stft")
+#: math channels that OBD2-only mode fills straight from a PID (load: PID 04)
+OBD2_MATH = ("load",)
 
 
 @dataclass
@@ -138,7 +140,7 @@ class Session:
     def _mark_obd2(self, on: bool) -> None:
         """In OBD2 mode the PID channels are standard values, not guesses from
         the address map: show them verified, and put the map's spec back after."""
-        for cid in PID_CHANNEL.values():
+        for cid in (*PID_CHANNEL.values(), *OBD2_MATH):
             state = self.bus.channel(cid)
             if state is None:
                 continue

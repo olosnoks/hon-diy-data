@@ -524,8 +524,39 @@ def decode_readiness(data: bytes) -> Readiness:
 
 #: Mode 01 PIDs that are the same quantity as an address map channel. OBD2-only
 #: live mode (``Poller``, the handheld's ``iso_fallback``) fills these channels.
+#: ``calc_load`` and ``o2_post`` are OBD2-only channels (the map's ``[[obd2]]``
+#: tables): the Honda protocol has no RAM address for them.
 PID_CHANNEL = {0x0C: "rpm", 0x0D: "vss", 0x0B: "map", 0x11: "tps", 0x0E: "ign", 0x14: "o2", 0x06: "stft",
-               0x07: "ltft", 0x05: "ect", 0x0F: "iat"}
+               0x07: "ltft", 0x05: "ect", 0x0F: "iat", 0x01: "mil", 0x03: "closed_loop",
+               0x04: "calc_load", 0x15: "o2_post"}
+
+
+def _closed_loop(data: bytes) -> float:
+    """PID 03, fuel system 1 status: closed loop (0x02) or closed loop with
+    an O2 sensor fault (0x10) -> 1, any other state -> 0."""
+    return 1.0 if data[0] in (0x02, 0x10) else 0.0
+
+
+def _mil(data: bytes) -> float:
+    """PID 01 byte A bit 7: the check engine lamp is commanded on."""
+    return float(data[0] >> 7 & 1)
+
+
+#: PIDs whose channel value is not ``decode_pid(...).value`` (status bytes and
+#: bitfields that become 0/1 flags). pid -> decoder(data bytes) -> value.
+PID_DECODE: dict[int, Callable[[bytes], float]] = {0x01: _mil, 0x03: _closed_loop}
+
+
+def channel_value(pid: int, data: bytes) -> float | None:
+    """The number a PID puts on its ``PID_CHANNEL`` channel (None if the reply
+    is too short or the PID has no numeric value)."""
+    fn = PID_DECODE.get(pid)
+    if fn is None:
+        return decode_pid(pid, data).value
+    try:
+        return fn(bytes(data))
+    except IndexError:
+        return None
 
 
 def decode_dtc(hi: int, lo: int) -> str:

@@ -24,7 +24,7 @@ from ..data.db import DriveRef
 from ..data.model import Column
 from ..data.store import Store
 from ..geo.track import GPS_STREAM, gps_columns
-from ..logger import LINK, LINK_STREAM, column_for, obd2_stream
+from ..logger import LINK, LINK_STREAM, column_for, obd2_stream, obd2_value
 from ..obd2 import PID_CHANNEL, decode_pid
 from . import format as F
 from .drivefile import DriveFile, read_drive_file
@@ -286,7 +286,7 @@ def _write_iso(drive: Any, df: DriveFile, amap: AddressMap) -> None:
             defined.add(name)
             drive.add_stream(name, [column], source="obd2", raw_len=len(r.data), attrs=attrs)
         try:
-            drive.append(name, df.seconds(r.t_us), [pv.value], r.data)
+            drive.append(name, df.seconds(r.t_us), [obd2_value(amap, r.pid, r.data, pv)], r.data)
         except ValueError:          # a reply of another length than the first: keep the stream consistent
             continue
 

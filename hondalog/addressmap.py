@@ -11,6 +11,8 @@ Schema 2 adds to the original (schema 1) file, all optional:
     [channel.variants.P28]              per-ECU overrides of a channel
     [[math]]                            derived channels (hondalog.mathch)
     [[alarm]]                           alarm rules (hondalog.alarms)
+    [[obd2]]                            OBD2-only channels: a standard Mode 01 PID
+                                        with no Honda RAM address (OBD2-only live mode)
 
 A schema 1 file loads unchanged. Formulas go through ``hondalog.expr``: text
 is parsed into a small AST and compiled to closures, nothing is eval'd.
@@ -212,6 +214,48 @@ class Channel:
 
 
 @dataclass
+class Obd2Channel:
+    """A channel only standard OBD2 can fill: a Mode 01 PID the Honda protocol
+    has no RAM address for. Never read in Honda mode, so it stays empty there.
+    The value is SAE J1979's, so it needs no verifying against the car."""
+    name: str
+    pid: int
+    label: str = ""
+    units: str = ""
+    min: float = 0.0
+    max: float = 255.0
+    decimals: int = 0
+    kind: str = "value"
+    gauge: bool = False         # its own tile on the ECU grid
+    plot: bool = False
+    rate: str = "slow"
+    source: str = "SAE J1979"
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not _NAME.fullmatch(self.name or ""):
+            raise MapError(f"bad obd2 channel name {self.name!r}")
+        if not isinstance(self.pid, int) or isinstance(self.pid, bool) or not 0 < self.pid <= 0xFF:
+            raise MapError(f"{self.name}: pid must be a Mode 01 PID, 0x01-0xFF")
+        if self.kind not in ("value", "flag"):
+            raise MapError(f"{self.name}: kind must be 'value' or 'flag'")
+        self.rate = str(self.rate).strip().lower() or "slow"
+        if self.rate not in RATES:
+            raise MapError(f"{self.name}: rate must be one of {', '.join(RATES)}")
+        self.label = self.label or self.name
+        if self.kind == "flag":
+            self.min, self.max, self.decimals = 0.0, 1.0, 0
+
+    verified = True
+    status = VERIFIED
+
+    def format(self, value: float | None) -> str:
+        if value is None or value != value:
+            return "--"
+        return f"{value:.{self.decimals}f}"
+
+
+@dataclass
 class AddressMap:
     version: str
     ecu: str
@@ -229,6 +273,7 @@ class AddressMap:
     math: list[MathChannel] = field(default_factory=list)
     alarms: list[AlarmRule] = field(default_factory=list)
     base_channels: list[Channel] = field(default_factory=list, repr=False)
+    obd2: list[Obd2Channel] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.base_channels:
@@ -237,6 +282,14 @@ class AddressMap:
     @property
     def names(self) -> list[str]:
         return [c.name for c in self.channels]
+
+    @property
+    def obd2_names(self) -> list[str]:
+        """OBD2-only channels (no RAM address): filled in OBD2-only live mode."""
+        return [c.name for c in self.obd2]
+
+    def obd2_channel(self, name: str) -> Obd2Channel | None:
+        return next((c for c in self.obd2 if c.name == name), None)
 
     @property
     def math_names(self) -> list[str]:
@@ -273,6 +326,7 @@ class AddressMap:
     def units(self) -> dict[str, str]:
         """Base unit text for every measured and math channel."""
         out = {c.name: c.units for c in self.channels}
+        out.update({c.name: c.units for c in self.obd2})
         out.update({m.name: m.units for m in self.math})
         return out
 
@@ -282,8 +336,9 @@ class AddressMap:
 
     def math_engine(self) -> MathEngine:
         """A fresh evaluator for this map's math channels."""
-        return MathEngine(self.math, self.names, self.constants,
-                          {c.name: c.units for c in self.channels})
+        units = {c.name: c.units for c in self.channels}
+        units.update({c.name: c.units for c in self.obd2})
+        return MathEngine(self.math, self.names + self.obd2_names, self.constants, units)
 
     def is_verified(self, name: str) -> bool:
         """A measured channel's own state; a math channel is verified when
@@ -309,13 +364,16 @@ class AddressMap:
 
     def decode_spec(self) -> dict[str, Any]:
         """Everything that decides what number a log row holds, as plain data."""
-        return {
+        spec = {
             "variant": self.variant,
             "channels": [[c.name, c.addr, c.length, c.endian, c.formula, c.units, c.kind]
                          for c in self.channels],
             "constants": sorted(self.constants.items()),
             "math": [[m.name, m.expr, m.units] for m in self.math if m.enabled],
         }
+        if self.obd2:           # left out when empty: older maps keep their hash
+            spec["obd2"] = [[c.name, c.pid, c.units, c.kind] for c in self.obd2]
+        return spec
 
     @property
     def version_hash(self) -> str:
@@ -358,7 +416,7 @@ def plan_blocks(channels: Iterable[Channel], max_len: int = 16) -> list[tuple[in
 
 
 _TOP_KEYS = {"schema", "version", "ecu", "ecu_variant", "base_variant", "variants", "ecu_id",
-             "protocol", "constants", "channel", "math", "alarm"}
+             "protocol", "constants", "channel", "math", "alarm", "obd2"}
 
 
 def _constants(table: Any, where: str) -> dict[str, float]:
@@ -431,6 +489,13 @@ def parse(doc: Mapping[str, Any], path: str = "", variant: str | None = None) ->
         raise MapError(f"{where}: constant {clash[0]!r} has the same name as a channel")
 
     try:
+        obd2 = [Obd2Channel(**entry) for entry in doc.get("obd2", [])]
+    except TypeError as exc:
+        raise MapError(f"{where}: [[obd2]] {exc}") from exc
+    clash = sorted({c.name for c in obd2} & set(names))
+    if clash:
+        raise MapError(f"{where}: obd2 channel {clash[0]!r} has the same name as a channel")
+    try:
         math = [MathChannel(**entry) for entry in doc.get("math", [])]
         alarms = [_alarm(entry) for entry in doc.get("alarm", [])]
     except (TypeError, MathError, AlarmError) as exc:
@@ -452,6 +517,7 @@ def parse(doc: Mapping[str, Any], path: str = "", variant: str | None = None) ->
         math=math,
         alarms=alarms,
         base_channels=base,
+        obd2=obd2,
     )
     try:                      # compile everything now so a bad map fails at load
         amap.math_engine()

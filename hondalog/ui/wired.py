@@ -115,6 +115,7 @@ class LinkSource(be.PollerSource):
                 for key in ("warn_lo", "warn_hi", "alarm_lo", "alarm_hi"):
                     setattr(spec, key, own.get(key))
             out.append(spec)
+        out += be.obd2_specs(self.amap)
         have = {s.id for s in out}
         # Rad fan / Fuel pump: real tiles as soon as the map has channels with
         # these names, placeholders (hatched, "not mapped") until then.

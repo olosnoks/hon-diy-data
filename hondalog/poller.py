@@ -648,7 +648,7 @@ class Poller(threading.Thread):
         self.iso_link = str(result)
         self.last_error = ""
         self.state = OK
-        self._values = {n: None for n in self.amap.names}
+        self._values = {n: None for n in self.amap.names + self.amap.obd2_names}
         self._stamps = {}
         self._fresh.clear()
 
@@ -657,7 +657,8 @@ class Poller(threading.Thread):
         emitted after each pair), the others weighted by their rate class.
         Only PIDs the ECU supports and the map has a channel for."""
         from .obd2 import PID_CHANNEL
-        names = set(self.amap.names)
+        names = set(self.amap.names) | set(self.amap.obd2_names)
+        rate = {**self._class, **{c.name: c.rate for c in self.amap.obd2}}
         have = [(pid, name) for pid, name in PID_CHANNEL.items()
                 if name in names and (not supported or pid in supported)]
         rpm = next(((p, n) for p, n in have if n == "rpm"), None)
@@ -667,7 +668,7 @@ class Poller(threading.Thread):
         # weighted round, spread out: fast channels three places, medium two, slow one
         slots: list[tuple[float, int, str]] = []
         for k, (pid, name) in enumerate(others):
-            weight = _ISO_WEIGHT.get(self._class.get(name, "slow"), 1)
+            weight = _ISO_WEIGHT.get(rate.get(name, "slow"), 1)
             slots += [((j + 0.5) / weight + k * 1e-3, pid, name) for j in range(weight)]
         slots.sort()
         plan: list[tuple[int, str, bool]] = []
@@ -681,7 +682,7 @@ class Poller(threading.Thread):
 
     def _iso_step(self) -> None:
         """One PID request in OBD2-only mode."""
-        from .obd2 import Iso9141Error
+        from .obd2 import Iso9141Error, channel_value
         if not self._iso_plan:
             self._iso_leave("no usable PIDs")
             return
@@ -704,7 +705,7 @@ class Poller(threading.Thread):
         mono = self.clock.now()
         t = mono - self.t0
         if name in self._values:
-            self._values[name] = pv.value
+            self._values[name] = channel_value(pid, pv.raw)
             self._stamps[name] = t
             self._fresh.add(name)
         hook = self.on_pid

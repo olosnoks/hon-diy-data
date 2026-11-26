@@ -28,7 +28,7 @@ def test_implementations_satisfy_the_protocols():
 def test_poller_source_specs_cover_the_32_slots():
     ecu = be.PollerSource()
     ids = [s.id for s in ecu.specs()]
-    assert len(ids) == 24 and {"fan", "fuel_pump"} <= set(ids)
+    assert len(ids) == 25 and {"fan", "fuel_pump", "o2_post"} <= set(ids)   # o2_post: OBD2-only
     by = {s.id: s for s in ecu.specs()}
     assert not by["fan"].mapped and by["rpm"].mapped and not by["rpm"].verified
     assert by["alt_fr"].label == "Alt load" and by["ign"].units == "°"

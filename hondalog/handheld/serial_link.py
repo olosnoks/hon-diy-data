@@ -355,7 +355,7 @@ class CydPoller(threading.Thread):
         self._target = {n: target_hz(k, amap.framing) for n, k in self._class.items()}
         self._decoders: dict[tuple[int, int], list[tuple[str, Any, int, int]]] = {}
         self._block_times: dict[tuple[int, int], collections.deque[float]] = {}
-        self._values: dict[str, float | None] = {n: None for n in amap.names}
+        self._values: dict[str, float | None] = {n: None for n in amap.names + amap.obd2_names}
         self._stamps: dict[str, float] = {}
         self._fresh: set[str] = set()
         self._stop_evt = threading.Event()
@@ -766,8 +766,7 @@ class CydPoller(threading.Thread):
                 self.last_error = f"on_block: {exc!r}"
 
     def _iso(self, p: bytes, now: float) -> None:
-        from ..obd2 import decode_pid
-        from ..obd2 import PID_CHANNEL
+        from ..obd2 import PID_CHANNEL, channel_value
         t_us, mode, pid, length, _flags = P.ISO.unpack(p[:P.ISO.size])
         data = p[P.ISO.size:P.ISO.size + length]
         name = PID_CHANNEL.get(pid)
@@ -777,7 +776,7 @@ class CydPoller(threading.Thread):
             return
         if self._ecu_up is not True:
             self._link(True, P.LINK_ISO_ONLY, now)
-        self._values[name] = decode_pid(pid, data).value
+        self._values[name] = channel_value(pid, data)
         self._stamps[name] = self._session(t_us, now)
         self._fresh.add(name)
 

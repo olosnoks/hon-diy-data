@@ -173,7 +173,7 @@ def build_map(amap: AddressMap, source: str | None = None, *, stall: dict[str, f
         try:
             if len(records) >= F.MAX_CH:
                 raise Unsupported(f"no room: the handheld takes {F.MAX_CH} channels")
-            program, _ = compile_condition(m.expr, pool, index, constants)
+            program, _ = compile_condition(m.expr, pool, index, constants, amap.obd2_names)
         except Unsupported as exc:
             report.skipped.append(f"math {name}: {exc}")
             continue
@@ -200,7 +200,7 @@ def build_map(amap: AddressMap, source: str | None = None, *, stall: dict[str, f
             spans = []
             for text in (rule.when, rule.clear_when, rule.gate):
                 if text.strip():
-                    program, _ = compile_condition(text, pool, index, constants)
+                    program, _ = compile_condition(text, pool, index, constants, amap.obd2_names)
                     spans += add(program)
                 else:
                     spans += (0, 0)

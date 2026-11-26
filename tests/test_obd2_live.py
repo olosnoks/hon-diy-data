@@ -174,3 +174,117 @@ def test_honda_ecu_keyed_off_is_probed_not_switched_to_obd2():
     samples = list(poller.samples)
     assert any(not s.link for s in samples) and samples[-1].link      # lost at key off, back at key on
     assert model.iso_inits == 0 and poller.mode == HONDA
+
+
+# ---- flags, load and the downstream O2 from standard PIDs ----
+
+REAL_CAR_PIDS = [0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x11,
+                 0x13, 0x14, 0x15, 0x1C]
+
+
+def test_channel_value_turns_status_bytes_into_flags():
+    from hondalog.obd2 import channel_value
+    # PID 03 fuel system 1 status: closed loop, and closed loop with an O2 fault
+    for status, flag in ((0x01, 0), (0x02, 1), (0x04, 0), (0x08, 0), (0x10, 1), (0x00, 0)):
+        assert channel_value(0x03, bytes([status, 0])) == flag, hex(status)
+    # PID 01 byte A bit 7 is the MIL; the low bits are the DTC count
+    assert channel_value(0x01, bytes([0x81, 7, 0x65, 0])) == 1
+    assert channel_value(0x01, bytes([0x7F, 7, 0x65, 0])) == 0
+    assert channel_value(0x04, b"\xff") == 100.0
+    assert channel_value(0x15, bytes([120, 0xFF])) == pytest.approx(0.6)
+    assert channel_value(0x03, b"") is None                          # short reply: unknown
+
+
+def test_plan_on_the_real_cars_pids_weights_flags_slow():
+    _clock, _model, poller = rig(honda_protocol=False)
+    plan = poller._plan_iso(REAL_CAR_PIDS)
+    count = {}
+    for pid, _name, _emit in plan:
+        count[pid] = count.get(pid, 0) + 1
+    assert set(count) == {0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                          0x11, 0x14, 0x15}                          # 13 and 1C fill no channel
+    assert count[0x01] == count[0x03] == 1                           # MIL and loop state: slow
+    assert count[0x04] == count[0x15] == 2                           # load and O2 post: medium
+    assert count[0x0B] == 3                                          # MAP: fast
+
+
+def test_obd2_mode_fills_mil_closed_loop_load_and_o2_post():
+    clock, model, poller = rig(honda_protocol=False, warmup_s=5.0, dtcs=("P0135",))
+    session = LiveSession(poller.amap)
+    session.attach(poller)
+    frames = []
+    session.on_frame = frames.append
+    poller.start()
+    try:
+        run_until(clock, 40)
+    finally:
+        poller.stop()
+    assert poller.mode == OBD2
+    last = [s for s in poller.samples if s.link][-1]
+    assert last.values["mil"] == 1                                   # a stored code lights it
+    assert last.values["closed_loop"] == (1 if model.live.closed_loop else 0)
+    assert any(s.values.get("closed_loop") == 1 for s in poller.samples if s.link)
+    assert last.values["o2_post"] == pytest.approx(0.6)
+    assert last.values["calc_load"] is not None
+    frame = [f for f in frames if f.link][-1]
+    assert frame.values["load"] == pytest.approx(frame.values["calc_load"])   # PID 04, not map/baro
+    for name in ("batt", "iacv", "knock", "baro", "eld", "alt_fr", "ign_limit", "vtec", "ac_sw",
+                 "inj"):
+        assert last.values[name] is None, name                       # no PID: stays blank
+    for name in ("inj_duty", "fuel_flow", "afr_est", "batt_min_5s"):
+        assert frame.values[name] is None, name                      # built on blank inputs
+
+
+def test_no_mil_and_open_loop_read_as_zero():
+    clock, model, poller = rig(honda_protocol=False)                 # cold, no codes
+    poller.start()
+    try:
+        run_until(clock, 20)
+    finally:
+        poller.stop()
+    last = [s for s in poller.samples if s.link][-1]
+    assert last.values["mil"] == 0 and last.values["closed_loop"] == 0
+
+
+def test_honda_mode_keeps_load_from_map_and_baro():
+    amap = addressmap.load_default()
+    assert "o2_post" not in amap.names and amap.obd2_channel("o2_post").pid == 0x15
+    out = amap.math_engine().update({"map": 50.0, "baro": 100.0}, 0.0)
+    assert out["load"] == pytest.approx(50.0)
+    out = amap.math_engine().update({"map": 50.0, "baro": 100.0, "calc_load": 21.0}, 0.0)
+    assert out["load"] == pytest.approx(21.0)
+    clock, model, poller = rig()
+    poller.start()
+    try:
+        run_until(clock, 10)
+    finally:
+        poller.stop()
+    assert poller.mode == HONDA
+    assert all("o2_post" not in s.values for s in poller.samples)   # never read over Honda
+
+
+def test_flag_and_o2_post_streams_are_recorded_with_raw_bytes(tmp_path):
+    clock = VirtualClock()
+    amap = addressmap.load_default()
+    model = EcuModel(clock=clock.now, honda_protocol=False, rev_every_s=0, warmup_s=5.0,
+                     dtcs=("P0135",))
+    session = LiveSession(amap, out_dir=tmp_path, sync_captures=True, fsync=False)
+    poller = Poller(LoopbackTransport(model, clock, byte_timing=True), amap, clock=clock)
+    session.attach(poller)
+    session.start_recording()
+    poller.start()
+    try:
+        run_until(clock, 40)
+    finally:
+        recorder = session.recorder
+        session.close()
+    assert recorder.write_error is None
+    with open_log(recorder.path) as log:
+        assert {"obd2/01", "obd2/03", "obd2/04", "obd2/15"} <= set(log.streams)
+        assert log.streams["obd2/03"].info.raw_len == 2 and log.streams["obd2/01"].info.raw_len == 4
+        assert set(np.unique(log.series("closed_loop").v)) <= {0.0, 1.0}
+        assert np.nanmax(log.series("closed_loop").v) == 1
+        assert np.all(log.series("mil").v == 1)
+        assert log.series("o2_post").v[-1] == pytest.approx(0.6, abs=1e-3)
+        assert log.series("o2_post").units == "V"
+        assert log.series("calc_load").units == "%"

@@ -406,6 +406,37 @@ status = "unverified"
 rate = "slow"
 source = "kerpz hobd_uni2 (P2T)"
 
+# ---- OBD2-only channels -----------------------------------------------------
+# Standard Mode 01 PIDs that have no Honda RAM address here. They are read only
+# in OBD2-only live mode (the ECU ignores Honda reads but answers ISO 9141-2)
+# and stay empty in Honda mode. Fields: name, pid, label, units, min, max,
+# decimals, kind, gauge (own tile), plot, rate, source, notes. Decoding is
+# SAE J1979's (hondalog/obd2.py), not a formula.
+
+[[obd2]]
+name = "o2_post"
+pid = 0x15
+label = "O2 post"
+units = "V"
+min = 0
+max = 1.2
+decimals = 2
+gauge = true
+plot = true
+rate = "medium"
+notes = "Downstream (post-catalyst) O2 sensor, bank 1 sensor 2: A / 200 volts"
+
+[[obd2]]
+name = "calc_load"
+pid = 0x04
+label = "Calc load"
+units = "%"
+min = 0
+max = 100
+decimals = 0
+rate = "medium"
+notes = "PID 04 calculated load value. Feeds the load math channel; no tile of its own"
+
 # ---- constants --------------------------------------------------------------
 # Named numbers for the expressions below. Check them against your engine.
 
@@ -478,12 +509,12 @@ description = "How fast engine speed is changing, fitted over the last half seco
 [[math]]
 name = "load"
 label = "Load"
-expr = "[map] / [baro] * 100"
+expr = "coalesce([calc_load], [map] / [baro] * 100)"
 units = "%"
 min = 0
 max = 100
 decimals = 0
-description = "Manifold pressure as a share of barometric pressure."
+description = "OBD2 PID 04 calculated load when the ECU sends it, otherwise manifold pressure as a share of barometric pressure."
 
 [[math]]
 name = "afr_est"
