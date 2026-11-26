@@ -212,6 +212,7 @@ static void make_link(hh_link_t *l, hh_transport_t *tr)
     tr->ctx = &tr_ctx_dummy; tr->open = w_open; tr->close = w_close; tr->write = w_write; tr->read_some = w_read;
     tr->flush_input = w_flush; tr->set_baud = w_baud; tr->set_break = w_break; tr->usb_latency_s = 0.001;
     hhsim_reset();
+    SIM.honda_baud = 9600; SIM.need_wake = 0;   /* link mechanics on kerpz's framing: a P2T */
     tr->open(tr->ctx);
     hh_link_init(l, tr, &clk, &f);
 }
@@ -348,9 +349,10 @@ TEST(test_planner)
         }
     }
     CHECK(covered == n);
-    /* The default map asks for a little more than 9600 baud carries (the
-     * laptop's planner says 1.09 too): the fast class then runs at 18 Hz. */
-    CHECK(NEAR(hh_plan_bus_load(&plan, &cost), 1.0916, 0.001));
+    /* The default map asks for a little more than the P2P's 10400 baud
+     * carries (the laptop's planner says 1.029 too; at kerpz's 9600 it was
+     * 1.092): the fast class then runs at about 19.4 Hz. */
+    CHECK(NEAR(hh_plan_bus_load(&plan, &cost), 1.0289, 0.001));
 
     /* two far-apart fast bytes are two requests; two near ones are one */
     hh_plan_ch_t far2[2] = {{0x00, 1, 20.0}, {0x40, 1, 20.0}}, near2[2] = {{0x00, 1, 20.0}, {0x05, 1, 20.0}};
@@ -452,7 +454,7 @@ TEST(test_map)
     const uint8_t *def;
     size_t len = hhhost_default_map(&def);
     hh_map_t m;
-    CHECK(MAP.n_ch >= 22 && MAP.n_alarm >= 5 && MAP.framing.baud == 9600);
+    CHECK(MAP.n_ch >= 27 && MAP.n_alarm >= 5 && MAP.framing.baud == 10400);
     CHECK(ch_index("rpm") == 0 && MAP.stall.rpm_channel == 0);
     CHECK(MAP.info.ecu_id_addr == 0x76 && MAP.info.ecu_id_len == 10);
     hh_map_chan_t c;
@@ -787,8 +789,8 @@ TEST(test_engine_link_loss_and_unplug)
     CHECK(d.ok && d.ended && d.stall_events == 2 && d.captures == 2 && d.bad == 0);
     CHECK(!(d.hdr.flags & HH_HF_PREALLOC));
     scan(drive_path(root, "CAPTURES", 'C', 1), &c);
-    /* 30 s before the trigger at about 60 reads a second */
-    CHECK(c.ok && c.hdr.reason == HH_STALL_LINK && c.reads > 1500 && c.reads < 2600);
+    /* 30 s before the trigger at 50-90 reads a second (the line runs at the P2P's 10400 baud) */
+    CHECK(c.ok && c.hdr.reason == HH_STALL_LINK && c.reads > 1500 && c.reads < 2800);
 }
 
 TEST(test_engine_noisy_line)

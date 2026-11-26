@@ -18,8 +18,10 @@ BYTE = 10 / 9600
 
 
 def rig(framing=protocol.DEFAULT, usb_latency_s=0.001, **model_kw):
+    """Link mechanics at 9600 baud: the simulated ECU is kerpz's P2T (Honda
+    reads at 9600, no wake frame), so the byte arithmetic stays simple."""
     clock = VirtualClock()
-    model = EcuModel(clock=clock.now, rev_every_s=0, **model_kw)
+    model = EcuModel(framing=framing, clock=clock.now, rev_every_s=0, **model_kw)
     transport = LoopbackTransport(model, clock, byte_timing=True, usb_latency_s=usb_latency_s)
     return clock, model, Link(transport, framing, clock)
 
@@ -460,6 +462,22 @@ def test_make_transport_builtin_sims():
     assert isinstance(t, LoopbackTransport) and t.byte_timing and not t.model.faults.any()
     flaky = make_transport("sim:flaky")
     assert flaky.model.faults.any() and flaky.name == "sim:flaky"
+    # sim: is a stock P2P whatever the map says; the port opens at the map's baud
+    amap = addressmap.load_default()
+    p2p = make_transport("sim:", amap.framing)
+    assert p2p.model.framing.baud == 10400 and p2p.model.need_wake and p2p.baud == 10400
+    link = Link(p2p, amap.framing.with_overrides({"retries": 0}))
+    link.wake()
+    assert link.read_mem(0x76, 3) == b"SIM"
+    old = make_transport("sim:", protocol.DEFAULT)              # a map still at 9600
+    assert old.baud == 9600
+    link = Link(old, protocol.DEFAULT.with_overrides({"retries": 0}))
+    link.wake()
+    with pytest.raises(protocol.NoReply):
+        link.read_mem(0x76, 3)                                  # like the car: no Honda at 9600
+    p2t = make_transport("sim:p2t", protocol.DEFAULT)
+    assert p2t.model.framing.baud == 9600 and not p2t.model.need_wake
+    assert Link(p2t, protocol.DEFAULT).read_mem(0x76, 3) == b"SIM"
 
 
 def test_transport_base_refuses_break_and_baud():

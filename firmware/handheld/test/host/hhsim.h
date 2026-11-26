@@ -14,8 +14,8 @@ typedef struct {
     int echo;               /* the cable echoes what is sent */
     int powered;            /* 0 = ECU silent (key off) */
     int port_ok;            /* 0 = the cable is unplugged */
-    uint32_t honda_baud;    /* Honda reads are answered at this baud rate only (9600; a real P2P: 10400) */
-    int need_wake;          /* Honda reads are answered only after the wake-up bytes (a real P2P) */
+    uint32_t honda_baud;    /* Honda reads are answered at this baud rate only (P2P, the default: 10400; kerpz's P2T: 9600) */
+    int need_wake;          /* Honda reads are answered only after the wake-up bytes (P2P, the default: 1) */
     int woken;              /* the wake-up bytes came since power-up */
     int closed_loop;        /* PID 03: fuel system 1 in closed loop */
     double turnaround_s;

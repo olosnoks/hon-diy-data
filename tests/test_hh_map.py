@@ -34,7 +34,7 @@ def test_map_file_carries_the_map_its_hash_and_its_text(amap):
     assert mf.address_map().version_hash == amap.version_hash
     assert report.core_bytes == len(mf.core) < F.MAP_MAX_CORE and report.total_bytes == len(data)
     assert mf.ecu_id_addr == 0x76 and mf.ecu_id_len == 10
-    assert mf.protocol["baud"] == 9600 and mf.protocol["init_sequence"] == amap.framing.init_sequence
+    assert mf.protocol["baud"] == 10400 and mf.protocol["init_sequence"] == amap.framing.init_sequence
     assert mf.protocol["rate_fast_hz"] == 20.0 and mf.protocol["max_read_len"] == 16
 
 
@@ -72,8 +72,12 @@ def test_channels_limits_and_what_is_left_out(amap):
 def test_the_protocol_section_reaches_the_handheld(tmp_path):
     """A stock P2P: Honda reads at 10400 baud after the wake-up bytes. The
     handheld runs the line at the map's baud, so it has to be in the file."""
+    shipped = addressmap.load_default()              # the shipped map is set up for the P2P
+    assert shipped.framing.baud == 10400 and read_map(build_map(shipped)).protocol["baud"] == 10400
+    p2t = addressmap.load(addressmap.DEFAULT_MAP, variant="P2T")
+    assert read_map(build_map(p2t)).protocol["baud"] == 9600        # kerpz's ECU: 9600
     text = addressmap.DEFAULT_MAP.read_text(encoding="utf-8").replace(
-        "[protocol]\n", '[protocol]\nbaud = 10400\ninit_sequence = "68 6a f5 af bf b3 b2 c1 db b3 e9"\n'
+        "[protocol]\n", '[protocol]\ninit_sequence = "68 6a f5 af bf b3 b2 c1 db b3 e9"\n'
         "init_delay_s = 0.35\n", 1)
     path = tmp_path / "p2p.toml"
     path.write_text(text, encoding="utf-8")

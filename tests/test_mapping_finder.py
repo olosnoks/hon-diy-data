@@ -115,7 +115,9 @@ def test_record_link_direct():
     model = EcuModel(clock=lambda: clk[0])
     tr = LoopbackTransport(model)
     tr.open()
-    rec = sweeps.record_link(Link(tr, AMAP.framing), 2, lo=0, hi=0x1F,
+    link = Link(tr, AMAP.framing)
+    link.wake()                                 # the P2P answers only after the wake frame
+    rec = sweeps.record_link(link, 2, lo=0, hi=0x1F,
                              between=lambda i: clk.__setitem__(0, clk[0] + 1))
     assert len(rec) == 2 and list(rec.read_addresses()) == list(range(32))
     assert sweeps.chunks(0x10, 0x00, 7) == [(0, 7), (7, 7), (14, 3)]

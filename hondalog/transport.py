@@ -33,6 +33,7 @@ SIM_SYMLINK = "/tmp/hondalog-sim"
 BUILTIN_SIM = "sim:"
 BUILTIN_SIM_FLAKY = "sim:flaky"
 BUILTIN_SIM_ISO = "sim:iso"
+BUILTIN_SIM_P2T = "sim:p2t"
 
 DEFAULT_USB_LATENCY_S = 0.016      # FTDI default latency_timer when we could not lower it
 LOW_USB_LATENCY_S = 0.001
@@ -227,7 +228,7 @@ class LoopbackTransport(Transport):
     """The simulated ECU in the same process, with a model of the wire.
 
     ``byte_timing=False``: bytes come back at once (unit tests).
-    ``byte_timing=True``: true 9600-baud timing. Every byte, echo included,
+    ``byte_timing=True``: true timing at the line's baud. Every byte, echo included,
     becomes readable 10 bit times after the one before it, the ECU's reply
     starts ``model.turnaround_s`` after the last request byte, and the adapter
     hands bytes over on ``usb_latency_s`` ticks like an FTDI latency timer.
@@ -239,7 +240,8 @@ class LoopbackTransport(Transport):
     name = BUILTIN_SIM
 
     def __init__(self, model: "EcuModel | None" = None, clock: Clock = REAL,
-                 byte_timing: bool = False, usb_latency_s: float | None = None) -> None:
+                 byte_timing: bool = False, usb_latency_s: float | None = None,
+                 baud: int | None = None) -> None:
         if model is None:
             from .sim import EcuModel
             model = EcuModel(clock=clock.now)
@@ -249,7 +251,10 @@ class LoopbackTransport(Transport):
         if usb_latency_s is None:
             usb_latency_s = LOW_USB_LATENCY_S if byte_timing else 0.0
         self.usb_latency_s = usb_latency_s
-        self.baud = model.framing.baud
+        # The baud rate the port opens at, like SerialTransport's. None: the
+        # simulated ECU's own Honda speed (tests that only want it to answer).
+        self.open_baud = baud
+        self.baud = model.framing.baud if baud is None else baud
         self._rx: list[tuple[float, int]] = []      # (readable at, byte), time order
         self._wire_free = 0.0                       # when our last TX byte ends
         self._break_since: float | None = None
@@ -287,7 +292,7 @@ class LoopbackTransport(Transport):
         self._wire_free = 0.0
         self._break_since = None
         self._is_open = True
-        self.baud = self.model.framing.baud
+        self.baud = self.model.framing.baud if self.open_baud is None else self.open_baud
 
     def close(self) -> None:
         self._is_open = False
@@ -406,9 +411,10 @@ def list_ports() -> list[PortInfo]:
     for p in found:
         if p.vid is not None:
             add(p.device, f"{p.device}  ({p.vid:04x}:{p.pid:04x} {p.description})")
-    add(BUILTIN_SIM, "sim:  (built-in simulator, true 9600 baud timing)")
+    add(BUILTIN_SIM, "sim:  (built-in simulated P2P: 10400 baud after the wake frame, true timing)")
     add(BUILTIN_SIM_FLAKY, "sim:flaky  (built-in simulator with line faults)")
     add(BUILTIN_SIM_ISO, "sim:iso  (built-in simulator that answers OBD2 only)")
+    add(BUILTIN_SIM_P2T, "sim:p2t  (built-in simulated P2T: kerpz's 9600 baud ECU)")
     return ports
 
 
@@ -436,11 +442,16 @@ def default_port() -> str:
 
 def make_transport(port: str, framing: Framing = protocol.DEFAULT) -> Transport:
     if port.startswith(BUILTIN_SIM):
-        from .sim import EcuModel, Faults
+        from .sim import P2P_FRAMING, P2T_FRAMING, EcuModel, Faults
         faults = Faults.flaky() if port == BUILTIN_SIM_FLAKY else None
+        # The simulated ECU is a stock P2P, whatever the map says: Honda reads
+        # at 10400 baud after the wake frame, like the car. A map that asks
+        # for 9600 gets no Honda replies here either. sim:p2t is kerpz's ECU.
         # sim:iso = an ECU that answers standard OBD2 (ISO 9141-2) but not Honda reads
-        model = EcuModel(framing=framing, faults=faults, honda_protocol=port != BUILTIN_SIM_ISO)
-        transport = LoopbackTransport(model, byte_timing=True)
+        model = EcuModel(framing=P2T_FRAMING if port == BUILTIN_SIM_P2T else P2P_FRAMING,
+                         faults=faults, honda_protocol=port != BUILTIN_SIM_ISO)
+        # the port opens at the map's baud, as a serial port would
+        transport = LoopbackTransport(model, byte_timing=True, baud=framing.baud)
         transport.name = port
         return transport
     return SerialTransport(port, framing.baud)

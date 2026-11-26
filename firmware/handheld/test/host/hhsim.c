@@ -51,7 +51,10 @@ void hhsim_reset(void)
     memcpy(SIM.mem + 0x76, "37820-P2P-", 10);
     SIM.honda = 1; SIM.echo = 1; SIM.powered = 1; SIM.port_ok = 1;
     SIM.turnaround_s = 0.002;
-    SIM.honda_baud = 9600;
+    /* a stock P2P, as on the 2000 Civic EX and in the built-in map: Honda
+     * reads at 10400 baud, only after the wake-up bytes */
+    SIM.honda_baud = 10400;
+    SIM.need_wake = 1;
     SIM.rng = 12345;
     SIM.mem[0x17] = 144;        /* 13.8 V */
     SIM.mem[0x10] = 40;         /* warm coolant */

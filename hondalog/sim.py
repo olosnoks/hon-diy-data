@@ -6,14 +6,21 @@ the app can talk to it exactly as it talks to the KKL cable, echo included.
 
 What it models:
 
-* Honda RAM reads at 9600 baud (``20 05 addr len cksum``).
+* Honda RAM reads (``20 05 addr len cksum``) as the stock P2P answers them
+  (confirmed on a 2000 Civic EX, 2026-11-25): at 10400 baud only, and only
+  after the wake frame ``68 6A F5 AF BF B3 B2 C1 DB B3 E9``. The ECU stays
+  awake until it loses power. ``EcuModel(framing=protocol.DEFAULT)`` is
+  instead kerpz's P2T: Honda reads at 9600 baud, no wake frame needed.
 * ISO 9141-2 at 10400 baud: 5-baud init at address 0x33 with W1-W5 and
   P2/P3 timing, optional fast init (off by default, as on the real car),
-  Mode 01 PIDs, Mode 02 freeze frame, Mode 03/07 DTCs, Mode 04 clear. The two
-  protocols exclude each other: while an ISO session is alive (until 5 s of
-  silence) Honda requests go unanswered. That is a guess about the real ECU,
-  chosen because it is the harder case for the app. ISO needs break and baud
-  control, so it works on the in-process transport, not through the pty.
+  Mode 01 PIDs, Mode 02 freeze frame, Mode 03/07 DTCs, Mode 04 clear. On the
+  P2P both protocols share 10400 baud, so the ECU tells them apart by
+  content: a 5-baud init opens an ISO session, the wake frame and ``20 05``
+  frames are Honda. The two exclude each other: while an ISO session is alive
+  (until 5 s of silence) Honda requests go unanswered. That is a guess about
+  the real ECU, chosen because it is the harder case for the app. ISO needs
+  break and baud control, so it works on the in-process transport, not
+  through the pty.
 * Line faults (``Faults``): dropped bytes, bad checksums, junk, slow and
   missing replies, damaged echo, cable unplug. Seeded, so a run repeats.
 * True byte timing: see ``LoopbackTransport(byte_timing=True)`` and ``serve``.
@@ -55,6 +62,11 @@ P3_MIN_S = 0.055           # ECU ignores a request sooner than this after its re
 P3_MAX_S = 5.0             # ISO session dies after this much silence
 W5_S = 0.3                 # line must be idle this long before a 5-baud init
 KWP_START = bytes.fromhex("c133f18166")
+#: The stock P2P: Honda reads at 10400 baud, after the wake frame (the
+#: init_sequence, which Framing has by default).
+P2P_FRAMING = protocol.DEFAULT.with_overrides({"baud": ISO_BAUD})
+#: kerpz's P2T test ECU: Honda reads at 9600 baud.
+P2T_FRAMING = protocol.DEFAULT
 KWP_START_REPLY = bytes.fromhex("83f110c1e98fbd")
 
 
@@ -166,7 +178,7 @@ class _Live:
 class EcuModel:
     """A warm-ish D16 that idles, revs now and then, and can be made to die."""
 
-    def __init__(self, framing: Framing = protocol.DEFAULT, warmup_s: float = 120.0,
+    def __init__(self, framing: Framing = P2P_FRAMING, warmup_s: float = 120.0,
                  rev_every_s: float = 20.0, stall_after_s: float | None = None,
                  stall_mode: str = "rpm", restart_after_s: float | None = 15.0,
                  echo: bool = True, seed: int = 1,
@@ -174,8 +186,14 @@ class EcuModel:
                  faults: Faults | None = None, turnaround_s: float = 0.002,
                  max_read_len: int | None = None, honda_protocol: bool = True,
                  iso: bool = True, iso_fast_init: bool = False,
-                 dtcs: tuple[str, ...] = (), pending_dtcs: tuple[str, ...] = ()) -> None:
-        self.framing = framing
+                 dtcs: tuple[str, ...] = (), pending_dtcs: tuple[str, ...] = (),
+                 need_wake: bool | None = None) -> None:
+        self.framing = framing             # Honda reads are answered at framing.baud only
+        # None: like the P2P, a 10400 baud ECU wants the wake frame first
+        self.need_wake = (framing.baud == ISO_BAUD) if need_wake is None else need_wake
+        self.woken = False
+        self.wakes = 0
+        self.honda_ignored = 0             # Honda reads dropped: not woken yet
         self.faults = faults or Faults()
         self.fault_rng = random.Random(self.faults.seed)
         self.fault_counts: dict[str, int] = {}
@@ -239,6 +257,7 @@ class EcuModel:
         """ECU loses power: engine dies and the K-line goes silent."""
         self.stall()
         self.powered = False
+        self.woken = False         # the wake frame has to be sent again
 
     def restart(self) -> None:
         self.running = self.powered = True
@@ -410,6 +429,9 @@ class EcuModel:
         if (not self.powered or not self.honda_protocol
                 or frame[0] != self.framing.cmd_read or len(frame) != 5):
             return b""
+        if self.need_wake and not self.woken:
+            self.honda_ignored += 1
+            return b""
         addr, length = frame[2], frame[3]
         if length == 0 or (self.max_read_len is not None and length > self.max_read_len):
             return b""
@@ -441,7 +463,22 @@ class EcuModel:
         checksum are dropped a byte at a time until it finds one it likes.
         No faults and no timing here; see ``on_bytes`` for the wire-level view.
         """
+        self._wake_in(buf)
         return b"".join(self._frames(buf))
+
+    def _wake_in(self, buf: bytearray) -> None:
+        """Take the wake frame out of ``buf``; a powered ECU is awake after it."""
+        seq = self.framing.init_sequence
+        if not seq:
+            return
+        at = buf.find(seq)
+        while at >= 0:
+            del buf[at:at + len(seq)]
+            self.step()                     # power state is due now (key on)
+            if self.powered:
+                self.woken = True
+                self.wakes += 1
+            at = buf.find(seq)
 
     # -- the wire --
 
@@ -454,14 +491,22 @@ class EcuModel:
         """Bytes from the tester, complete on the wire at ``now``."""
         gap = now - self._last_rx
         self._last_rx = self._last_activity = now
-        if self._iso_alive(now) or baud != self.framing.baud:
+        # Told apart by content, not only by speed: on the P2P both protocols
+        # run at 10400 baud. An ISO session (opened by a 5-baud init, or a
+        # fast init) takes everything until it times out; otherwise bytes at
+        # the Honda speed are Honda (wake frame, 20 05 reads).
+        iso_ok = baud == ISO_BAUD and self.powered and self.iso
+        fast_start = (iso_ok and self.iso_fast_init and data == KWP_START
+                      and now <= self._fast_armed_until + 0.1)
+        if self._iso_alive(now) or fast_start or baud != self.framing.baud:
             self._rxbuf.clear()
-            if baud != ISO_BAUD or not self.powered or not self.iso:
+            if not iso_ok:
                 return []                       # wrong speed: framing errors, ignored
             return self._iso_bytes(data, now)
         if gap > 0.05:
             self._rxbuf.clear()                 # stale partial request
         self._rxbuf += data
+        self._wake_in(self._rxbuf)
         chunks: list[Chunk] = []
         delay = self.turnaround_s
         for frame in self._frames(self._rxbuf):
@@ -808,7 +853,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--restart-after", type=float, default=15.0, help="seconds a stall lasts, 0 = until 'r'")
     ap.add_argument("--no-echo", action="store_true", help="do not echo requests (not like a real K-line)")
     ap.add_argument("--fast", action="store_true",
-                    help="skip the 9600 baud byte timing (bytes go out at once)")
+                    help="skip the true byte timing (bytes go out at once)")
     ap.add_argument("--faults", default="", metavar="SPEC",
                     help="line faults, e.g. 'drop=0.01,cksum=0.01,junk=0.01,slow=0.005,silent=0.005,"
                          "echo=0.005' or 'flaky'")
@@ -823,11 +868,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cable-dead", action="store_true", help="no echo, no replies (no 12 V at the plug)")
     ap.add_argument("--iso-only", action="store_true",
                     help="ECU ignores Honda reads (ISO needs the built-in sim: port, not the pty)")
+    ap.add_argument("--ecu", choices=("P2P", "P2T"), default="P2P",
+                    help="P2P (default): Honda reads at 10400 baud after the wake frame, as on "
+                         "the 2000 Civic EX. P2T: kerpz's test ECU, Honda reads at 9600 baud")
     ap.add_argument("--run-for", type=float, default=None, help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     faults = Faults.flaky(args.seed) if args.faults == "flaky" else Faults.parse(args.faults)
     faults.seed = args.seed
-    model = EcuModel(warmup_s=args.warmup, rev_every_s=args.rev_every,
+    model = EcuModel(framing=P2P_FRAMING if args.ecu == "P2P" else P2T_FRAMING,
+                     warmup_s=args.warmup, rev_every_s=args.rev_every,
                      stall_after_s=args.stall_after, stall_mode=args.stall_mode,
                      restart_after_s=args.restart_after or None, echo=not args.no_echo,
                      seed=args.seed, faults=faults, turnaround_s=args.turnaround_ms / 1000.0,

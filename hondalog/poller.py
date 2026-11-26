@@ -18,7 +18,8 @@ Recovery
 --------
 * ECU stops answering (key off, stall with power loss): state NO_REPLY, the
   thread probes with one short read and a growing pause, re-sends the wake-up
-  bytes now and then, and carries on by itself when the ECU is back.
+  bytes before every second probe (a P2P answers nothing after key-on until
+  it has had them), and carries on by itself when the ECU is back.
 * Port dies (cable pulled): state PORT_LOST, the thread reopens the port every
   0.25-2 s (the cable may come back under another ttyUSB number) and then goes
   through the same probing.
@@ -511,8 +512,8 @@ class Poller(threading.Thread):
         quiet = self.clock.now() < self._quiet_until
         try:
             self._probes += 1
-            if self._probes % 4 == 0:
-                self.link.wake()            # the ECU may have just been powered up
+            if self._probes % 2 == 0:
+                self.link.wake()            # just powered up? a P2P needs the wake frame
             try:
                 self._read(block.addr, block.length)
             except ProtocolError:

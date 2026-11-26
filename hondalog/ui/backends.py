@@ -114,7 +114,7 @@ def obd2_specs(amap) -> list[ChannelSpec]:
 
 
 def is_sim_port(port: str) -> bool:
-    return port in (BUILTIN_SIM, BUILTIN_SIM_ISO, SIM_SYMLINK)
+    return port.startswith(BUILTIN_SIM) or port == SIM_SYMLINK
 
 
 # ---- ECU over K-line --------------------------------------------------------

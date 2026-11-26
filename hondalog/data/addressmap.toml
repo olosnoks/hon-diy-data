@@ -51,10 +51,11 @@ ecu_variant = "P2P"                     # which of the [variants] below to load
 
 # The plain channel entries describe the first variant listed here.
 [variants.P2P]
-description = "2000 Civic EX, D16Y8, OBD2B. Confirmed 2026-11-25: Honda reads answer at 10400 baud after the wake frame (set baud = 10400 in [protocol] for the car)."
+description = "2000 Civic EX, D16Y8, OBD2B. Confirmed 2026-11-25: Honda reads answer at 10400 baud, only after the wake frame (baud = 10400 under [protocol])."
 
 [variants.P2T]
 description = "kerpz's OBD2 test ECU. The addresses in this file are his."
+protocol = { baud = 9600 }              # kerpz reads his ECU at 9600
 
 [variants.P28]
 description = "Chipped OBD1 P28. Needs the OBD1 datalog link, not this K-line protocol."
@@ -67,7 +68,9 @@ length = 10
 # Framing overrides. Defaults are in hondalog/protocol.py (class Framing).
 # Uncomment to change. init_sequence = "" sends no wake-up bytes.
 [protocol]
-# baud = 9600
+# The stock P2P answers Honda reads at 10400 baud, and only after the wake
+# frame below (init_sequence, sent by default). It does not answer at 9600.
+baud = 10400
 # cmd_read = 0x20
 # reply_header = 0x00        # -1 accepts any first byte
 # reply_timeout_s = 0.2
@@ -466,13 +469,6 @@ status = "verified"
 rate = "slow"
 source = "kerpz hobd_uni2 (P2T)"
 
-# ---- OBD2-only channels -----------------------------------------------------
-# Standard Mode 01 PIDs that have no Honda RAM address here. They are read only
-# in OBD2-only live mode (the ECU ignores Honda reads but answers ISO 9141-2)
-# and stay empty in Honda mode. Fields: name, pid, label, units, min, max,
-# decimals, kind, gauge (own tile), plot, rate, source, notes. Decoding is
-# SAE J1979's (hondalog/obd2.py), not a formula.
-
 [channel.evidence]
 date = "2026-11-25T19:45"
 method = "manual"
@@ -555,6 +551,13 @@ method = "manual"
 result = "pass"
 summary = "bit 0 of 0x08 set only while cranking"
 reference = "key cycle"
+
+# ---- OBD2-only channels -----------------------------------------------------
+# Standard Mode 01 PIDs that have no Honda RAM address here. They are read only
+# in OBD2-only live mode (the ECU ignores Honda reads but answers ISO 9141-2)
+# and stay empty in Honda mode. Fields: name, pid, label, units, min, max,
+# decimals, kind, gauge (own tile), plot, rate, source, notes. Decoding is
+# SAE J1979's (hondalog/obd2.py), not a formula.
 
 [[obd2]]
 name = "o2_post"

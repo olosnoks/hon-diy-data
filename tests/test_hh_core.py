@@ -390,13 +390,16 @@ def test_engine_only_ever_sends_reads(handheld):
     h.run_until(60.0)
     h.model.unplug(3.0)
     h.run_until(70.0)
+    # On the P2P both protocols run at 10400 baud: tell them apart by content
     framing = protocol.DEFAULT
-    honda = [f for baud, f in h.sent if baud == 9600]
-    iso = [f for baud, f in h.sent if baud != 9600]
+
+    def is_honda(frame):
+        return frame == framing.init_sequence or (
+            len(frame) == 5 and frame[0] == 0x20 and frame[1] == 5 and protocol.verify(frame))
+    honda = [(baud, f) for baud, f in h.sent if is_honda(f)]
+    iso = [f for baud, f in h.sent if not is_honda(f)]
     assert len(honda) > 1000 and iso
-    for frame in honda:
-        assert frame == framing.init_sequence or (
-            len(frame) == 5 and frame[0] == 0x20 and frame[1] == 5 and protocol.verify(frame)), frame.hex()
+    assert {baud for baud, _ in honda} == {10400}                  # the map's baud, never 9600
     for frame in iso:
         assert len(frame) == 1 or (frame[:3] == b"\x68\x6a\xf1" and frame[3] in (0x01, 0x03)), frame.hex()
     assert h.get("stats.blocked") == 0

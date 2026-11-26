@@ -12,7 +12,8 @@ from hondalog.diag import ftdi
 from hondalog.diag.probe import probe_block_length, probe_timing, sweep
 from hondalog.diag.trace import TracingTransport
 from hondalog.link import VirtualClock
-from hondalog.sim import EcuModel
+from hondalog.addressmap import load_default
+from hondalog.sim import P2P_FRAMING, EcuModel
 from hondalog.transport import Link, LoopbackTransport, Transport, TransportError
 
 
@@ -34,7 +35,8 @@ def run(model_setup=None, **kw: object) -> fc.FirstContactReport:
 def test_verdict_honda_ok_with_everything_measured():
     r = run(dtcs=("P0135",))
     assert r.verdict == fc.HONDA_OK
-    assert r.echo and r.honda_no_init
+    assert r.echo and not r.honda_no_init and r.honda_with_init     # a P2P wants the wake frame
+    assert "only after the wake-up bytes" in r.summary
     assert r.ecu_id.startswith(b"SIM-P2P")
     assert r.block_probe is not None and r.block_probe.max_read_len == 64
     assert r.timing is not None and r.timing.ok
@@ -117,9 +119,25 @@ def test_cli_writes_report(tmp_path, capsys):
 
 # ---- probes ----------------------------------------------------------------
 
+def p2p_link(transport, clock):
+    """A link with the P2P's framing (10400 baud), the ECU woken up."""
+    link = Link(transport, P2P_FRAMING, clock)
+    link.wake()
+    return link
+
+
+def test_p2t_answers_without_the_wake_frame():
+    clock, model, transport = rig(framing=protocol.DEFAULT)     # kerpz's 9600 baud ECU
+    amap = load_default()
+    amap.framing = protocol.DEFAULT
+    r = fc.run("sim:", transport=transport, clock=clock, listen_s=0, iso=False, quick=True,
+               amap=amap)
+    assert r.verdict == fc.HONDA_OK and r.honda_no_init and "without the wake-up" in r.summary
+
+
 def test_block_length_probe_finds_the_ecu_limit():
     clock, model, transport = rig(max_read_len=16)
-    link = Link(transport, protocol.DEFAULT, clock)
+    link = p2p_link(transport, clock)
     p = probe_block_length(link)
     assert p.max_read_len == 16
     assert p.results[16] and not p.results[32]
@@ -127,18 +145,18 @@ def test_block_length_probe_finds_the_ecu_limit():
 
 def test_timing_probe_measures_a_slow_ecu_and_recommends():
     clock, model, transport = rig(turnaround_s=0.010)
-    link = Link(transport, protocol.DEFAULT, clock)
+    link = p2p_link(transport, clock)
     p = probe_timing(link, reads=50)
     assert p.reads == 50 and p.failed == 0
     assert 9.5 < p.turnaround_median_ms < 12.5
     assert p.recommended["reply_timeout_s"] >= 0.05
     assert p.recommended["inter_request_delay_s"] == 0.001
-    assert link.timing.gap == link.timing.gap_floor == protocol.DEFAULT.inter_request_delay_s
+    assert link.timing.gap == link.timing.gap_floor == P2P_FRAMING.inter_request_delay_s
 
 
 def test_timing_probe_apply_sets_link_limits():
     clock, model, transport = rig(turnaround_s=0.010)
-    link = Link(transport, protocol.DEFAULT, clock)
+    link = p2p_link(transport, clock)
     p = probe_timing(link, reads=30, apply=True)
     assert link.timing.gap_floor == p.recommended["inter_request_delay_s"]
     assert link.timing.timeout_ceiling == p.recommended["reply_timeout_s"]
@@ -154,7 +172,7 @@ def test_sweep_marks_dead_addresses_byte_by_byte():
             return super().handle(frame)
     clock = VirtualClock()
     model = Holey(clock=clock.now, rev_every_s=0)
-    link = Link(LoopbackTransport(model, clock, byte_timing=True), protocol.DEFAULT, clock)
+    link = p2p_link(LoopbackTransport(model, clock, byte_timing=True), clock)
     s = sweep(link)
     assert s.answered == 255 and s.unanswered == [(0x42, 1)]
     assert "--" in s.hexdump().splitlines()[5]
@@ -164,7 +182,7 @@ def test_sweep_marks_dead_addresses_byte_by_byte():
 # ---- trace -----------------------------------------------------------------
 
 def test_trace_records_and_merges():
-    clock, model, transport = rig()
+    clock, model, transport = rig(framing=protocol.DEFAULT)     # P2T: no wake bytes in the trace
     tr = TracingTransport(transport, clock)
     link = Link(tr, protocol.DEFAULT, clock)
     link.read_block(0x00, 2)

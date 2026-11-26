@@ -109,8 +109,10 @@ def test_full_run_on_sim_finishes_and_reports(honda):
     assert any("0x21" in n and "stopped" in n for n in r.notes)
     honda_rows = [e for e in r.exchanges if e.stage.startswith("B")]
     assert len(honda_rows) == len(ep.HONDA_CANDIDATES)
-    first = honda_rows[0]
-    assert (first.kind == ep.POSITIVE) == honda
+    # the P2P, as on the car: Honda reads answer only at 10400 baud after the wake frame
+    positive = [c.name for c, e in zip(ep.HONDA_CANDIDATES, honda_rows) if e.kind == ep.POSITIVE]
+    want = [c.name for c in ep.HONDA_CANDIDATES if c.baud == 10400 and c.wake] if honda else []
+    assert positive == want and len(want) in (0, 6)
     md = r.to_markdown()
     assert "| stage | service | request | reply | meaning |" in md
     assert "## Byte trace" in md and "BREAK" in md and "TX    20 05 00 02 D9" in md

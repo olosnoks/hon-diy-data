@@ -47,16 +47,60 @@ FAST = protocol.DEFAULT.with_overrides({"reply_timeout_s": 0.03, "init_sequence"
 
 
 def test_sim_echoes_then_replies():
-    t = LoopbackTransport(EcuModel(rev_every_s=0))
+    t = LoopbackTransport(EcuModel(rev_every_s=0))      # a stock P2P: 10400 baud
+    assert t.baud == 10400
     req = protocol.build_read_request(0x00, 2)
+    t.write(req)
+    assert t.read(64, 0.1) == req                       # not woken: the echo only
+    t.write(protocol.DEFAULT.init_sequence)
+    assert t.read(64, 0.1) == protocol.DEFAULT.init_sequence
     t.write(req)
     got = t.read(64, 0.1)
     assert got[:5] == req                               # echo first
     assert protocol.parse_reply(got, req, 2)
 
 
+def test_p2p_answers_honda_only_at_10400_after_the_wake_frame():
+    from hondalog.sim import P2P_FRAMING
+    m = EcuModel(rev_every_s=0)
+    t = LoopbackTransport(m)
+    req = protocol.build_read_request(0x76, 3)
+    wake = P2P_FRAMING.init_sequence
+    for baud in (9600, 10400):                          # no wake frame: silent at either speed
+        t.set_baud(baud)
+        t.write(req)
+        assert t.read(64, 0.1) == req
+    t.set_baud(9600)
+    t.write(wake)                                       # a wake frame at 9600 is noise to it
+    t.write(req)
+    t.read(64, 0.1)
+    assert not m.woken and m.honda_ignored == 1         # only the read at 10400 got that far
+    t.set_baud(10400)
+    t.write(wake)
+    t.read(64, 0.1)
+    assert m.woken and m.wakes == 1
+    t.write(req)
+    assert t.read(64, 0.1)[5:10] == b"\x00\x06SIM"
+    t.set_baud(9600)
+    t.write(req)
+    assert t.read(64, 0.1) == req                       # woken, still deaf at 9600
+    m.power_cut()
+    m.restart()
+    t.set_baud(10400)
+    t.write(req)
+    assert t.read(64, 0.1) == req                       # key cycled: wake it again
+    link = Link(t, P2P_FRAMING)
+    link.wake()
+    assert link.read_mem(0x76, 3) == b"SIM"
+    p2t = LoopbackTransport(EcuModel(framing=protocol.DEFAULT, rev_every_s=0))
+    p2t.write(req)                                      # kerpz's P2T: 9600, no wake needed
+    assert p2t.baud == 9600 and p2t.read(64, 0.1)[5:10] == b"\x00\x06SIM"
+
+
 def test_sim_ignores_bad_checksum_and_resyncs():
     m = EcuModel(rev_every_s=0)
+    assert m.feed(bytearray(protocol.build_read_request(0x10, 1))) == b""   # asleep
+    assert m.feed(bytearray(protocol.DEFAULT.init_sequence)) == b"" and m.woken
     buf = bytearray(b"\x20\x05\x00\x02\x00")            # wrong checksum
     assert m.feed(buf) == b""
     buf += protocol.build_read_request(0x10, 1)
@@ -93,14 +137,16 @@ def test_sim_idle_rev_and_stall():
     assert m.feed(bytearray(protocol.build_read_request(0, 2))) == b""
 
 
+# FAST is a 9600 baud framing without wake bytes: kerpz's P2T, not the P2P
+
 def test_link_reads_through_echo():
-    link = Link(LoopbackTransport(EcuModel(rev_every_s=0)), FAST)
+    link = Link(LoopbackTransport(EcuModel(framing=FAST, rev_every_s=0)), FAST)
     data = link.read_mem(0x76, 10)
     assert data == b"SIM-P2P\x00\x00\x01" and link.echo_seen
 
 
 def test_link_works_without_echo():
-    link = Link(LoopbackTransport(EcuModel(rev_every_s=0, echo=False)), FAST)
+    link = Link(LoopbackTransport(EcuModel(framing=FAST, rev_every_s=0, echo=False)), FAST)
     assert len(link.read_mem(0x00, 16)) == 16 and not link.echo_seen
 
 
@@ -117,7 +163,7 @@ def test_link_malformed_replies(answer, exc):
 
 
 def test_link_raw_separates_echo():
-    link = Link(LoopbackTransport(EcuModel(rev_every_s=0)), FAST)
+    link = Link(LoopbackTransport(EcuModel(framing=FAST, rev_every_s=0)), FAST)
     req = protocol.build_read_request(0x76, 3)
     echo, rest = link.raw(req, quiet_s=0.03, max_s=0.3)
     assert echo and protocol.find_any_frame(rest)[2:5] == b"SIM"
@@ -173,7 +219,7 @@ def test_poller_end_to_end_with_stall(tmp_path):
 def test_poller_reports_silent_ecu():
     amap = addressmap.load_default()
     amap.framing = FAST
-    model = EcuModel(rev_every_s=0)
+    model = EcuModel(framing=FAST, rev_every_s=0)
     model.power_cut()
     model.restart_after_s = None
     poller = Poller(LoopbackTransport(model), amap)

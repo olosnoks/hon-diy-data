@@ -12,6 +12,7 @@ from hondalog.obd2 import (ConfirmationRequired, InitError, Iso9141Error, Iso914
                            NoResponse, Obd2Session)
 from hondalog.poller import HONDA, OBD2, OK, Poller
 from hondalog.sim import EcuModel, Faults, dtc_to_bytes
+from hondalog.sim import P2P_FRAMING
 from hondalog.transport import Link, LoopbackTransport, Transport
 
 
@@ -19,7 +20,7 @@ def rig(**kw):
     clock = VirtualClock()
     model = EcuModel(clock=clock.now, rev_every_s=0, warmup_s=1, **kw)
     transport = LoopbackTransport(model, clock, byte_timing=True)
-    return clock, model, transport, Iso9141Link(transport, clock)
+    return clock, model, transport, Iso9141Link(transport, clock, honda_baud=model.framing.baud)
 
 
 class Recorder(Transport):
@@ -287,17 +288,18 @@ def test_dtc_table():
 # ---- sharing the line with the Honda protocol ----
 
 def test_protocols_exclude_each_other_and_switch_back_without_power_cycle():
-    clock, model, transport, iso = rig()
-    honda = Link(transport, protocol.DEFAULT.with_overrides({"retries": 0}), clock)
+    clock, model, transport, iso = rig()                      # a P2P: both at 10400 baud
+    honda = Link(transport, P2P_FRAMING.with_overrides({"retries": 0}), clock)
+    honda.wake()
     assert honda.read_mem(0x76, 3) == b"SIM"
     iso.connect()
     assert Obd2Session(iso).read_pid(0x0C).value > 0
-    iso.close()                                               # back to 9600 baud
-    assert transport.baud == 9600
+    iso.close()                                               # back to the Honda baud
+    assert transport.baud == 10400
     with pytest.raises(protocol.NoReply):
         honda.read_mem(0x76, 3)                               # ECU still holds the ISO session
     clock.sleep(5.1)                                          # P3max: it lets go
-    assert honda.read_mem(0x76, 3) == b"SIM"
+    assert honda.read_mem(0x76, 3) == b"SIM"                  # and is still awake
     # and the other way: Honda traffic, then straight into another ISO init
     iso.connect()
     assert Obd2Session(iso).read_pid(0x05).value == pytest.approx(model.ect, abs=1)
@@ -305,13 +307,32 @@ def test_protocols_exclude_each_other_and_switch_back_without_power_cycle():
 
 
 def test_wrong_baud_is_garbage_to_the_ecu():
-    clock, model, transport, iso = rig()
+    clock, model, transport, iso = rig(framing=protocol.DEFAULT)    # kerpz's P2T: Honda at 9600
     transport.set_baud(10400)
     transport.write(protocol.build_read_request(0, 2))        # Honda frame at the ISO speed
     assert transport.read(64, 0.3) == protocol.build_read_request(0, 2)   # echo only
     transport.set_baud(9600)
     transport.write(bytes.fromhex("686af1010cd0"))            # ISO frame, no session
     assert len(transport.read(64, 0.3)) == 6
+
+
+def test_p2p_tells_the_protocols_apart_by_content_at_10400():
+    clock, model, transport, iso = rig()
+    read = protocol.build_read_request(0, 2)
+    transport.write(P2P_FRAMING.init_sequence)
+    transport.read(64, 0.4)
+    transport.set_baud(9600)
+    transport.write(read)                                     # awake, but 9600 is noise to it
+    assert transport.read(64, 0.3) == read
+    transport.set_baud(10400)
+    transport.write(bytes.fromhex("686af1010cd0"))            # ISO frame, no session: ignored
+    assert len(transport.read(64, 0.3)) == 6
+    transport.write(read)                                     # Honda frame: answered
+    assert len(transport.read(64, 0.3)) == 5 + 5
+    iso.connect()                                             # 5-baud init: an ISO session
+    assert Obd2Session(iso).read_pid(0x0D).value == 0
+    transport.write(read)                                     # Honda frames ignored meanwhile
+    assert transport.read(64, 0.3) == read
 
 
 def _run_until(clock, t, wall=20.0):

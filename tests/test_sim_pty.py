@@ -35,6 +35,19 @@ def test_pty_echo_then_reply(sim_pty):
     t.open()
     try:
         req = protocol.build_read_request(0x76, 10)
+        t.write(req)                                # a P2P: nothing before the wake frame
+        got = b""
+        end = time.monotonic() + 0.3
+        while time.monotonic() < end:
+            got += t.read(64, 0.05)
+        assert got == req
+        wake = protocol.DEFAULT.init_sequence
+        t.write(wake)
+        got = b""
+        end = time.monotonic() + 1
+        while len(got) < len(wake) and time.monotonic() < end:
+            got += t.read(64, 0.05)
+        assert got == wake
         t.write(req)
         got = b""
         end = time.monotonic() + 1
