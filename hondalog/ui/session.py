@@ -276,7 +276,7 @@ def build_session(demo: bool = False, log_dir=None, writable_tables: bool = Fals
         tables.open(rom, definition)
     session = Session(ecu, wired.BlackboxSource(ecu, blackbox_port), wired.PipelineAlarms(ecu),
                       wired.LiveRecording(ecu, log_dir), None, wired.LogHistogramMap(tables),
-                      wired.MappingSession(ecu), tables, extra_sources=[wired.MathSource(ecu)])
+                      wired.MappingSession(ecu), tables, extra_sources=[wired.MathSource(ecu), wired.LaptopGpsSource(ecu)])
     session.logs = wired.DriveReader(_lookup(session), log_dir)
     return session
 

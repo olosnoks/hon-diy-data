@@ -10,6 +10,7 @@ built against. This module is what ``build_session()`` wires for real use:
                     ``cyd:`` ports: hondalog.handheld.serial_link)
     MathSource      W3 math channels as the "MATH" source
     BlackboxSource  W2 BlackboxReader on the poller's time axis
+    LaptopGpsSource the laptop's own location when no handheld GPS is connected
     PipelineAlarms  W3 alarm engine (plus plain limits for the black box rails)
     LiveRecording   W4 Recorder + trigger engine through the LiveSession
     DriveReader     W4 open_log / ReplaySession on the drive database, .bbx through W2 open_event
@@ -494,6 +495,85 @@ class BlackboxSource:
                                    errors=reader.errors, detail=reader.last_error,
                                    simulated=self.simulated)
         return ad.SourceStatus(ad.CONNECTING, detail="connecting", simulated=self.simulated)
+
+
+# ---- the laptop's location ---------------------------------------------------
+
+#: Windows' Wi-Fi/IP location moves seldom: a fix is the position for this long
+LAPTOP_GPS_TIMEOUT_S = 30.0
+
+
+class LaptopGpsSource:
+    """The laptop's own location (``hondalog.geo.laptop``) on the bus as source
+    "GPS", like the handheld's fixes, whenever the ECU port is not a ``cyd:``
+    port: idle, so the Map screen shows where the car is, and connected, where
+    the fixes go through ``LiveSession.laptop_fix`` and are recorded."""
+
+    name = "GPS"
+
+    def __init__(self, ecu: LinkSource, gps=None):
+        from ..geo.laptop import LaptopGps, default_backend
+        self.ecu = ecu
+        self.bus: ChannelBus | None = None
+        self.gps = gps if gps is not None else LaptopGps(backend=default_backend())
+        self.gps.on_fix = self._on_fix
+        ecu.listeners.append(self)
+
+    def specs(self):
+        return be.GPS_SPECS
+
+    def start(self, bus: ChannelBus) -> None:
+        self.bus = bus
+        if not self.ecu.is_cyd:
+            self.gps.start()
+
+    def stop(self) -> None:
+        self.gps.stop()
+
+    def on_map(self, _ecu) -> None: ...
+
+    def on_connect(self, ecu: LinkSource) -> None:
+        if ecu.is_cyd:                      # the handheld has its own GPS
+            self.gps.stop()
+            if self.bus is not None:
+                self.bus.set_timeout("GPS", be.GPS_TIMEOUT_S)
+        elif self.bus is not None:
+            self.gps.start()
+
+    def on_disconnect(self) -> None:
+        if self.bus is not None:
+            self.gps.start()                # idle: keep showing where the car is
+
+    def _on_fix(self, fix) -> None:
+        ecu, bus = self.ecu, self.bus
+        if ecu.poller is not None:
+            if not ecu.is_cyd:
+                ecu.live.laptop_fix(fix)    # -> LinkSource._on_gps, and the recording
+            return
+        if bus is None:
+            return
+        if bus.channel("gps_lat") is None:
+            for spec in be.GPS_SPECS:
+                bus.register(spec)
+        bus.set_timeout("GPS", LAPTOP_GPS_TIMEOUT_S)
+        values = fix.values()
+        bus.publish({k: values.get(k) for k in be.GPS_IDS}, t=bus.now(), source="GPS")
+
+    def info_text(self) -> str:
+        """For the info bar: "GPS: laptop ±40 m" or why there is none."""
+        if self.ecu.is_cyd and self.ecu.poller is not None:
+            return ""
+        return "GPS: " + self.gps.status
+
+    def status(self) -> ad.SourceStatus:
+        gps = self.gps
+        if self.bus is not None and gps.last is not None and not self.ecu.is_cyd:
+            self.bus.set_timeout("GPS", LAPTOP_GPS_TIMEOUT_S)
+        if not gps.running:
+            return ad.SourceStatus(ad.OFF, detail=gps.status[:40])
+        if gps.last is None:
+            return ad.SourceStatus(ad.CONNECTING, detail=gps.status[:40])
+        return ad.SourceStatus(ad.OK, 1.0, detail=gps.status)
 
 
 # ---- alarms -----------------------------------------------------------------

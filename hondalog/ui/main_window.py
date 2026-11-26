@@ -440,8 +440,10 @@ class Shell(QMainWindow):
             self._info_t = now
             n, unverified = s.counts()
             link = getattr(s.ecu, "link_text", lambda: "")()
+            gps = " · ".join(t for t in (getattr(x, "info_text", lambda: "")() for x in s.extra_sources) if t)
             self.tabs.set_info(f"{s.port or 'no port'} · map {s.map_name()} · {n} ch "
-                               f"· {unverified} unverified" + (f" · {link}" if link else ""))
+                               f"· {unverified} unverified" + (f" · {link}" if link else "")
+                               + (f" · {gps}" if gps else ""))
             notice = getattr(s.ecu, "take_notice", lambda: "")()
             if notice:
                 self.say(notice)

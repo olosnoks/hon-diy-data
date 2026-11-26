@@ -402,6 +402,20 @@ class LiveSession:
     # ---- the handheld (CydPoller thread) ----
 
     def _on_cyd_gps(self, t: float, fix: Mapping[str, Any]) -> None:
+        self.feed_gps(t, fix)
+
+    def laptop_fix(self, fix: Any) -> None:
+        """A fix from the laptop's own location (``hondalog.geo.laptop.Fix``),
+        when no handheld GPS is connected: the same path as the handheld's, its
+        ``gps`` stream marked source "laptop" with altitude and accuracy."""
+        from .geo.laptop import SOURCE, laptop_columns
+        self.feed_gps(self.now(), fix.values(), source=SOURCE, columns=laptop_columns)
+
+    def feed_gps(self, t: float, fix: Mapping[str, Any], source: str = "gps",
+                 columns: Callable[[], list[Any]] | None = None) -> None:
+        """A GPS fix (session seconds, the ``gps`` stream's columns): to ``on_gps``
+        and, while recording, into the ``gps`` stream. The stream's columns and
+        source are fixed by the first fix of a drive."""
         hook = self.on_gps
         if hook is not None:
             try:
@@ -411,11 +425,12 @@ class LiveSession:
         recorder = self.recorder
         if recorder is None:
             return
-        if self._gps_columns is None:
+        if self._gps_columns is None or self._gps_source != source:
             from .geo.track import GPS_STREAM, gps_columns
-            self._gps_columns = gps_columns()
+            self._gps_columns = (columns or gps_columns)()
             self._gps_stream = GPS_STREAM
-        recorder.feed_values(self._gps_stream, t, fix, source="gps", columns=self._gps_columns, evaluate=False)
+            self._gps_source = source
+        recorder.feed_values(self._gps_stream, t, fix, source=source, columns=self._gps_columns, evaluate=False)
 
     def _on_cyd_event(self, event: Any) -> None:
         """The handheld's own events: its button's markers, its stall trigger,
@@ -443,6 +458,7 @@ class LiveSession:
             recorder.external_trigger(f"handheld: {event.text}", t=event.t)
 
     _gps_stream = "gps"
+    _gps_source = "gps"
 
     # ---- black box thread ----
 
