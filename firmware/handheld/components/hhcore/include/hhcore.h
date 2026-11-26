@@ -330,6 +330,7 @@ void hh_map_chan(const hh_map_t *m, int i, hh_map_chan_t *out);
 void hh_map_alarm(const hh_map_t *m, int i, hh_map_alarm_t *out);
 
 enum { HH_CFG_BACKEND_AUTO = 0, HH_CFG_BACKEND_USB = 1, HH_CFG_BACKEND_UART = 2 };
+enum { HH_CFG_UNITS_METRIC = 0, HH_CFG_UNITS_US = 1 };     /* = HH_UNITS_* in hh_data.h */
 
 typedef struct {
     int32_t backend;            /* auto: USB cable if one enumerates, else stay on USB and wait */
@@ -349,6 +350,7 @@ typedef struct {
     int32_t serial;             /* 1: the binary link to the laptop on the USB-C port (SERIAL.md); 0 = off */
     int32_t serial_baud;        /* its baud rate */
     int32_t rotate;             /* display: 0 or 180 degrees (180 = picture upside down, for mounting the other way up) */
+    int32_t units;              /* display only: HH_CFG_UNITS_US (°F, mph, mi, inHg, gal/h) or _METRIC (the map's units) */
 } hh_config_t;
 
 void   hh_config_default(hh_config_t *c);

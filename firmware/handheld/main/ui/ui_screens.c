@@ -8,6 +8,7 @@
 #include "ui_shapes.h"
 #include "ui_theme.h"
 #include "ui_tile.h"
+#include "ui_units.h"
 
 #define GAP 4
 #define COLS 3
@@ -166,7 +167,7 @@ static void gps_create(lv_obj_t *body)
     lv_label_set_text(l, "GPS SPEED");
     ui_ink(l, TK(fg));
     l = ui_label(box, &hh_font_16, 5, 4, left_w - 14, LV_TEXT_ALIGN_RIGHT);
-    lv_label_set_text(l, "km/h");
+    lv_label_set_text(l, ui_units_speed_unit());
     ui_ink(l, TK(fg2));
     gps.speed = ui_label(box, &hh_num_84, 5, 34, left_w - 14, LV_TEXT_ALIGN_RIGHT);
     lv_label_set_long_mode(gps.speed, LV_LABEL_LONG_CLIP);
@@ -191,10 +192,10 @@ static void gps_create(lv_obj_t *body)
 
 static void gps_update(const hh_snapshot_t *s, const ui_derived_t *d)
 {
-    char text[48], num[16];
+    char text[48];
     bool fix = s->gps.fix != 0;
 
-    if (fix) ui_fmt_float(text, sizeof(text), s->gps.speed_kmh, 0);
+    if (fix) ui_fmt_float(text, sizeof(text), ui_units_speed(s->gps.speed_kmh), 0);
     else snprintf(text, sizeof(text), "---");
     ui_set_text(gps.speed, text);
 
@@ -216,8 +217,7 @@ static void gps_update(const hh_snapshot_t *s, const ui_derived_t *d)
 
     snprintf(text, sizeof(text), "%u:%02u:%02u", (unsigned)(d->trip_s / 3600), (unsigned)(d->trip_s / 60 % 60), (unsigned)(d->trip_s % 60));
     ui_set_text(gps.time.value, text);
-    ui_fmt_float(num, sizeof(num), d->trip_km, d->trip_km < 100 ? 2 : 1);
-    snprintf(text, sizeof(text), "%s km", num);
+    ui_units_distance(text, sizeof(text), d->trip_km);
     ui_set_text(gps.dist.value, text);
 
     if (!s->log.sd_ok) snprintf(text, sizeof(text), "NO CARD");

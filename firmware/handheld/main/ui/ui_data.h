@@ -7,7 +7,12 @@
 #include "lvgl.h"
 #include "hh_data.h"
 
+/* The channels in the display units (ui_units.h): units, lo/hi, limits and
+ * decimals converted. Values from the snapshot go through ui_value first. */
 const hh_channel_info_t *ui_channels(uint16_t *n);
+/* A snapshot value of channel ch in its display unit (NaN stays NaN). Uses the
+ * conversion of the last ui_channels() call. */
+float ui_value(int ch, float v);
 /* First channel whose name equals one of the '|'-separated candidates,
  * case-insensitive. -1 if none. */
 int ui_find_channel(const char *candidates);

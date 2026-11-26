@@ -187,7 +187,7 @@ void ui_tile_update(ui_tile_t *t, const hh_snapshot_t *s, bool octagon_on)
     }
 
     char text[16];
-    float v = have ? s->value[t->ch] : NAN;
+    float v = have ? ui_value(t->ch, s->value[t->ch]) : NAN;   /* display units, like t->info */
     if (have) ui_fmt_value(text, sizeof(text), t->info, v);
     else snprintf(text, sizeof(text), "---");
     ui_set_text(t->value, text);

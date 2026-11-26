@@ -488,6 +488,22 @@ TEST(test_config)
     hh_config_t back;
     hh_config_default(&back);
     CHECK(n > 100 && hh_config_parse(&back, text, n) == 0 && memcmp(&back, &c, sizeof(c)) == 0);
+
+    /* units: display only; us unless the card says metric */
+    hh_config_default(&c);
+    CHECK(c.units == HH_CFG_UNITS_US);
+    const char *u = "units = metric\n";
+    CHECK(hh_config_parse(&c, u, strlen(u)) == 0 && c.units == HH_CFG_UNITS_METRIC);
+    n = hh_config_dump(&c, text, sizeof(text));
+    CHECK(strstr(text, "units = metric\n") != NULL);
+    hh_config_default(&back);
+    CHECK(hh_config_parse(&back, text, n) == 0 && back.units == HH_CFG_UNITS_METRIC);
+    u = "units = Imperial\n";
+    CHECK(hh_config_parse(&c, u, strlen(u)) == 0 && c.units == HH_CFG_UNITS_US);
+    u = "units = US  # mph\nunits = furlongs\nunits = 0\nunits =\n";
+    CHECK(hh_config_parse(&c, u, strlen(u)) == 3 && c.units == HH_CFG_UNITS_US);
+    n = hh_config_dump(&c, text, sizeof(text));
+    CHECK(strstr(text, "units = us\n") != NULL);
 }
 
 /* ---- alarms ------------------------------------------------------------------------- */

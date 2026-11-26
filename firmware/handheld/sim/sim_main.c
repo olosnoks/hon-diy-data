@@ -407,6 +407,49 @@ static void test_format(void)
     CHECK(ui_find_channel("rp") < 0 && ui_find_channel("rpmx") < 0, "name lookup matches whole names");
 }
 
+static bool tree_has(lv_obj_t *obj, const char *text)
+{
+    if (lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) return false;
+    if (lv_obj_check_type(obj, &lv_label_class) && strstr(lv_label_get_text(obj), text)) return true;
+    uint32_t n = lv_obj_get_child_count(obj);
+    for (uint32_t i = 0; i < n; i++) if (tree_has(lv_obj_get_child(obj, (int32_t)i), text)) return true;
+    return false;
+}
+
+static bool screen_has(const char *text) { return tree_has(lv_screen_active(), text) || tree_has(lv_layer_top(), text); }
+
+/* HANDHELD.CFG units: US by default, metric on request; the engine's values are
+ * the same either way, only the drawing changes */
+static void test_units(void)
+{
+    uint16_t n;
+    hh_stub_set_units(HH_UNITS_US);
+    start(false, HH_SCENE_ALARM);                       /* coolant over its alarm limit */
+    const hh_channel_info_t *info = ui_channels(&n);
+    int ect = ui_find_channel("ect"), map = ui_find_channel("map"), vss = ui_find_channel("vss");
+    CHECK(ect >= 0 && !strcmp(info[ect].units, "\xC2\xB0""F") && fabsf(info[ect].alarm_hi - 226.4f) < 0.01f,
+          "coolant in °F, alarm at 226.4 °F");
+    CHECK(map >= 0 && !strcmp(info[map].units, "inHg") && info[map].decimals == 1, "MAP in inHg, 1 decimal");
+    CHECK(vss >= 0 && !strcmp(info[vss].units, "mph"), "speed in mph");
+    CHECK(fabsf(ui_value(ect, 100.0f) - 212.0f) < 1e-3f && isnan(ui_value(ect, NAN)), "ui_value converts, NaN stays");
+    CHECK(screen_has("\xC2\xB0""F") && !screen_has("\xC2\xB0""C"), "the screen shows °F and no °C");
+    CHECK(screen_has("limit > 226.4") || screen_has("limit > 226"), "the banner's limit is in °F");
+    ui_goto(ui_sensor_pages() + 1);                     /* GPS */
+    run(1200);
+    CHECK(screen_has("mph") && screen_has(" mi") && !screen_has("km"), "GPS speed in mph, trip in miles");
+
+    hh_stub_set_units(HH_UNITS_METRIC);
+    start(false, HH_SCENE_ALARM);
+    info = ui_channels(&n);
+    CHECK(!strcmp(info[ect].units, "\xC2\xB0""C") && info[ect].alarm_hi == 108.0f && ui_value(ect, 100.0f) == 100.0f,
+          "metric: the map's °C");
+    CHECK(screen_has("\xC2\xB0""C") && !screen_has("\xC2\xB0""F"), "metric screen shows °C");
+    ui_goto(ui_sensor_pages() + 1);
+    run(1200);
+    CHECK(screen_has("km/h") && screen_has(" km") && !screen_has("mph"), "metric GPS in km/h and km");
+    hh_stub_set_units(HH_UNITS_US);
+}
+
 static void test_flow(void)
 {
     start(false, HH_SCENE_DRIVE);
@@ -428,24 +471,30 @@ static void test_flow(void)
     press(3300);
     CHECK(hh_stub_acks() == acks + 1 && ui_night(), "once acknowledged, 3 s is the theme again");
 
-    /* every stop, every scene, both themes: nothing cut off */
+    /* every stop, every scene, both themes, both unit sets (US: the longer
+     * °F, inHg, gal/h, mph): nothing cut off */
     static const hh_stub_scene_t scenes[] = {HH_SCENE_DRIVE, HH_SCENE_WARN, HH_SCENE_ALARM, HH_SCENE_STALL,
                                              HH_SCENE_LINK_LOST, HH_SCENE_CONNECTING};
-    for (int night = 0; night < 2; night++)
-        for (size_t s = 0; s < sizeof(scenes) / sizeof(scenes[0]); s++) {
-            start(night, HH_SCENE_DRIVE);
-            hh_stub_set_scene(scenes[s]);
-            run(300);
-            if (scenes[s] == HH_SCENE_STALL) check_layout("stall screen");
-            press(100);
-            for (int stop = 0; stop < ui_stops(); stop++) {
-                char where[48];
-                snprintf(where, sizeof(where), "%s scene %d stop %d", night ? "night" : "day", (int)scenes[s], stop);
-                ui_goto(stop);
-                run(1200);
-                check_layout(where);
+    for (int units = HH_UNITS_US; units >= HH_UNITS_METRIC; units--) {
+        hh_stub_set_units(units);
+        for (int night = 0; night < 2; night++)
+            for (size_t s = 0; s < sizeof(scenes) / sizeof(scenes[0]); s++) {
+                start(night, HH_SCENE_DRIVE);
+                hh_stub_set_scene(scenes[s]);
+                run(300);
+                if (scenes[s] == HH_SCENE_STALL) check_layout("stall screen");
+                press(100);
+                for (int stop = 0; stop < ui_stops(); stop++) {
+                    char where[64];
+                    snprintf(where, sizeof(where), "%s %s scene %d stop %d", units ? "us" : "metric", night ? "night" : "day",
+                             (int)scenes[s], stop);
+                    ui_goto(stop);
+                    run(1200);
+                    check_layout(where);
+                }
             }
-        }
+    }
+    hh_stub_set_units(HH_UNITS_US);
     CHECK(layout_faults == 0, "%d layout fault(s)", layout_faults);
 
     /* the press cycle visits every stop and comes back */
@@ -700,7 +749,7 @@ int main(int argc, char **argv)
     if (!strcmp(cmd, "shots") && argc > 2) return shots(argv[2]);
     if (!strcmp(cmd, "budget")) { budget(); budget_map(); return 0; }
     if (!strcmp(cmd, "test")) {
-        test_contrast(); test_button(); test_fonts(); test_format(); test_flow(); test_map();
+        test_contrast(); test_button(); test_fonts(); test_format(); test_units(); test_flow(); test_map();
         printf(failures ? "%d FAILED\n" : "all passed\n", failures);
         return failures != 0;
     }

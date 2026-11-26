@@ -100,6 +100,10 @@ void hh_dtc_text(uint16_t code, char out[6]);   /* raw code -> "P0301" */
 /* Called by the core before it sleeps (ECU silent, sleep_after_s). Weak: the
  * UI may define it to switch the backlight off. */
 void hh_ui_before_sleep(void);
+/* The units the screen shows, from HANDHELD.CFG `units` (us, the default, or metric). Display only: values,
+ * limits, files and the serial stream stay in the address map's units. Valid after hh_core_start. */
+enum { HH_UNITS_METRIC = 0, HH_UNITS_US = 1 };
+int  hh_display_units(void);
 
 #ifdef __cplusplus
 }

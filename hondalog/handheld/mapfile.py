@@ -50,6 +50,7 @@ utc_offset_min = 0      # clock on the screen only; files are UTC
 serial = 1              # the link to the laptop on the USB-C port; 0 = off (plain log console)
 serial_baud = 921600    # its speed; try 460800 if the laptop sees damaged frames
 # rotate = 180          # display: 0 or 180 (upside down); unset = the firmware's built-in default
+units = us              # screen: us (F, mph, mi, inHg, gal/h) or metric (C, km/h, kPa, L/h)
 """
 
 

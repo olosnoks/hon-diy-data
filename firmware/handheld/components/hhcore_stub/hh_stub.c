@@ -150,6 +150,9 @@ void hh_ack_alarm(void) { acks++; }
 void hh_core_start(void) { t0_us = clock_us(); }
 void hh_serial_port_set_map_hold(int (*hold)(int on)) { (void)hold; }
 int hh_display_rotation(void) { return 0; }
+static int units = HH_UNITS_US;
+int hh_display_units(void) { return units; }
+void hh_stub_set_units(int u) { units = u == HH_UNITS_METRIC ? HH_UNITS_METRIC : HH_UNITS_US; }
 
 static uint8_t level(const hh_channel_info_t *c, float v)
 {

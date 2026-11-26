@@ -20,6 +20,7 @@
 #include "ui_screens.h"
 #include "ui_shapes.h"
 #include "ui_theme.h"
+#include "ui_units.h"
 
 #define STALL_SHOW_MS   10000
 #define STALL_FLASH_MS  2400
@@ -152,6 +153,7 @@ void ui_create(bool night)
     memset(&st, 0, sizeof(st));
     st.acked_ch = -1;
     ui_theme_set(night);
+    ui_units_set(hh_display_units());       /* HANDHELD.CFG units = us | metric */
     ui_map_reset();
     build();
 }
@@ -216,8 +218,9 @@ static void update_banner(const hh_snapshot_t *s, bool blink_on)
 
     char label[24], value[16], limit[24], text[96];
     ui_upper(label, sizeof(label), info[ch].label[0] ? info[ch].label : info[ch].name);
-    ui_fmt_value(value, sizeof(value), &info[ch], s->value[ch]);
-    ui_fmt_limit(limit, sizeof(limit), &info[ch], s->value[ch], level);
+    float v = ui_value(ch, s->value[ch]);     /* display units, like info[] */
+    ui_fmt_value(value, sizeof(value), &info[ch], v);
+    ui_fmt_limit(limit, sizeof(limit), &info[ch], v, level);
     snprintf(text, sizeof(text), "%s  %s %s%s%s", label, value, info[ch].units, limit[0] ? "   limit " : "", limit);
     ui_set_text(w.banner_text, text);
 

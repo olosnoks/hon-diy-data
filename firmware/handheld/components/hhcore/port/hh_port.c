@@ -570,6 +570,7 @@ static void quiet_probe(void)
 /* ---- hh_data.h -------------------------------------------------------------------- */
 
 int hh_display_rotation(void) { return cfg.rotate == 180 ? 180 : 0; }
+int hh_display_units(void) { return cfg.units == HH_CFG_UNITS_METRIC ? HH_UNITS_METRIC : HH_UNITS_US; }
 
 void hh_core_start(void)
 {

@@ -274,3 +274,4 @@ range is skipped; the rest still applies.
 | `serial` | 1 | the binary link to the laptop on the USB-C port (SERIAL.md); 0 = plain log console |
 | `serial_baud` | 921600 | its speed; 460800 if the laptop sees damaged frames |
 | `rotate` | 0 | display rotation, 0 or 180 (upside down). Firmware built with `-DHH_ROTATE_DEFAULT=180` defaults to 180 |
+| `units` | `us` | screen units: `us` (°F, mph, mi, inHg, gal/h; `imperial` is taken too) or `metric` (the address map's own). Display only: records, alarms, stall rules and the serial stream stay in the map's units |

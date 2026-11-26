@@ -34,5 +34,7 @@ void hh_stub_set_route(hh_stub_route_t route, double start_m);
 void hh_stub_set_clock(int64_t (*now_us)(void));
 uint32_t hh_stub_marks(void);
 uint32_t hh_stub_acks(void);
+/* What hh_display_units() answers (HH_UNITS_US by default, like HANDHELD.CFG); ui_create picks it up. */
+void hh_stub_set_units(int units);
 
 #endif

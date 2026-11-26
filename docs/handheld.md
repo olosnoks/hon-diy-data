@@ -371,6 +371,7 @@ A wrong or missing line falls back to its default.
 | `sleep_probe_s` | 20 | Asleep: wake this often and ask the ECU |
 | `usb_latency_ms` | 1 | FTDI latency timer |
 | `utc_offset_min` | 0 | For the clock on the screen only; files are UTC |
+| `units` | `us` | What the screen shows: `us` (°F, mph, mi, inHg, gal/h) or `metric` (the address map's °C, km/h, km, kPa, L/h). Display only: see [Units](#units) |
 
 ## The road map
 
@@ -505,11 +506,36 @@ The order is Gauges, the Sensors pages, GPS trip, Map, Link, and round again.
 
 Things to know:
 
-- The handheld shows metric units (km/h, km, °C). It has no units setting.
+- The handheld shows US units by default: see [Units](#units).
 - An unverified channel is marked, as on the laptop.
 - On the Link screen, **BACKEND** is a number: 0 is the KKL cable on USB
   host, 1 is the L9637D on the UART.
 - The link states are `OFF`, `CONNECTING`, `OK`, `ISO ONLY`, `ERROR`.
+
+### Units
+
+`units = us` in `HANDHELD.CFG` (the default; a card without the line gets it
+too) shows every reading in US units; `units = metric` shows them as the
+address map has them. Only the drawing changes: the alarms, the stall rules,
+the drive files, the stream to the laptop and the relay stay in the map's
+units, so a drive looks the same on the laptop whichever the handheld shows.
+
+| The map's unit | US | Decimals |
+|---|---|---|
+| °C (coolant, intake air) | °F | as the map (0) |
+| km/h (VSS, GPS speed) | mph | as the map (0) |
+| km (GPS trip) | mi | 2, 1 from 100 |
+| kPa (MAP, baro) | inHg | one more than the map (1) |
+| L/h (fuel flow) | gal/h | one more than the map (3) |
+| °C/s and other "/s" rates | °F/s | scale only, no +32 |
+
+Tile ranges, gauge bars and the limits in the alarm banner are converted with
+the value, so a bar fills the same and a limit reads in the tile's unit
+("COOLANT  230 °F   limit > 226"). The map's scale bar is in miles, and feet when
+short (250 ft); metric gives km and m. AFR, volts, %, ms, rpm and degrees of
+timing are shown as they are. The factors and decimals are the laptop's (its
+**US** units preset), so both show the same numbers; the laptop keeps MAP in
+kPa by default, the handheld shows inHg.
 
 ### The Map screen
 
@@ -544,7 +570,7 @@ so a red light on the highway does not zoom in. The chip in the corner reads
 screen steps the zoom: `FIXED 1/4` ... `FIXED 4/4`, then `AUTO` again; on
 this screen *holding* it 1 s steps back a screen.
 
-The scale bar (bottom left) is in miles.
+The scale bar (bottom left) is in miles, feet when short (km and m with `units = metric`).
 
 **No GPS fix.** A black band across the top says `NO GPS FIX`, the car is a
 hollow square, and the map stays at the last fix. After a power-up without a

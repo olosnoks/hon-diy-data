@@ -9,6 +9,14 @@ against the simulators and the host builds of the firmware cores.
 
 ## Unreleased
 
+### Handheld shows US units
+
+- The CYD's screen shows °F, mph, mi (ft on the map scale bar), inHg and gal/h by default; `units = metric` in
+  `HANDHELD.CFG` brings back the address map's own units. Display only (`main/ui/ui_units.c`): tile ranges, bars
+  and alarm-banner limits convert with the value; the engine, alarms, drive files, serial stream and relay keep
+  the map's units. Factors and decimals as the laptop's `hondalog/units.py`. Tested: a host C test of the
+  conversions (`hhunitstest`), the config parser, the simulator's layout and contrast checks in both unit sets.
+
 ### Handheld tab in the laptop app, and the HL text session
 
 - A **Handheld** tab (F10) in the PySide6 app: port picker with CH340 detection and one Connect that stays open

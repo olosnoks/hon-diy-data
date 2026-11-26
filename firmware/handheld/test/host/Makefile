@@ -3,6 +3,7 @@
 #   make          build, then run the C unit tests (non-zero exit if one fails)
 #   make lib      only the shared library the Python tests load (tests/test_hh_*.py)
 #   make hmtest   only the road map reader and renderer (components/hhmap)
+#   make hhunitstest  only the UI's display units (main/ui/ui_units.c: °F, mph, inHg ...)
 #
 # -ffp-contract=off: the planner and scheduler are compared with the Python
 # bit for bit; a fused multiply-add would round differently.
@@ -62,15 +63,24 @@ $(OUT)/hmtest: $(MAP_SRC) hmtest.c $(MAP)/include/hhmap.h
 	mkdir -p $(OUT)
 	$(CC) $(MAP_CFLAGS) -o $@ $(MAP_SRC) hmtest.c -lm
 
-test: $(OUT)/hhtest $(OUT)/hhpps $(OUT)/hhsertest $(OUT)/hhrelaytest $(OUT)/hhhltest $(OUT)/hh_serial_txonly.o $(OUT)/hmtest
+# the UI's display units (main/ui/ui_units.c): plain C, no LVGL
+UI := ../../main/ui
+$(OUT)/hhunitstest: $(UI)/ui_units.c $(UI)/ui_units.h hhunitstest.c $(CORE)/include/hh_data.h
+	mkdir -p $(OUT)
+	$(CC) $(CFLAGS) -I$(UI) -o $@ $(UI)/ui_units.c hhunitstest.c -lm
+
+test: $(OUT)/hhtest $(OUT)/hhpps $(OUT)/hhsertest $(OUT)/hhrelaytest $(OUT)/hhhltest $(OUT)/hh_serial_txonly.o $(OUT)/hmtest $(OUT)/hhunitstest
 	$(OUT)/hhtest
 	$(OUT)/hhpps
 	$(OUT)/hhsertest
 	$(OUT)/hhrelaytest
 	$(OUT)/hhhltest
 	$(OUT)/hmtest
+	$(OUT)/hhunitstest
 
 clean:
 	rm -rf $(OUT)
 
-.PHONY: all lib test clean
+.PHONY: all lib test clean hhunitstest
+hhunitstest: $(OUT)/hhunitstest
+	$(OUT)/hhunitstest

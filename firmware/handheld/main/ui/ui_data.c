@@ -3,6 +3,14 @@
 #include <string.h>
 
 #include "ui_data.h"
+#include "ui_units.h"
+
+/* the channels as shown: units, range, limits and decimals in the display
+ * units (ui_units.h). Made again on every call: the map can be replaced and
+ * the units set can change; 48 channels cost next to nothing. */
+static hh_channel_info_t shown[HH_MAX_CH];
+static ui_conv_t conv[HH_MAX_CH];
+static uint16_t n_shown;
 
 const hh_channel_info_t *ui_channels(uint16_t *n)
 {
@@ -10,8 +18,16 @@ const hh_channel_info_t *ui_channels(uint16_t *n)
     const hh_channel_info_t *ch = hh_channels(&count);
     if (!ch) count = 0;
     if (count > HH_MAX_CH) count = HH_MAX_CH;
+    for (uint16_t i = 0; i < count; i++) ui_units_channel(&ch[i], &shown[i], &conv[i]);
+    n_shown = count;
     if (n) *n = count;
-    return ch;
+    return shown;
+}
+
+float ui_value(int ch, float v)
+{
+    if (ch < 0 || ch >= n_shown) return v;
+    return ui_units_apply(&conv[ch], v);
 }
 
 static bool same_name(const char *a, const char *b, size_t blen)

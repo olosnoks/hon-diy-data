@@ -7,7 +7,7 @@
  *                            placed best first where they collide with nothing
  *   the car                  an arrow when moving, a dot when stopped,
  *                            a hollow square at the last known position
- *   scale bar                bottom left, in miles
+ *   scale bar                bottom left, in miles (feet when short), or km and m
  *   attribution              bottom right: (c) OpenStreetMap contributors
  *
  * The picture is redrawn only when the car has moved REDRAW_PX from its
@@ -25,6 +25,7 @@
 #include "ui_mapsvc.h"
 #include "ui_shapes.h"
 #include "ui_theme.h"
+#include "ui_units.h"
 
 #define TRAIL_STEP_M    25.0            /* a trail point every 25 m: 512 points, the last 12.8 km */
 #define MOVING_KMH      5.0f
@@ -459,13 +460,10 @@ static void place_labels(const hm_render_out_t *out)
 
 static void scale_bar(float mpp)
 {
-    static const struct { float mi; const char *text; } steps[] = {
-        {20, "20 mi"}, {10, "10 mi"}, {5, "5 mi"}, {2, "2 mi"}, {1, "1 mi"}, {0.5f, "0.5 mi"},
-        {0.25f, "0.25 mi"}, {0.1f, "0.1 mi"}, {0.05f, "0.05 mi"},
-    };
-    size_t i = 0;
-    while (i + 1 < sizeof(steps) / sizeof(steps[0]) && steps[i].mi * 1609.344f / mpp > 112) i++;
-    int px = (int)lroundf(steps[i].mi * 1609.344f / mpp);
+    size_t n, i = 0;
+    const ui_scale_step_t *steps = ui_units_scale_steps(&n);    /* miles and feet, or km and m */
+    while (i + 1 < n && steps[i].m / mpp > 112) i++;
+    int px = (int)lroundf(steps[i].m / mpp);
     ui_set_text(sc.scale_text, steps[i].text);
     lv_obj_update_layout(sc.scale_text);
     int w = LV_MAX(px + 3, lv_obj_get_width(sc.scale_text)) + 8;

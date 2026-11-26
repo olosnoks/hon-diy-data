@@ -159,6 +159,7 @@ static const struct { const char *key; size_t off; int32_t def, lo, hi; } KEYS[]
     {"serial", OFF(serial), 1, 0, 1},
     {"serial_baud", OFF(serial_baud), 921600, 9600, 2000000},
     {"rotate", OFF(rotate), HH_ROTATE_DEFAULT, 0, 180},
+    {"units", OFF(units), HH_CFG_UNITS_US, 0, 1},
 };
 #define N_KEYS (sizeof(KEYS) / sizeof(KEYS[0]))
 
@@ -171,6 +172,7 @@ void hh_config_default(hh_config_t *c)
 }
 
 static const char *const BACKENDS[] = {"auto", "usb", "uart"};
+static const char *const UNITS[] = {"metric", "us"};        /* HH_CFG_UNITS_* */
 
 static int set_key(hh_config_t *c, const char *key, const char *val)
 {
@@ -181,6 +183,16 @@ static int set_key(hh_config_t *c, const char *key, const char *val)
         if (KEYS[i].off == OFF(backend)) {
             for (v = 0; v < 3; v++) if (strcmp(val, BACKENDS[v]) == 0) break;
             if (v == 3) return -1;
+        } else if (KEYS[i].off == OFF(units)) {
+            /* "imperial" is taken for us; case does not matter */
+            char low[12];
+            size_t k = 0;
+            for (; val[k] && k + 1 < sizeof(low); k++) low[k] = (char)(val[k] >= 'A' && val[k] <= 'Z' ? val[k] + 32 : val[k]);
+            low[k] = 0;
+            if (val[k]) return -1;
+            if (strcmp(low, "us") == 0 || strcmp(low, "imperial") == 0) v = HH_CFG_UNITS_US;
+            else if (strcmp(low, "metric") == 0) v = HH_CFG_UNITS_METRIC;
+            else return -1;
         } else {
             v = strtol(val, &endp, 10);
             if (endp == val || *endp) return -1;
@@ -229,6 +241,7 @@ size_t hh_config_dump(const hh_config_t *c, char *out, size_t cap)
         int32_t v = *field((hh_config_t *)(uintptr_t)c, KEYS[i].off);
         int n;
         if (KEYS[i].off == OFF(backend)) n = snprintf(out + w, cap - w, "%s = %s\n", KEYS[i].key, BACKENDS[v % 3]);
+        else if (KEYS[i].off == OFF(units)) n = snprintf(out + w, cap - w, "%s = %s\n", KEYS[i].key, UNITS[v ? 1 : 0]);
         else n = snprintf(out + w, cap - w, "%s = %ld\n", KEYS[i].key, (long)v);
         if (n < 0 || (size_t)n >= cap - w) break;
         w += (size_t)n;
