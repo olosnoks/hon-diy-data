@@ -261,6 +261,58 @@ def test_review_without_a_verdict_in_time_stands():
     feed(eng, 20.0, 800)                                    # 7 s after the firing
 
 
+def feed_v(eng, t, rpm, vss, link=True):
+    """As feed(), with road speed in the same read (the P2P's 00+3 block)."""
+    vals = {"rpm": rpm, "vss": vss, "link": 1} if link else {"rpm": None, "vss": None, "link": 0}
+    fired, done = eng.feed(t, vals)
+    return (fired[0].reason if fired else None), done
+
+
+def test_link_loss_while_driving_and_revving_is_a_dropout():
+    # 2026-11-26 23:16: 8 s silent while accelerating 41 -> 59 km/h; back at
+    # 2,887 rpm against 2,066 before (above 1.25 x + 100), engine pulling
+    eng = engine(post_s=10, link_down_s=3.0)
+    revoked = []
+    eng.on_revoked = lambda f, t: revoked.append(t)
+    for i in range(100):
+        feed_v(eng, i * 0.1, 2066, 41)
+    t = 10.0
+    while t < 18.0:
+        feed_v(eng, t, None, None, link=False)
+        t += 0.1
+    feed_v(eng, 18.1, 2887, 59)
+    assert revoked == [pytest.approx(18.1)] and not eng.reviewing()
+
+
+def test_link_loss_when_stopped_then_a_flare_with_speed_stands():
+    # standing still before the silence: a high first rpm is a restart flare,
+    # whatever the speed channel says, and the stall stands
+    eng = engine(post_s=10, link_down_s=3.0)
+    eng.on_revoked = lambda f, t: pytest.fail("a restart flare at a standstill is a stall")
+    for i in range(100):
+        feed_v(eng, i * 0.1, 670, 0)
+    t = 10.0
+    while t < 30.0:
+        feed_v(eng, t, None, None, link=False)
+        t += 0.1
+    feed_v(eng, 30.0, 1446, 0)
+    assert not eng.reviewing()
+
+
+def test_link_loss_while_driving_answered_at_key_on_stands():
+    # moving before, but the ECU comes back at rpm 0 (power loss, rolled to a stop)
+    eng = engine(post_s=10, link_down_s=3.0)
+    eng.on_revoked = lambda f, t: pytest.fail("rpm 0 on return is a stall")
+    for i in range(100):
+        feed_v(eng, i * 0.1, 2500, 60)
+    t = 10.0
+    while t < 20.0:
+        feed_v(eng, t, None, None, link=False)
+        t += 0.1
+    feed_v(eng, 20.0, 0, 30)
+    assert not eng.reviewing()
+
+
 def test_link_loss_answered_in_an_after_start_flare_stands():
     # 2026-11-25 18:17 (OBD2-only mode): key off at 670 rpm, the slow ISO init
     # reconnected only after the restart, at 1,446 rpm

@@ -19,7 +19,8 @@ from .engine import TriggerRule
 
 def stall_rules(rpm_channel: str = "rpm", pre_s: float = 30.0, post_s: float = 10.0,
                 rpm_run: float = 400.0, rpm_zero: float = 50.0,
-                link_down_s: float = 3.0, review_s: float = 60.0) -> list[TriggerRule]:
+                link_down_s: float = 3.0, review_s: float = 60.0,
+                vss_channel: str = "vss", moving_kmh: float = 5.0) -> list[TriggerRule]:
     """The stall catcher as two rules.
 
     Both arm once RPM has been above ``rpm_run``.
@@ -37,6 +38,17 @@ def stall_rules(rpm_channel: str = "rpm", pre_s: float = 30.0, post_s: float = 1
     as kind "dropout" (label "LINK DROPOUT"), not as a stall, so it stays out
     of the stall list but its data is kept.
 
+    It is also a dropout when the car was moving before the silence (speed
+    above ``moving_kmh``) and is still moving when the ECU answers, with the
+    engine above ``rpm_run``: then RPM follows the road, not the idle, and the
+    "close to before" test fails on an ordinary throttle change (2026-11-26
+    23:16: 8 s silent while accelerating 41 -> 59 km/h, back at 2,887 rpm against
+    2,066 before, filed as a stall). A stall while moving that the driver
+    restarts while still rolling would also be filed as a dropout; the capture
+    is kept either way. With no speed channel (never read before the
+    silence) this test is false and the rpm test decides; ``vss_channel=""``
+    leaves it out altogether.
+
     ``link_down_s`` was 1.0 s until 2026-11-26. The stock P2P on the KKL cable
     has short K-line dropouts with the engine running (96 in one 28-minute
     idle, up to 1.5 s; one of 2.5 s on 2026-11-25), and one of them was filed
@@ -52,7 +64,10 @@ def stall_rules(rpm_channel: str = "rpm", pre_s: float = 30.0, post_s: float = 1
                     pre_s=pre_s + link_down_s, post_s=post_s, label="STALL (link lost)",
                     message="link lost (no reply from ECU)", kind="stall", reason="link",
                     group="stall", review_s=review_s, cancel_kind="dropout",
-                    cancel_when=f"{arm} and {rpm_channel} < before_{rpm_channel} * 1.25 + 100",
+                    cancel_when=(f"{arm} and ({rpm_channel} < before_{rpm_channel} * 1.25 + 100"
+                                 + (f" or (before_{vss_channel} > {moving_kmh:g}"
+                                    f" and {vss_channel} > {moving_kmh:g})" if vss_channel else "")
+                                 + ")"),
                     cancel_label="LINK DROPOUT (engine running)",
                     cancel_message="ECU silent, engine still running when it answered again"),
     ]

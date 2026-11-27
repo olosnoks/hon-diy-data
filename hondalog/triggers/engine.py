@@ -193,8 +193,15 @@ class _Review:
         if t <= self.fired.t or changed is None or deps.isdisjoint(changed):
             return None
         env = {**env, **self.before}
-        if any(env.get(name) is None for name in deps):
-            return None
+        for name in deps:
+            if env.get(name) is not None:
+                continue
+            channel = name[len("before_"):] if name.startswith("before_") else name
+            if f"before_{channel}" in self.before:
+                return None             # a channel we had: wait until it reads again
+            # never seen before the firing (not in this map, or never read): no value,
+            # so every comparison with it is false and the other tests decide
+            env[name] = float("nan")
         return bool(self.expr.test(env, t))
 
 
