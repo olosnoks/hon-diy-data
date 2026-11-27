@@ -67,6 +67,11 @@ function UnitsTab() {
   );
 }
 
+/** The simulator is for development only: shown with ?sim in the address. The owner's app never shows made-up data. */
+function devSim(): boolean {
+  try { return new URLSearchParams(window.location.search).has('sim'); } catch { return false; }
+}
+
 function ConnectionCard(props: { connection: ConnectionControl; picker: TransportPicker | null; ports: PortInfo[]; onPorts: (p: PortInfo[]) => void }) {
   const t = useTheme();
   const ecu = useSession((s) => s.ecu);
@@ -96,7 +101,7 @@ function ConnectionCard(props: { connection: ConnectionControl; picker: Transpor
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Button onClick={() => void connectCable()} disabled={!props.picker}>Connect the KKL cable</Button>
-        <Button onClick={() => void run(() => props.connection.connectSim())}>Simulator</Button>
+        {devSim() && <Button onClick={() => void run(() => props.connection.connectSim())}>Simulator (dev)</Button>}
         <Button onClick={() => void run(() => props.connection.disconnect())} disabled={!current}>Disconnect</Button>
       </div>
       <Note>An OBD2 (ISO 9141-2) slow init takes about 3 s: keep hondalog in front while it connects (a hidden tab slows its timers and the init fails).</Note>
@@ -147,7 +152,6 @@ function CableTab(props: { picker: TransportPicker | null; notes: string[]; conn
         <Select aria-label="protocol" value={cable.protocol} onChange={(v: Protocol) => cable.set({ protocol: v })}
           options={[['auto', 'Auto: Honda reads, OBD2 (ISO 9141-2) if they stay unanswered'], ['honda', 'Honda reads only'], ['obd2', 'OBD2 (ISO 9141-2) only']]} />
       </Row>
-      <Row label="No cable"><Check checked={cable.simWhenNoCable} onChange={(v) => cable.set({ simWhenNoCable: v })}>Run the built-in simulator</Check></Row>
       <Button onClick={cable.reset}>Defaults</Button>
       {cable.ecuPort && cable.ecuPort === cable.cydPort && <Note style={{ color: t.warn }}>The ECU and the CYD cannot share a port.</Note>}
       {msg && <Note>{msg}</Note>}

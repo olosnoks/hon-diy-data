@@ -15,6 +15,8 @@ import type { CydClient, CydPortChoice, CydState, Progress } from '../ui/setup/c
 export interface CydClientOptions {
   /** Ports to offer (the platform picker's granted ports). */
   listPorts(): Promise<CydPortChoice[]>;
+  /** The browser's port chooser (from a click): a port not granted yet. */
+  requestPort?(): Promise<CydPortChoice | null>;
   /** Open a port by id as a CydPort (TransportPort over the picker's Transport). */
   openPort(id: string): CydPort;
   /** The W3C SerialPort behind a port id, for esptool-js (null: WebUSB, no flashing). */
@@ -37,6 +39,10 @@ export class HlCydClient implements CydClient {
   async ports(): Promise<CydPortChoice[]> {
     const ports = await this.opts.listPorts();
     return [...ports].sort((a, b) => Number(b.guess === 'cyd') - Number(a.guess === 'cyd'));
+  }
+
+  async requestPort(): Promise<CydPortChoice | null> {
+    return this.opts.requestPort ? this.opts.requestPort() : null;
   }
 
   private emitState(state: CydState, detail = ''): void {

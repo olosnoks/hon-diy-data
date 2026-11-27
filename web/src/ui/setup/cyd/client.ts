@@ -17,6 +17,8 @@ export type CydState = 'disconnected' | 'connecting' | 'connected' | 'flashing';
 export interface CydClient {
   /** Ports to offer (a CH340 1a86:7523 first when there is one). */
   ports(): Promise<CydPortChoice[]>;
+  /** Show the browser's port chooser (call from a click); resolves with the picked port, null if cancelled. */
+  requestPort?(): Promise<CydPortChoice | null>;
   /** Open the port and the HL session; resolves with the HL HELLO fields (id, fw, variant, map). */
   connect(portId: string): Promise<Record<string, string>>;
   disconnect(): Promise<void>;

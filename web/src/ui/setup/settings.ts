@@ -20,7 +20,7 @@ export interface CableSettings {
 }
 
 const KEY = 'hondalog.cable';
-export const DEFAULT_CABLE: CableSettings = { ecuPort: '', cydPort: '', baud: 0, protocol: 'auto', simWhenNoCable: true };
+export const DEFAULT_CABLE: CableSettings = { ecuPort: '', cydPort: '', baud: 0, protocol: 'auto', simWhenNoCable: false };
 
 function load(): CableSettings {
   try {

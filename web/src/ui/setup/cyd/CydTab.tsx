@@ -417,6 +417,13 @@ export function CydTab(props: { client: CydClient | null; mapText: string; mapLa
         <span style={{ fontWeight: 700 }}>Port</span>
         <Select aria-label="CYD port" value={port} disabled={state !== 'disconnected'} onChange={setPort} style={{ minWidth: 320 }}
           options={(ports.length ? ports : [{ id: port, label: port || '(no port)' }]).map((p) => [p.id, p.label] as const)} />
+        {client.requestPort && (
+          <Button disabled={state !== 'disconnected'} onClick={() => void client.requestPort!().then(async (picked) => {
+            if (!picked) { setMsg('No port picked. The port chooser needs Chrome or Edge.'); return; }
+            setPorts(await client.ports());
+            setPort(picked.id);
+          }).catch((e: unknown) => setMsg(`Port: ${(e as Error).message}`))}>Pick port…</Button>
+        )}
         <Button disabled={state !== 'disconnected'} onClick={() => void client.ports().then(setPorts)}>Rescan</Button>
         <Button kind="primary" disabled={state === 'connecting' || state === 'flashing' || !port} onClick={() => void toggle()}>{connected ? 'Disconnect' : 'Connect'}</Button>
         <span data-testid="cyd-state" style={{ fontWeight: 700 }}>{stateText}</span>

@@ -73,6 +73,14 @@ function registerDeps(app: AppController): void {
       for (const p of ports) infos.set(p.id, p);
       return ports.map((p) => ({ id: p.id, label: p.label, guess: p.guess }));
     },
+    requestPort: async () => {
+      if (!picker?.request) return null;
+      // Any adapter may be picked: the chooser lists every serial port, the CH340 among them.
+      const p = await picker.request([]);
+      if (!p) return null;
+      infos.set(p.id, p);
+      return { id: p.id, label: p.label, guess: p.guess };
+    },
     openPort: (id) => {
       const info = infos.get(id);
       if (!info || !picker) throw new Error(`unknown port ${id}`);
@@ -121,8 +129,9 @@ async function firstConnect(app: AppController): Promise<void> {
       port = undefined;
     }
   }
+  // No cable, no data: the screens stay empty until a real cable answers
+  // (the simulator is only for tests and for ?sim on a dev build).
   if (port) await app.connect({ kind: 'port', port });
-  else if (cable.simWhenNoCable) await app.connect({ kind: 'sim' });
 }
 
 /** Write hondalog.db (the writers' buffers included) when the page is hidden
