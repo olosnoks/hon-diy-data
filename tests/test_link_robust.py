@@ -496,7 +496,10 @@ def test_short_ecu_deafness_does_not_drop_the_link():
     # The stock P2P ignores everything for ~0.2-0.45 s about three times a
     # minute at idle. That used to drop the link (values blanked, wake bytes,
     # a "link 0" for the stall catcher); now the poller just reads on.
-    clock, model, poller = start_poller(faults=Faults(deaf=1e-12, deaf_s=0.0))
+    clock = VirtualClock()
+    model = EcuModel(clock=clock.now, rev_every_s=0, faults=Faults(deaf=1e-12, deaf_s=0.0))
+    poller = Poller(LoopbackTransport(model, clock, byte_timing=True), addressmap.load_default(),
+                    clock=clock)
     reads, deaf = [], {}
 
     def on_block(r):                                        # on the poller thread: exact timing
@@ -504,7 +507,8 @@ def test_short_ecu_deafness_does_not_drop_the_link():
         if r.t > 3.0 and not deaf:
             deaf["t"], deaf["wakes"] = r.t, poller.link.stats.wakes
             model._deaf_until = clock.now() + 0.4
-    poller.on_block = on_block
+    poller.on_block = on_block                              # before start: the poller races ahead
+    poller.start()
     try:
         run_until(clock, 8)
     finally:
