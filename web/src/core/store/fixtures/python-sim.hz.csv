@@ -1,0 +1,42 @@
+# hondalog 0.1.0
+# format: hondalog 0.1.0
+# timebase: seconds since connect (monotonic)
+# ecu_variant: P2P
+# unverified_channels: baro o2 batt alt_fr eld inj ign ign_limit iacv knock vtec fan brake
+# units: rpm=rpm vss=km/h ect=°C iat=°C map=kPa baro=kPa tps=% o2=V batt=V alt_fr=% eld=A stft=% ltft=% inj=ms ign=° BTDC ign_limit=° iacv=% knock=V ac_sw=- vtec=- mil=- closed_loop=- fuel_pump=- fan=- ac_clutch=- brake=- starter=-
+# blackbox: black box SIM fw sim, boot 1, 0 events on card
+# blackbox_clock_rtt_us: 19
+# drive_of_session: 1
+# ecu: P2P (confirmed on a 2000 Civic EX, 2026-11-25)
+# ecu_id: 53 49 4D 2D 50 32 50 00 00 01  "SIM-P2P..."
+# port: sim:
+# address_map_version: p2p-guess-2 (kerpz P2T map)
+# address_map_tag: p2p-guess-2 (kerpz P2T map) #071de5244d2b
+# address_map_hash: 071de5244d2b
+# started: 2026-11-27T01:51:03
+# started_unix: 1795765863.113915
+# epoch_unix: 1795765862.73675
+# unlocked_frames: []
+# read_plan: ['00+3', '08+10', '12+4', '17+3', '20+3', '24+3', '27+2', '3C+1']
+# expert_unlock: False
+# address_map_file: hondalog\data\addressmap.toml
+# drive: drive_2026_11_27_0151
+# status: complete
+# end_reason: stopped
+# ended: 2026-11-27T01:51:06
+time_s,rpm,bb_vbat,link,marker
+1.0969,1480.75,12.4480,1,
+1.1969,1473.25,12.4470,1,
+1.2969,1477.00,12.4440,1,
+1.3969,1480.00,12.4460,1,
+1.4969,1473.00,12.4560,1,
+1.5969,1454.25,12.4040,1,
+1.6969,1469.75,10.8010,1,
+1.7969,1450.00,10.2180,1,
+1.8969,1455.00,10.2830,1,
+1.9969,1455.50,10.4350,1,
+2.0969,1451.00,10.3290,1,
+2.1969,1438.00,10.1740,1,
+2.2969,1438.25,10.2460,1,
+2.3969,1450.25,10.4650,1,
+2.4969,1453.75,12.1870,1,

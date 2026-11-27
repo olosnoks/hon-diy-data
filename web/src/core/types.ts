@@ -12,7 +12,7 @@
  *  WebSerialTransport (browser), TauriSerialTransport (Windows/Linux/Android),
  *  SimTransport (built-in simulator). Byte-exact, no framing. */
 export interface Transport {
-  readonly kind: 'webserial' | 'tauri' | 'sim';
+  readonly kind: 'webserial' | 'webusb' | 'tauri' | 'sim';
   /** A human label: "COM21", "/dev/ttyUSB0", "FTDI 0403:6001", "sim:". */
   readonly label: string;
   open(opts: { baud: number }): Promise<void>;
@@ -21,13 +21,19 @@ export interface Transport {
   /** Hold the line low (true) / release (false): ISO 9141 5-baud init, wake-up. */
   setBreak(on: boolean): Promise<void>;
   write(bytes: Uint8Array): Promise<void>;
-  /** Read up to `max` bytes, resolving with what arrived within `timeoutMs`
-   *  (possibly empty). Never throws on timeout. */
+  /** Read up to `max` bytes. Resolves AS SOON AS at least one byte is
+   *  available (with everything buffered, up to `max`), like pyserial
+   *  read_some; resolves empty only when `timeoutMs` passes with nothing.
+   *  Never throws on timeout (may throw if the device is gone). */
   read(max: number, timeoutMs: number): Promise<Uint8Array>;
   /** Discard anything buffered on the receive side. */
   drain(): Promise<void>;
   /** USB identity when known (FTDI 0403:6001, CH340 1a86:7523). */
   readonly usb?: { vendorId: number; productId: number };
+  /** The adapter's receive latency in seconds when known (FTDI latency
+   *  timer: 0.001 when set by the WebUSB driver; unknown on desktop Web
+   *  Serial, where Windows defaults to 16 ms). */
+  readonly usbLatencyS?: number;
 }
 
 export interface TransportPicker {

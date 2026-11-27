@@ -3,7 +3,7 @@
  *
  *   short      released before 1 s          -> next screen
  *   long       released between 1 s and 3 s -> MARK
- *   very long  still held at 3 s            -> acknowledge alarm, else Day/Night
+ *   very long  still held at 3 s            -> acknowledge alarm, else Dracula/Darker
  *
  * MARK is decided on release, so that holding on for the 3 s gesture does not
  * also drop a mark into the log. The hint strip shows which one is armed.

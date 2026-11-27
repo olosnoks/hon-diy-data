@@ -1,0 +1,20 @@
+/* Bundled Inter + JetBrains Mono (public/fonts, SIL OFL 1.1). Vite prefixes
+   these root paths with the build's base (GitHub Pages / Tauri). */
+@font-face { font-family: Inter; font-weight: 500; font-display: block; src: url('/fonts/Inter-Medium.otf') format('opentype'); }
+@font-face { font-family: Inter; font-weight: 600; font-display: block; src: url('/fonts/Inter-SemiBold.otf') format('opentype'); }
+@font-face { font-family: Inter; font-weight: 700; font-display: block; src: url('/fonts/Inter-Bold.otf') format('opentype'); }
+@font-face { font-family: Inter; font-weight: 800; font-display: block; src: url('/fonts/Inter-ExtraBold.otf') format('opentype'); }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 500; font-display: block; src: url('/fonts/JetBrainsMono-Medium.ttf') format('truetype'); }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 700; font-display: block; src: url('/fonts/JetBrainsMono-Bold.ttf') format('truetype'); }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 800; font-display: block; src: url('/fonts/JetBrainsMono-ExtraBold.ttf') format('truetype'); }
+
+html, body, #root { margin: 0; height: 100%; overflow: hidden; }
+body { font-family: Inter, system-ui, sans-serif; font-weight: 500; -webkit-font-smoothing: antialiased; }
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; }
+button:focus-visible { outline: 3px solid #FF79C6; outline-offset: -3px; }
+
+/* An unacknowledged alarm icon blinks (1 s period, like the Python tiles). */
+@keyframes hl-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.hl-blink { animation: hl-blink 1s step-end infinite; }
+@media (prefers-reduced-motion: reduce) { .hl-blink { animation: none; } }

@@ -52,8 +52,8 @@ void ui_perf_create(void)
 {
     label = lv_label_create(lv_layer_sys());
     lv_obj_set_style_text_font(label, &hh_font_16, 0);
-    ui_fill(label, TK(fg));
-    ui_ink(label, TK(bg));
+    ui_fill(label, TK(sunk));
+    ui_ink(label, TK(fg));
     lv_obj_set_style_pad_hor(label, 4, 0);
     lv_obj_align(label, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
     lv_label_set_text(label, "perf");

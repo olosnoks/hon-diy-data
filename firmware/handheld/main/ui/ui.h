@@ -6,7 +6,7 @@
  * One-button UX (BOOT, GPIO0):
  *   short press        next screen (sensor pages count as screens)
  *   hold 1 s, release  MARK
- *   hold 3 s           acknowledge the alarm if one is blinking, else Day/Night
+ *   hold 3 s           acknowledge the alarm if one is blinking, else Dracula/Darker
  *   any press          dismisses the stall-captured screen
  * An optional second button steps back a screen; on the Map screen a short
  * press of it steps the zoom (AUTO, 1..4) and a 1 s hold steps back.
@@ -25,17 +25,17 @@
 #define HH_UI_AUTOCYCLE_S 0
 #endif
 
-void ui_create(bool night);
+void ui_create(bool darker);       /* false = Dracula (default), true = Darker */
 /* Call every 10 ms or so with the debounce-free button levels. */
 void ui_tick(uint32_t now_ms, bool button, bool button_back);
-bool ui_night(void);
+bool ui_darker(void);
 
 /* For the simulator's screenshots. */
 void ui_goto(int stop);            /* 0 .. ui_stops() - 1 */
 int ui_stops(void);
 
 /* Provided by the port. */
-void ui_port_theme_changed(bool night);   /* set the backlight, remember the choice */
+void ui_port_theme_changed(bool darker);  /* set the backlight, remember the choice */
 int64_t ui_port_micros(void);
 /* Busy percentage of each core over the last call interval, -1 = unknown. */
 void ui_port_cpu(int *core0, int *core1);

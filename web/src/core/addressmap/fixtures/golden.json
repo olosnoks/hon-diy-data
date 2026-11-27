@@ -1,0 +1,918 @@
+{
+ "maps": {
+  "v1_minimal": {
+   "text": "\nversion = \"old\"\n[[channel]]\nname = \"rpm\"\naddr = 0x00\nlength = 2\nformula = \"1875000 / (x + 1)\"\n[[channel]]\nname = \"ect\"\naddr = 0x10\nformula = \"x - 40\"\n",
+   "variant": null,
+   "hash": "343d28963f8d",
+   "spec": "{\"channels\":[[\"rpm\",0,2,\"big\",\"1875000 / (x + 1)\",\"\",\"value\"],[\"ect\",16,1,\"big\",\"x - 40\",\"\",\"value\"]],\"constants\":[],\"math\":[],\"variant\":\"\"}",
+   "decode": {
+    "rpm": 654.4502617801047,
+    "ect": 51.0
+   }
+  },
+  "constants_floats": {
+   "text": "\nschema = 2\nversion = \"c\"\n[constants]\na = 1\nb = 0.1\nc = 1e-7\nd = 1e16\ne = 1234567890123456.0\nf = -2.5\ng = 0.0001\nh = 0.00001\ni = 3.0e300\nj = 100\nk = -0.0\n[[channel]]\nname = \"x1\"\naddr = 1\nformula = \"x * 2\"\n[[math]]\nname = \"m1\"\nexpr = \"[x1] * a + b\"\nunits = \"u\"\n",
+   "variant": null,
+   "hash": "cdf432d9b39a",
+   "spec": "{\"channels\":[[\"x1\",1,1,\"big\",\"x * 2\",\"\",\"value\"]],\"constants\":[[\"a\",1.0],[\"b\",0.1],[\"c\",1e-07],[\"d\",1e+16],[\"e\",1234567890123456.0],[\"f\",-2.5],[\"g\",0.0001],[\"h\",1e-05],[\"i\",3e+300],[\"j\",100.0],[\"k\",-0.0]],\"math\":[[\"m1\",\"[x1] * a + b\",\"u\"]],\"variant\":\"\"}",
+   "decode": {
+    "x1": 96.0
+   }
+  },
+  "unicode_and_escapes": {
+   "text": "\nschema = 2\nversion = \"u ° é\"\n[[channel]]\nname = \"ect\"\naddr = 0x10\nformula = \"x - 40\"\nunits = \"°C\"\n[[channel]]\nname = \"q\"\naddr = 0x11\nformula = \"x\"\nunits = \"a\\\"b\\\\c\\td\\u0001e/f g😀\"\n[[channel]]\nname = \"w\"\naddr = 0x12\nlength = 4\nendian = \"little\"\nformula = \"signed(x, 32) / 3\"\nkind = \"value\"\n",
+   "variant": null,
+   "hash": "fa7e52b4b8fc",
+   "spec": "{\"channels\":[[\"ect\",16,1,\"big\",\"x - 40\",\"°C\",\"value\"],[\"q\",17,1,\"big\",\"x\",\"a\\\"b\\\\c\\td\\u0001e/f g😀\",\"value\"],[\"w\",18,4,\"little\",\"signed(x, 32) / 3\",\"\",\"value\"]],\"constants\":[],\"math\":[],\"variant\":\"\"}",
+   "decode": {
+    "ect": 51.0,
+    "q": 128.0,
+    "w": 117086433.66666667
+   }
+  },
+  "flags_and_obd2": {
+   "text": "\nschema = 2\nversion = \"o\"\n[[channel]]\nname = \"mil\"\naddr = 0x0F\nformula = \"bit(x, 5)\"\nkind = \"flag\"\n[[obd2]]\nname = \"o2_post\"\npid = 0x15\nunits = \"V\"\n[[math]]\nname = \"off\"\nexpr = \"[mil] * 2\"\nenabled = false\n",
+   "variant": null,
+   "hash": "00ff0dda09b0",
+   "spec": "{\"channels\":[[\"mil\",15,1,\"big\",\"bit(x, 5)\",\"\",\"flag\"]],\"constants\":[],\"math\":[],\"obd2\":[[\"o2_post\",21,\"V\",\"value\"]],\"variant\":\"\"}",
+   "decode": {
+    "mil": 1.0
+   }
+  },
+  "variants_p28": {
+   "text": "\nschema = 2\nversion = \"test-1\"\necu_variant = \"P2P\"\n[variants.P2P]\ndescription = \"target\"\n[variants.P28]\ndescription = \"obd1\"\nconstants = { k = 2 }\n[constants]\nk = 1\n[[channel]]\nname = \"rpm\"\naddr = 0x00\nlength = 2\nformula = \"x\"\nendian = \"little\"\nrate = \"fast\"\nstatus = \"verified\"\n[channel.variants.P28]\nformula = \"1875000 / (x + 1)\"\naddr = 0x02\n[[channel]]\nname = \"ect\"\naddr = 0x10\nformula = \"x - 40\"\n[channel.variants.P28]\nabsent = true\n[[math]]\nname = \"rpm_k\"\nexpr = \"[rpm] * k\"\n",
+   "variant": "P28",
+   "hash": "a86a59ac6d6c",
+   "spec": "{\"channels\":[[\"rpm\",2,2,\"little\",\"1875000 / (x + 1)\",\"\",\"value\"]],\"constants\":[[\"k\",2.0]],\"math\":[[\"rpm_k\",\"[rpm] * k\",\"\"]],\"variant\":\"P28\"}",
+   "decode": {
+    "rpm": 59.869723481703815
+   }
+  }
+ },
+ "formulas": [
+  {
+   "f": "x",
+   "values": [
+    0.0,
+    1.0,
+    7.0,
+    100.0,
+    128.0,
+    200.0,
+    255.0
+   ],
+   "two": 4660.0
+  },
+  {
+   "f": "x / 4",
+   "values": [
+    0.0,
+    0.25,
+    1.75,
+    25.0,
+    32.0,
+    50.0,
+    63.75
+   ],
+   "two": 1165.0
+  },
+  {
+   "f": "x // 3",
+   "values": [
+    0.0,
+    0.0,
+    2.0,
+    33.0,
+    42.0,
+    66.0,
+    85.0
+   ],
+   "two": 1553.0
+  },
+  {
+   "f": "x % 7",
+   "values": [
+    0.0,
+    1.0,
+    0.0,
+    2.0,
+    2.0,
+    4.0,
+    3.0
+   ],
+   "two": 5.0
+  },
+  {
+   "f": "-x % 7",
+   "values": [
+    0.0,
+    6.0,
+    0.0,
+    5.0,
+    5.0,
+    3.0,
+    4.0
+   ],
+   "two": 2.0
+  },
+  {
+   "f": "x ** 2",
+   "values": [
+    0.0,
+    1.0,
+    49.0,
+    10000.0,
+    16384.0,
+    40000.0,
+    65025.0
+   ],
+   "two": 21715600.0
+  },
+  {
+   "f": "2 ** -1",
+   "values": [
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "two": 0.5
+  },
+  {
+   "f": "bit(x, 3)",
+   "values": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    1.0
+   ],
+   "two": 0.0
+  },
+  {
+   "f": "signed(x, 8)",
+   "values": [
+    0.0,
+    1.0,
+    7.0,
+    100.0,
+    -128.0,
+    -56.0,
+    -1.0
+   ],
+   "two": 52.0
+  },
+  {
+   "f": "signed(x)",
+   "values": [
+    0.0,
+    1.0,
+    7.0,
+    100.0,
+    -128.0,
+    -56.0,
+    -1.0
+   ],
+   "two": 52.0
+  },
+  {
+   "f": "b[0] * 256 + b[1]",
+   "values": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "two": 4660.0
+  },
+  {
+   "f": "b[-1]",
+   "values": [
+    0.0,
+    1.0,
+    7.0,
+    100.0,
+    128.0,
+    200.0,
+    255.0
+   ],
+   "two": 52.0
+  },
+  {
+   "f": "poly(x, 1, 2, 3)",
+   "values": [
+    1.0,
+    6.0,
+    162.0,
+    30201.0,
+    49409.0,
+    120401.0,
+    195586.0
+   ],
+   "two": 65156121.0
+  },
+  {
+   "f": "x / 4 if x > 0 else 0",
+   "values": [
+    0.0,
+    0.25,
+    1.75,
+    25.0,
+    32.0,
+    50.0,
+    63.75
+   ],
+   "two": 1165.0
+  },
+  {
+   "f": "x > 3 ? 1 : 2",
+   "values": [
+    2.0,
+    2.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "two": 1.0
+  },
+  {
+   "f": "x & 0x0F",
+   "values": [
+    0.0,
+    1.0,
+    7.0,
+    4.0,
+    0.0,
+    8.0,
+    15.0
+   ],
+   "two": 4.0
+  },
+  {
+   "f": "x | 0b1000",
+   "values": [
+    8.0,
+    9.0,
+    15.0,
+    108.0,
+    136.0,
+    200.0,
+    255.0
+   ],
+   "two": 4668.0
+  },
+  {
+   "f": "x ^ 0xFF",
+   "values": [
+    255.0,
+    254.0,
+    248.0,
+    155.0,
+    127.0,
+    55.0,
+    0.0
+   ],
+   "two": 4811.0
+  },
+  {
+   "f": "x << 2",
+   "values": [
+    0.0,
+    4.0,
+    28.0,
+    400.0,
+    512.0,
+    800.0,
+    1020.0
+   ],
+   "two": 18640.0
+  },
+  {
+   "f": "x >> 1",
+   "values": [
+    0.0,
+    0.0,
+    3.0,
+    50.0,
+    64.0,
+    100.0,
+    127.0
+   ],
+   "two": 2330.0
+  },
+  {
+   "f": "~x",
+   "values": [
+    -1.0,
+    -2.0,
+    -8.0,
+    -101.0,
+    -129.0,
+    -201.0,
+    -256.0
+   ],
+   "two": -4661.0
+  },
+  {
+   "f": "not x",
+   "values": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "two": 0.0
+  },
+  {
+   "f": "!x == 0",
+   "values": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "two": 1.0
+  },
+  {
+   "f": "x and 3",
+   "values": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "two": 1.0
+  },
+  {
+   "f": "x or 0",
+   "values": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "two": 1.0
+  },
+  {
+   "f": "1 < x < 200",
+   "values": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   "two": 0.0
+  },
+  {
+   "f": "abs(x - 128)",
+   "values": [
+    128.0,
+    127.0,
+    121.0,
+    28.0,
+    0.0,
+    72.0,
+    127.0
+   ],
+   "two": 4532.0
+  },
+  {
+   "f": "min(x, 10, 20)",
+   "values": [
+    0.0,
+    1.0,
+    7.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0
+   ],
+   "two": 10.0
+  },
+  {
+   "f": "max(x, 10)",
+   "values": [
+    10.0,
+    10.0,
+    10.0,
+    100.0,
+    128.0,
+    200.0,
+    255.0
+   ],
+   "two": 4660.0
+  },
+  {
+   "f": "round(x / 3)",
+   "values": [
+    0.0,
+    0.0,
+    2.0,
+    33.0,
+    43.0,
+    67.0,
+    85.0
+   ],
+   "two": 1553.0
+  },
+  {
+   "f": "round(x / 3, 2)",
+   "values": [
+    0.0,
+    0.33,
+    2.33,
+    33.33,
+    42.67,
+    66.67,
+    85.0
+   ],
+   "two": 1553.33
+  },
+  {
+   "f": "round(2.5)",
+   "values": [
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0
+   ],
+   "two": 2.0
+  },
+  {
+   "f": "round(3.5)",
+   "values": [
+    4.0,
+    4.0,
+    4.0,
+    4.0,
+    4.0,
+    4.0,
+    4.0
+   ],
+   "two": 4.0
+  },
+  {
+   "f": "int(x / 3)",
+   "values": [
+    0.0,
+    0.0,
+    2.0,
+    33.0,
+    42.0,
+    66.0,
+    85.0
+   ],
+   "two": 1553.0
+  },
+  {
+   "f": "floor(x / 3)",
+   "values": [
+    0.0,
+    0.0,
+    2.0,
+    33.0,
+    42.0,
+    66.0,
+    85.0
+   ],
+   "two": 1553.0
+  },
+  {
+   "f": "ceil(x / 3)",
+   "values": [
+    0.0,
+    1.0,
+    3.0,
+    34.0,
+    43.0,
+    67.0,
+    85.0
+   ],
+   "two": 1554.0
+  },
+  {
+   "f": "sqrt(x)",
+   "values": [
+    0.0,
+    1.0,
+    2.6457513110645907,
+    10.0,
+    11.313708498984761,
+    14.142135623730951,
+    15.968719422671311
+   ],
+   "two": 68.26419266350405
+  },
+  {
+   "f": "ln(x)",
+   "values": [
+    null,
+    0.0,
+    1.9459101490553132,
+    4.605170185988092,
+    4.852030263919617,
+    5.298317366548036,
+    5.541263545158426
+   ],
+   "two": 8.446770727119691
+  },
+  {
+   "f": "log10(x)",
+   "values": [
+    null,
+    0.0,
+    0.8450980400142568,
+    2.0,
+    2.1072099696478683,
+    2.3010299956639813,
+    2.406540180433955
+   ],
+   "two": 3.66838591669
+  },
+  {
+   "f": "exp(x / 50)",
+   "values": [
+    1.0,
+    1.0202013400267558,
+    1.1502737988572274,
+    7.38905609893065,
+    12.935817315543076,
+    54.598150033144236,
+    164.0219072999017
+   ],
+   "two": 2.9939580670504245e+40
+  },
+  {
+   "f": "pow(x, 0.5)",
+   "values": [
+    0.0,
+    1.0,
+    2.6457513110645907,
+    10.0,
+    11.313708498984761,
+    14.142135623730951,
+    15.968719422671311
+   ],
+   "two": 68.26419266350405
+  },
+  {
+   "f": "sign(x - 100)",
+   "values": [
+    -1.0,
+    -1.0,
+    -1.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "two": 1.0
+  },
+  {
+   "f": "clamp(x, 10, 100)",
+   "values": [
+    10.0,
+    10.0,
+    10.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0
+   ],
+   "two": 100.0
+  },
+  {
+   "f": "between(x, 10, 100)",
+   "values": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "two": 0.0
+  },
+  {
+   "f": "table(x, 0, 0, 100, 50, 200, 60)",
+   "values": [
+    0.0,
+    0.5,
+    3.5,
+    50.0,
+    52.8,
+    60.0,
+    60.0
+   ],
+   "two": 60.0
+  },
+  {
+   "f": "thermistor(x, 0.001, 0.0002, 0.0000001)",
+   "values": [
+    null,
+    -8308.798261658138,
+    3273.5047792390656,
+    822.9318843129757,
+    725.283821223239,
+    521.5023098051726,
+    null
+   ],
+   "two": null
+  },
+  {
+   "f": "1 / x",
+   "values": [
+    null,
+    1.0,
+    0.14285714285714285,
+    0.01,
+    0.0078125,
+    0.005,
+    0.00392156862745098
+   ],
+   "two": 0.00021459227467811158
+  },
+  {
+   "f": "x // 0",
+   "values": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "two": null
+  },
+  {
+   "f": "77.06 - x / 2.5371",
+   "values": [
+    77.06,
+    76.66584919790311,
+    74.30094438532183,
+    37.644919790311775,
+    26.608697331599075,
+    -1.7701604193764524,
+    -23.448454534704965
+   ],
+   "two": -1759.6827377714712
+  },
+  {
+   "f": "(x / 128 - 1) * 100",
+   "values": [
+    -100.0,
+    -99.21875,
+    -94.53125,
+    -21.875,
+    0.0,
+    56.25,
+    99.21875
+   ],
+   "two": 3540.625
+  },
+  {
+   "f": "x * 0.716 - 5",
+   "values": [
+    -5.0,
+    -4.284,
+    0.011999999999999567,
+    66.6,
+    86.648,
+    138.2,
+    177.57999999999998
+   ],
+   "two": 3331.56
+  },
+  {
+   "f": "1875000 / (x + 1)",
+   "values": [
+    1875000.0,
+    937500.0,
+    234375.0,
+    18564.356435643564,
+    14534.883720930233,
+    9328.358208955224,
+    7324.21875
+   ],
+   "two": 402.274190087964
+  },
+  {
+   "f": "true + x",
+   "values": [
+    1.0,
+    2.0,
+    8.0,
+    101.0,
+    129.0,
+    201.0,
+    256.0
+   ],
+   "two": 4661.0
+  },
+  {
+   "f": "valid(1 / x)",
+   "values": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "two": 1.0
+  },
+  {
+   "f": "coalesce(1 / x, 7)",
+   "values": [
+    7.0,
+    1.0,
+    0.14285714285714285,
+    0.01,
+    0.0078125,
+    0.005,
+    0.00392156862745098
+   ],
+   "two": 0.00021459227467811158
+  },
+  {
+   "f": "1e3 + .5 + 1.",
+   "values": [
+    1001.5,
+    1001.5,
+    1001.5,
+    1001.5,
+    1001.5,
+    1001.5,
+    1001.5
+   ],
+   "two": 1001.5
+  },
+  {
+   "f": "sin(x) + cos(x)",
+   "values": [
+    1.0,
+    1.3817732906760363,
+    1.4108888530620938,
+    0.3559532311779251,
+    0.02814188858156652,
+    -0.38610962220698875,
+    -1.3686952427555732
+   ],
+   "two": -1.3760978199003224
+  },
+  {
+   "f": "x if x else -1",
+   "values": [
+    -1.0,
+    1.0,
+    7.0,
+    100.0,
+    128.0,
+    200.0,
+    255.0
+   ],
+   "two": 4660.0
+  }
+ ],
+ "bad": [
+  {
+   "f": "__import__('os').system('true')",
+   "error": "bad formula \"__import__('os').system('true')\": unexpected character \"'\" (text is not allowed, only numbers and names)"
+  },
+  {
+   "f": "x.real",
+   "error": "bad formula 'x.real': unexpected character '.' (attribute access is not allowed)"
+  },
+  {
+   "f": "open('/etc/passwd')",
+   "error": "bad formula \"open('/etc/passwd')\": unexpected character \"'\" (text is not allowed, only numbers and names)"
+  },
+  {
+   "f": "lambda: 1",
+   "error": "bad formula 'lambda: 1': expected an operator or the end, got ':'"
+  },
+  {
+   "f": "'a' * 3",
+   "error": "bad formula \"'a' * 3\": unexpected character \"'\" (text is not allowed, only numbers and names)"
+  },
+  {
+   "f": "x +",
+   "error": "bad formula 'x +': expected a value, got the end"
+  },
+  {
+   "f": "y + 1",
+   "error": "bad formula 'y + 1': unknown name 'y'"
+  },
+  {
+   "f": "[i for i in b]",
+   "error": "bad formula '[i for i in b]': expected ']', got 'for'"
+  },
+  {
+   "f": "xx + 1",
+   "error": "bad formula 'xx + 1': unknown name 'xx' (did you mean x?)"
+  },
+  {
+   "f": "avg(x, 100)",
+   "error": "bad formula 'avg(x, 100)': a formula decodes one reading, it cannot use history (avg); make a [[math]] channel for that"
+  },
+  {
+   "f": "time()",
+   "error": "bad formula 'time()': a formula decodes one reading, it cannot use history (time); make a [[math]] channel for that"
+  },
+  {
+   "f": "[x-1]",
+   "error": "bad formula '[x-1]': a formula decodes one reading, it cannot use history (); make a [[math]] channel for that"
+  },
+  {
+   "f": "b",
+   "error": "bad formula 'b': 'b' is a list of bytes: write b[0], b[1] ..."
+  },
+  {
+   "f": "x[0]",
+   "error": "bad formula 'x[0]': 'x' cannot be indexed"
+  },
+  {
+   "f": "",
+   "error": "bad formula '': empty expression"
+  },
+  {
+   "f": "   ",
+   "error": "bad formula '   ': empty expression"
+  },
+  {
+   "f": "bitt(x, 1)",
+   "error": "bad formula 'bitt(x, 1)': unknown function 'bitt' (did you mean bit?)"
+  },
+  {
+   "f": "round(x, x)",
+   "error": "bad formula 'round(x, x)': argument 2 of round() must be a constant"
+  },
+  {
+   "f": "table(x, 1, 2, 0, 3)",
+   "error": "bad formula 'table(x, 1, 2, 0, 3)': table(): the x values must go up"
+  },
+  {
+   "f": "table(x, 1, 2, 3)",
+   "error": "bad formula 'table(x, 1, 2, 3)': table() takes 5 or more arguments, got 4"
+  },
+  {
+   "f": "abs()",
+   "error": "bad formula 'abs()': abs() takes 1 arguments, got 0"
+  },
+  {
+   "f": "x = 1",
+   "error": "bad formula 'x = 1': unexpected character '=' (use == to compare)"
+  },
+  {
+   "f": "(x",
+   "error": "bad formula '(x': expected ')', got the end"
+  },
+  {
+   "f": "x)",
+   "error": "bad formula 'x)': expected an operator or the end, got ')'"
+  },
+  {
+   "f": "1 +* 2",
+   "error": "bad formula '1 +* 2': expected a value, got '*'"
+  },
+  {
+   "f": "if x else 2",
+   "error": "bad formula 'if x else 2': expected a value, got 'if'"
+  },
+  {
+   "f": "poly(x)",
+   "error": "bad formula 'poly(x)': poly() takes 2 or more arguments, got 1"
+  }
+ ]
+}

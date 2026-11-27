@@ -1,7 +1,7 @@
 /* The Map screen (480 x 216 body):
  *
  *   the map picture, full size, from the worker
- *   NO GPS FIX banner        top, inverted, hollow square (shape-coded "off")
+ *   NO GPS FIX banner        top, accent band, hollow square (shape-coded "off")
  *   zoom chip                top right: AUTO 2/4 or FIXED 2/4
  *   labels                   road shields, street and place names on plates,
  *                            placed best first where they collide with nothing
@@ -353,17 +353,17 @@ void ui_map_create(lv_obj_t *body)
     lv_obj_add_flag(sc.zoom, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(sc.scale, LV_OBJ_FLAG_HIDDEN);
 
-    /* NO GPS FIX: the top of the map, inverted */
+    /* NO GPS FIX: the top of the map, an accent band (no light surfaces) */
     sc.banner = ui_box(sc.root, 0, 0, UI_W, 28);
-    ui_fill(sc.banner, TK(fg));
+    ui_fill(sc.banner, TK(accent));
     sc.banner_shape = ui_shape_create(sc.banner, 16);
     lv_obj_set_pos(sc.banner_shape, 6, 6);
-    ui_shape_set(sc.banner_shape, UI_SHAPE_SQUARE, TK(bg), TK(bg));
+    ui_shape_set(sc.banner_shape, UI_SHAPE_SQUARE, TK(on_accent), TK(on_accent));
     sc.banner_text = ui_label(sc.banner, &hh_font_20, 28, 2, 0, LV_TEXT_ALIGN_LEFT);
-    ui_ink(sc.banner_text, TK(bg));
+    ui_ink(sc.banner_text, TK(on_accent));
     lv_label_set_text(sc.banner_text, "NO GPS FIX");
     sc.banner_sub = ui_label(sc.banner, &hh_font_16, 160, 4, UI_W - 166, LV_TEXT_ALIGN_RIGHT);
-    ui_ink(sc.banner_sub, TK(bg));
+    ui_ink(sc.banner_sub, TK(on_accent));
     lv_obj_add_flag(sc.banner, LV_OBJ_FLAG_HIDDEN);
 
     /* no map / no card / damaged: a panel in the middle */
@@ -383,7 +383,7 @@ void ui_map_create(lv_obj_t *body)
     sc.pins_version = tk.pins_version - 1;          /* ask for a picture at the first update */
     sc.res = NULL;
     /* the last picture is still in the worker's canvas: show it at once if it fits the theme */
-    if (last_res && last_res->night == ui_theme_night()) sc.res = last_res;
+    if (last_res && last_res->night == ui_theme_darker()) sc.res = last_res;
 }
 
 /* ---- labels --------------------------------------------------------------------------- */
@@ -539,7 +539,7 @@ static void request(uint32_t now)
     q->lon = tk.have_pos ? tk.lon : UI_MAP_HOME_LON;
     q->level = level;
     q->mpp = mapsvc_mpp(level);
-    q->night = ui_theme_night();
+    q->night = ui_theme_darker();
     palette(&q->pal);
     /* the scale bar and the attribution along the bottom, the banner or the zoom chip at the top */
     q->inset[0] = 16; q->inset[1] = 40; q->inset[2] = 16; q->inset[3] = 44;
@@ -559,7 +559,7 @@ static bool want_new(uint32_t now, float off_x, float off_y)
     const mapsvc_result_t *r = sc.res;
     if (!sc.requested) return true;
     if (!r) return false;                               /* the first is on its way */
-    if (r->night != ui_theme_night() || r->level != view_level() || sc.pins_version != tk.pins_version) return true;
+    if (r->night != ui_theme_darker() || r->level != view_level() || sc.pins_version != tk.pins_version) return true;
     if (r->status != MAPSVC_OK) return now - sc.t_req >= RETRY_MS;
     return fabsf(off_x) > REDRAW_PX || fabsf(off_y) > REDRAW_PX;
 }
