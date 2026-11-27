@@ -1,6 +1,6 @@
 /** F4 Replay screen (port of the screen half of tests/test_ui_replay.py). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const plots = vi.hoisted(() => ({ made: 0, data: [] as unknown[] }));
 vi.mock('uplot', () => ({
@@ -36,6 +36,8 @@ beforeEach(() => {
   resetSession();
   useSession.setState({ replayRequest: null, gpsFocus: null, powerFocus: null, replayDrive: null });
   setDriveSource(new FixtureStore(), true);
+  plots.made = 0;
+  plots.data = [];
   frames = [];
   vi.stubGlobal('requestAnimationFrame', (f: FrameRequestCallback) => { frames.push(f); return frames.length; });
   vi.stubGlobal('cancelAnimationFrame', () => {});
@@ -51,6 +53,10 @@ const secs = (text: string) => { const [h, m, s] = text.replace('A ', '').split(
 async function open() {
   render(<ReplayScreen />);
   await screen.findByTestId('drive-name');
+  // the drive arrives outside act (a resolved load): its lanes make their uPlots in passive
+  // effects, which may run after the name is in the DOM. Wait for them, not for the clock.
+  await waitFor(() => expect(document.querySelectorAll('[data-lane-plot]').length).toBeGreaterThan(0));
+  await act(async () => { await Promise.resolve(); });
 }
 
 describe('F4 Replay', () => {
@@ -64,7 +70,7 @@ describe('F4 Replay', () => {
     expect([...ticks].filter((t) => t.getAttribute('data-tick') === 'near_stall')).toHaveLength(2);
     // the default lanes, drawn with uPlot
     for (const id of ['rpm', 'vss', 'tps', 'map', 'lat_g']) expect(document.querySelector(`[data-lane="${id}"]`)).toBeTruthy();
-    expect(plots.made).toBeGreaterThanOrEqual(5);
+    await waitFor(() => expect(plots.made).toBeGreaterThanOrEqual(5));
     // eight calculated readouts, sensors grouped like Live
     expect(screen.getByTestId('calc').querySelectorAll('[data-calc]')).toHaveLength(8);
     for (const g of ['engine', 'idle', 'fuel', 'ignition', 'electrical', 'switches', 'cyd']) expect(document.querySelector(`[data-group="${g}"]`), g).toBeTruthy();
@@ -73,6 +79,12 @@ describe('F4 Replay', () => {
     expect(Number(map.getAttribute('data-values'))).toBeGreaterThan(100);
     expect(Number(map.getAttribute('data-pins'))).toBeGreaterThan(3);
     expect(map.getAttribute('data-cursor')).not.toBe('');
+  });
+
+  it('a remembered drive the store does not have (the demo drive before the store opened) falls back to the newest', async () => {
+    useSession.setState({ replayDrive: 'drive_from_the_demo' });
+    await open();
+    expect(screen.getByTestId('drive-name').textContent).toBe('drive_2026_11_26_2251');
   });
 
   it('← → step 0.1 s, Shift 1 s; [ ] walk the events; Home / End', async () => {

@@ -163,6 +163,16 @@ export interface DriveInfo {
   reason?: string;
   /** What kind of capture a capture row is (stall, dropout, overtemp, lowbatt, manual ...). */
   captureKind?: string;
+  /** drives.keep: never pruned; deleting it asks twice (a drive row only). */
+  keep?: boolean;
+}
+
+/** A person's note and verdict on one event (desktop eventnotes.py, events rows of kind 'event_note'). */
+export interface EventNote {
+  note: string;
+  verdict: string;
+  kind: string;
+  t: number | null;
 }
 
 /** Store backed by SQLite (sql.js in the browser, persisted to OPFS; the same
@@ -174,6 +184,14 @@ export interface DriveStore {
   deleteDrive(name: string, opts?: { allowKeep?: boolean }): Promise<void>;
   importDb(file: Uint8Array): Promise<number>;
   exportDb(): Promise<Uint8Array>;
+  /** Mark a drive keep (or not). */
+  setKeep?(name: string, keep: boolean): Promise<void>;
+  /** A CSV / MSL / MLG log file as a new drive; resolves the drive's name. */
+  importFile?(fileName: string, bytes: Uint8Array): Promise<string>;
+  /** Notes and verdicts of one drive's events, by event key ("near_stall@3210.4"). */
+  loadEventNotes?(drive: string): Promise<Record<string, EventNote>>;
+  /** Set (undefined: leave, '': clear) the note and/or verdict of one event. */
+  saveEventNote?(drive: string, key: string, change: { note?: string; verdict?: string; kind?: string; t?: number }): Promise<void>;
 }
 
 export interface LoadedDrive {

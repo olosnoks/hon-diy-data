@@ -164,7 +164,7 @@ describe('fetcher', () => {
     const server = new Server({ gate });
     const f = new TileFetcher(new TileStore(new MemoryBackend()), source, { get: server.get });
     f.want(Array.from({ length: 40 }, (_, x) => [16, x, 100] as TileKey));
-    await new Promise((r) => setTimeout(r, 10)); // two are in flight now
+    for (let i = 0; i < 400 && server.inFlight < 2; i++) await new Promise((r) => setTimeout(r, 5));   // two are in flight now
     f.want([[16, 500, 500]]); // the view moved on
     open();
     await f.idle();

@@ -17,8 +17,9 @@ describe('events of a drive', () => {
     expect(of('vtec')).toHaveLength(1);
     expect(of('key_off')).toHaveLength(1);
     expect(of('mark')).toHaveLength(1);
-    expect(of('harsh').some((e) => e.title.startsWith('Harsh brake'))).toBe(true);
-    expect(of('harsh').some((e) => e.title.startsWith('Hard left'))).toBe(true);
+    expect(of('harsh_brake').some((e) => e.title.startsWith('Harsh brake'))).toBe(true);
+    expect(of('corner').some((e) => e.title.startsWith('Hard left'))).toBe(true);
+    expect(of('harsh')).toHaveLength(0);           // the desktop's kind names: notes keyed kind@t carry over
     expect(of('stall')).toHaveLength(0);           // nothing died tonight
   });
 

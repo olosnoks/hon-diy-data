@@ -22,6 +22,7 @@ import { ALIGNMENTS, ALIGN_SHORT, ReplayModel } from '../../core/analysis/replay
 import type { AlignHow } from '../../core/analysis/compare';
 import { valueAt } from '../../core/analysis/cursors';
 import { torqueToHp } from '../../core/analysis/power';
+import { COMPACT_BELOW, useStageSize } from '../shell/Stage';
 import { useTheme } from '../shell/useTheme';
 import { FONTS, type Theme } from '../theme';
 import { pullAt, withDerived } from './calc';
@@ -45,7 +46,7 @@ function isTyping(el: EventTarget | null): boolean {
   return e.tagName === 'INPUT' || e.tagName === 'TEXTAREA' || e.tagName === 'SELECT' || e.isContentEditable;
 }
 
-const tickColour = (t: Theme, e: DriveEvent) => ({ stall: t.alarm, near_stall: t.warn, dropout: t.series[2], key_off: t.rule, vtec: t.ok, harsh: t.unverified, mark: t.fg }[e.kind]);
+const tickColour = (t: Theme, e: DriveEvent) => ({ stall: t.alarm, near_stall: t.warn, dropout: t.series[2], key_off: t.rule, vtec: t.ok, harsh_accel: t.unverified, harsh_brake: t.unverified, corner: t.unverified, knock: t.unverified, mark: t.fg }[e.kind]);
 
 export interface Opened { drive: LoadedDrive; model: ReplayModel; events: DriveEvent[] }
 
@@ -62,6 +63,7 @@ export function openDrive(raw: LoadedDrive): Opened {
 
 export default function ReplayScreen() {
   const t = useTheme();
+  const stage = useStageSize();
   const { source, version } = useDriveSource();
   const request = useSession((s) => s.replayRequest);
   const [opened, setOpened] = useState<Opened | null>(null);
@@ -75,10 +77,12 @@ export default function ReplayScreen() {
   const [colourBy, setColourBy] = useState('vss');
   const [note, setNote] = useState('');
   const handled = useRef(0);
+  const openedFrom = useRef<unknown>(null);
 
   const load = useCallback(async (name: string, at?: number) => {
     try {
       const o = openDrive(await source.loadDrive(name));
+      openedFrom.current = source;
       if (at !== undefined) {
         const v = at - o.model.origin;
         o.model.setCursor(v);
@@ -101,11 +105,12 @@ export default function ReplayScreen() {
       void load(request.drive, request.t);
       return;
     }
-    if (opened) return;
+    // a drive from another source (the demo drives before the store opened) does not count
+    if (opened && openedFrom.current === source) return;
     const last = useSession.getState().replayDrive;
-    if (last) { void load(last); return; }
     source.listDrives().then((all) => {
-      const d = all.filter((x) => x.kind === 'drive').sort((a, b) => b.startedUnix - a.startedUnix)[0] ?? all[0];
+      const remembered = last ? all.find((x) => x.name === last) : undefined;
+      const d = remembered ?? all.filter((x) => x.kind === 'drive').sort((a, b) => b.startedUnix - a.startedUnix)[0] ?? all[0];
       if (d) void load(d.name);
       else setStatus('No drives recorded yet. Record one (Ctrl+R on the Drive screen), or import a hondalog.db (O).');
     }, (e: unknown) => setStatus(`Cannot list drives: ${String(e)}`));
@@ -249,6 +254,12 @@ export default function ReplayScreen() {
 
   const pull = pullAt(drive.series, now);
   const rpmNow = at('rpm'), torque = at('torque');
+  // column widths in design pixels (vw / vh are window pixels, not the scaled stage's)
+  const compact = stage.height < COMPACT_BELOW;
+  const clampPx = (lo: number, v: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const leftW = clampPx(220, stage.width * 0.29, 400);
+  const asideW = clampPx(200, stage.width * 0.24, 330);
+  const bottomH = compact ? 132 : clampPx(140, stage.height * 0.26, 200);
 
   return (
     <div style={{ position: 'relative', flexGrow: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: t.bg, color: t.fg, fontFamily: FONTS.sans }}>
@@ -311,49 +322,50 @@ export default function ReplayScreen() {
 
       <div style={{ flexGrow: 1, minHeight: 0, display: 'flex', gap: 8, padding: 8, paddingTop: 2 }}>
         {/* map, g-g, this pull */}
-        <div style={{ width: 'clamp(220px, 29vw, 400px)', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
+        <div style={{ width: leftW, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: compact ? 6 : 8, minHeight: 0 }}>
           <figure style={{ margin: 0, flex: '1 1 0', minHeight: 0, border: `1px solid ${t.line}`, background: t.panel, position: 'relative' }}>
             <ReplayMap drive={drive} theme={t} cursorT={now} events={events} colourBy={colourBy} onColourBy={setColourBy}
               onPick={(tt) => setCursor(tt - origin)} />
           </figure>
-          <div style={{ height: 'clamp(140px, 26vh, 200px)', flexShrink: 0, display: 'flex', gap: 8 }}>
+          <div style={{ height: bottomH, flexShrink: 0, display: 'flex', gap: compact ? 6 : 8 }}>
             <figure style={{ margin: 0, aspectRatio: '1', height: '100%', border: `1px solid ${t.line}`, background: t.panel }}>
               <GG drive={drive} t={now} theme={t} />
             </figure>
-            <div style={{ flex: '1 1 0', minWidth: 0, border: `1px solid ${t.line}`, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div data-testid="this-pull" style={{ flex: '1 1 0', minWidth: 0, minHeight: 0, overflowY: 'auto', border: `1px solid ${t.line}`, padding: compact ? '4px 8px' : '8px 10px',
+              display: 'flex', flexDirection: 'column', gap: compact ? 2 : 6 }}>
               <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.06em' }}>THIS PULL</div>
-              <div data-testid="pull" style={{ fontSize: 12.5, color: t.fg2 }}>
+              <div data-testid="pull" style={{ fontSize: compact ? 11.5 : 12.5, color: t.fg2 }}>
                 {pull
                   ? `${Number.isFinite(pull.gear) ? `${ordinal(pull.gear)} gear · ` : ''}${num(pull.rpm0)} → ${num(pull.rpm1)} rpm · ${pull.tpsMean > 85 ? 'full' : 'part'} throttle ${num(pull.tpsMean)} %`
                   : 'Not on the throttle here.'}
               </div>
-              <div style={{ fontFamily: FONTS.mono, fontSize: 18, fontWeight: 700 }}>
+              <div style={{ fontFamily: FONTS.mono, fontSize: compact ? 15 : 18, fontWeight: 700 }}>
                 {Number.isFinite(torque) ? `${num(torque)} N·m · ${num(torqueToHp(torque, rpmNow))} hp` : '—'}
               </div>
-              <div style={{ fontSize: 12, color: t.fg2 }}>{Number.isFinite(rpmNow) ? `at ${num(rpmNow)} rpm, now (modelled)` : ''}</div>
+              <div style={{ fontSize: compact ? 11 : 12, color: t.fg2 }}>{Number.isFinite(rpmNow) ? `at ${num(rpmNow)} rpm, now (modelled)` : ''}</div>
               <div style={{ flexGrow: 1 }} />
               <button type="button" onClick={() => openInPower(drive.info.name, pull?.t0 ?? now - 5, pull?.t1 ?? now + 5)}
-                style={{ ...btnStyle(t), minHeight: 32 }}>Open in Power (F5)</button>
+                style={{ ...btnStyle(t), minHeight: compact ? 26 : 32, flexShrink: 0 }}>Open in Power (F5)</button>
             </div>
           </div>
         </div>
 
         {/* lanes and calculated readouts */}
-        <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: compact ? 6 : 8 }}>
           <figure style={{ margin: 0, flex: '1 1 0', minHeight: 0, border: `1px solid ${t.line}`, background: t.panel }}>
             <Lanes model={model} drive={drive} lanes={lanes} events={events} theme={t} window={model.window}
               cursorA={tA} cursorB={tB} overlayKey={overlayKey}
               onCursor={(tt, which) => setCursor(tt, which)} onZoom={(f, around) => act((m) => m.zoom(f, around))}
               onPan={(f) => act((m) => m.pan(f))} onRemove={(id) => setLanes((ls) => ls.filter((l) => l.id !== id))} />
           </figure>
-          <div data-testid="calc" style={{ flexShrink: 0, display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6 }}>
+          <div data-testid="calc" style={{ flexShrink: 0, display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: compact ? 4 : 6 }}>
             {CALC.map((ch) => {
               const meta = channelMeta(ch, drive);
               return (
                 <button key={ch} type="button" title="Click to add as a lane" onClick={() => addLane(ch)}
-                  style={{ border: `1px solid ${t.line}`, padding: '5px 8px', background: t.panel, textAlign: 'left', cursor: 'pointer', fontFamily: FONTS.sans, color: t.fg }}>
+                  style={{ border: `1px solid ${t.line}`, padding: compact ? '2px 6px' : '5px 8px', background: t.panel, textAlign: 'left', cursor: 'pointer', fontFamily: FONTS.sans, color: t.fg }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: t.fg2 }}>{meta.label}</div>
-                  <div data-calc={ch} style={{ fontFamily: FONTS.mono, fontSize: 17, fontWeight: 700 }}>{valueText(meta, at(ch))}</div>
+                  <div data-calc={ch} style={{ fontFamily: FONTS.mono, fontSize: compact ? 14 : 17, fontWeight: 700 }}>{valueText(meta, at(ch))}</div>
                 </button>
               );
             })}
@@ -361,7 +373,7 @@ export default function ReplayScreen() {
         </div>
 
         {/* every sensor at the cursor */}
-        <aside style={{ width: 'clamp(200px, 24vw, 330px)', flexShrink: 0, border: `1px solid ${t.line}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <aside style={{ width: asideW, flexShrink: 0, border: `1px solid ${t.line}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ padding: '6px 10px', borderBottom: `1px solid ${t.line}`, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.06em' }}>ALL SENSORS AT CURSOR</span>
             <span style={{ fontSize: 11, color: t.fg2 }}>click = add lane</span>

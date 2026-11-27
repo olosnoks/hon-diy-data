@@ -124,7 +124,7 @@ export function ByteInspector(props: { scanner: MemoryScanner; map: ParsedMap | 
         {[7, 6, 5, 4, 3, 2, 1, 0].map((b) => {
           const on = known && (v >> b) & 1;
           return <span key={b} title={`bit ${b}`} style={{ ...mono, width: 30, height: 30, lineHeight: '26px', textAlign: 'center', fontWeight: 700,
-            border: `2px solid ${t.rule}`, boxSizing: 'border-box', background: on ? t.fg : t.panel, color: on ? t.bg : t.fg }}>{on ? 1 : 0}</span>;
+            border: `2px solid ${on ? t.accent : t.rule}`, boxSizing: 'border-box', background: on ? t.accent : t.panel, color: on ? t.onAccent : t.fg }}>{on ? 1 : 0}</span>;
         })}
         <span style={{ ...mono, fontSize: 13, fontWeight: 700, marginLeft: 6 }}>bit 7 → 0</span>
       </div>

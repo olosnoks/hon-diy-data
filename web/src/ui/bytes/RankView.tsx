@@ -129,11 +129,11 @@ export function RankView(props: { scanner: MemoryScanner; map: ParsedMap | null;
             const v = scanner.cur[r.candidate.addr]!;
             return (
               <tr key={r.label} onClick={() => { setSel(i); props.onPick(r.candidate.addr); }} aria-selected={on}
-                style={{ background: on ? t.fg : 'transparent', color: on ? t.bg : t.fg, cursor: 'pointer', borderBottom: `2px solid ${t.sunk}` }}>
-                <td style={{ ...mono, fontWeight: 700, padding: '6px 4px' }}>{r.label}</td>
+                style={{ background: on ? t.sunk : 'transparent', color: t.fg, cursor: 'pointer', borderBottom: `2px solid ${t.sunk}` }}>
+                <td style={{ ...mono, fontWeight: 700, padding: '6px 4px', boxShadow: on ? `inset 5px 0 0 ${t.accent}` : 'none', paddingLeft: 10 }}>{r.label}</td>
                 <td>
-                  <span style={{ display: 'inline-block', width: 110, height: 12, border: `2px solid ${on ? t.bg : t.fg}`, verticalAlign: 'middle', position: 'relative' }}>
-                    <span style={{ position: 'absolute', inset: 0, width: `${Math.min(1, r.score) * 100}%`, background: on ? t.bg : t.fg }} />
+                  <span style={{ display: 'inline-block', width: 110, height: 12, border: `2px solid ${t.fg}`, verticalAlign: 'middle', position: 'relative' }}>
+                    <span style={{ position: 'absolute', inset: 0, width: `${Math.min(1, r.score) * 100}%`, background: t.fg }} />
                   </span>
                   <span style={{ ...mono, fontWeight: 700, marginLeft: 6 }}>{r.score.toFixed(2)}{r.r >= 0 ? '↑' : '↓'}</span>
                 </td>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { DriveInfo } from '../../core/types';
 import { DRACULA } from '../theme';
 import { DrivePicker, deleteQuestion, matches, pickerRows } from './DrivePicker';
@@ -77,6 +77,55 @@ describe('<DrivePicker>', () => {
     expect(del).toHaveBeenCalledWith('dropout_2026_11_26_2253');
     expect(await screen.findByText('Deleted dropout_2026_11_26_2253.')).toBeTruthy();
     expect(screen.queryByRole('option', { name: /dropout_2026_11_26_2253/ })).toBeNull();
+  });
+
+  it('Keep marks a drive; deleting a keep drive asks twice and passes allowKeep', async () => {
+    const { SqliteDriveStore } = await import('../../core/store/drivestore');
+    const { MemoryFileStore } = await import('../../core/store/filestore');
+    const { newDrive } = await import('../../core/store/writer');
+    const { column } = await import('../../core/store/model');
+    const store = await SqliteDriveStore.open(new MemoryFileStore());
+    const name = newDrive(store.hdb, { started_unix: 1794812400.0 }, (d) => { d.addStream('s', [column('rpm')]); d.append('s', 0, [800]); d.append('s', 5, [810]); }).drive;
+    const del = vi.spyOn(store, 'deleteDrive');
+    render(<DrivePicker source={store} theme={DRACULA} title="Open a drive" onOpen={() => {}} onClose={() => {}} />);
+    await screen.findByText(name);
+    const keep = screen.getByRole('button', { name: 'Keep' });
+    expect(keep.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => { fireEvent.click(keep); });
+    expect(await screen.findByText(/is marked keep/)).toBeTruthy();
+    expect((await store.listDrives())[0]!.keep).toBe(true);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Keep' }).getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.getByRole('option').textContent).toContain('keep');
+    fireEvent.click(screen.getByText('Delete…'));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByText('Delete'));
+    const second = screen.getByRole('alertdialog', { name: 'Marked keep' });
+    expect(second.textContent).toContain('is marked keep');
+    fireEvent.click(within(second).getByText('Cancel'));
+    expect(del).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Delete…'));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByText('Delete'));
+    await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Marked keep' })).getByText('Delete')); });
+    expect(del).toHaveBeenCalledWith(name, { allowKeep: true });
+    expect(await screen.findByText(`Deleted ${name}.`)).toBeTruthy();
+    expect(await store.listDrives()).toEqual([]);
+  });
+
+  it('Import file… takes a CSV log as a new drive and chooses it', async () => {
+    const { SqliteDriveStore } = await import('../../core/store/drivestore');
+    const { MemoryFileStore } = await import('../../core/store/filestore');
+    const store = await SqliteDriveStore.open(new MemoryFileStore());
+    render(<DrivePicker source={store} theme={DRACULA} title="Open a drive" onOpen={() => {}} onClose={() => {}} />);
+    expect(await screen.findByText(/or a CSV, MSL or MLG log/)).toBeTruthy();
+    const csv = 'time_s,rpm,map\n0.0,800,30\n0.1,820,31\n0.2,850,32\n';
+    const f = new File([csv], 'old_log.csv', { type: 'text/csv' });
+    Object.defineProperty(f, 'arrayBuffer', { value: async () => new TextEncoder().encode(csv).buffer });   // jsdom's File has none
+    await act(async () => { fireEvent.change(screen.getByLabelText('Import file'), { target: { files: [f] } }); });
+    const msg = await screen.findByText(/^Imported old_log\.csv as /);
+    const name = msg.textContent!.replace(/^Imported old_log\.csv as /, '').replace(/\.$/, '');
+    expect((await store.listDrives()).map((d) => d.name)).toEqual([name]);
+    await waitFor(() => expect(screen.getByRole('option', { selected: true }).getAttribute('data-name')).toBe(name));
+    const d = await store.loadDrive(name);
+    expect(Array.from(d.series.rpm!.v)).toEqual([800, 820, 850]);
   });
 
   it('says so when there is nothing recorded', async () => {

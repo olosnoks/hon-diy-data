@@ -19,20 +19,35 @@ describe('ByteQueue', () => {
   });
 
   it('resolves empty on timeout, never throws', async () => {
-    const q = new ByteQueue();
-    const t0 = Date.now();
-    const r = await q.read(8, 30);
-    expect(r.length).toBe(0);
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(25);
+    vi.useFakeTimers();
+    try {
+      const q = new ByteQueue();
+      let got: Uint8Array | null = null;
+      void q.read(8, 30).then((r) => { got = r; });
+      await vi.advanceTimersByTimeAsync(29);
+      expect(got).toBeNull();                       // not before the timeout
+      await vi.advanceTimersByTimeAsync(1);
+      expect(got).not.toBeNull();
+      expect(got!.length).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('wakes a waiting read as soon as data arrives', async () => {
-    const q = new ByteQueue();
-    const p = q.read(8, 1000);
-    setTimeout(() => q.push(Uint8Array.of(0x20)), 5);
-    const t0 = Date.now();
-    expect([...(await p)]).toEqual([0x20]);
-    expect(Date.now() - t0).toBeLessThan(500);
+    vi.useFakeTimers();
+    try {
+      const q = new ByteQueue();
+      let got: Uint8Array | null = null;
+      void q.read(8, 1000).then((r) => { got = r; });
+      await vi.advanceTimersByTimeAsync(5);
+      expect(got).toBeNull();
+      q.push(Uint8Array.of(0x20));
+      await vi.advanceTimersByTimeAsync(0);         // no waiting for the 1000 ms timeout
+      expect([...got!]).toEqual([0x20]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a failed queue rejects empty reads but still hands out what is buffered', async () => {

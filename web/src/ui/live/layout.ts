@@ -95,7 +95,7 @@ export const GROUPS: GroupDef[] = [
     ],
   },
   {
-    id: 'ignition', title: 'IGNITION', sub: () => 'formula fixed 11-26',
+    id: 'ignition', title: 'IGNITION', sub: () => 'timing and VTEC',   // the artboard's 'formula fixed 11-26' was a dated note; the desktop's words
     tiles: [
       { name: 'ign', label: 'Timing', note: 'BTDC' },
       { name: 'vtec', label: 'VTEC', note: (s) => ((s.channels.vtec?.max ?? 0) >= 0.5 ? `seen at ${bound(s, 'rpm', 'max')}` : 'not seen this drive') },

@@ -4,7 +4,12 @@
  * marks. Found by agent #7's src/core/analysis/events.ts (findEvents); this
  * file puts them in the screens' terms (title, one-line text, a "why"
  * paragraph from the signals around the moment) and adds hard cornering from
- * the GPS lateral g, which the core finder does not look for.
+ * the GPS lateral g and knock retards from 0x27, which the core finder does
+ * not look for.
+ *
+ * The kind names are the desktop app's (hondalog/analysis/events.py KINDS):
+ * event notes are stored keyed "kind@t", so a note written in one app is
+ * found by the other.
  */
 import type { LoadedDrive } from '../../core/types';
 import { findEvents, type AnalysisEvent } from '../../core/analysis/events';
@@ -13,7 +18,8 @@ import { valueAt } from '../../core/analysis/cursors';
 import { searchSorted } from '../../core/analysis/series';
 import { num } from '../replay/channels';
 
-export type EventKind = 'stall' | 'near_stall' | 'dropout' | 'key_off' | 'vtec' | 'harsh' | 'mark';
+export type EventKind = 'stall' | 'near_stall' | 'dropout' | 'key_off' | 'vtec' | 'harsh_accel' | 'harsh_brake'
+  | 'corner' | 'knock' | 'mark';
 
 export interface DriveEvent {
   id: string;
@@ -36,16 +42,28 @@ export interface DriveEvent {
 
 export const KIND_LABEL: Record<EventKind, string> = {
   stall: 'ENGINE DIED', near_stall: 'NEAR-STALL', dropout: 'DROPOUT', key_off: 'KEY OFF',
-  vtec: 'VTEC', harsh: 'HARSH', mark: 'MARK',
+  vtec: 'VTEC', harsh_accel: 'HARSH ACCEL', harsh_brake: 'HARSH BRAKE', corner: 'HARD CORNER',
+  knock: 'KNOCK RETARD', mark: 'MARK',
 };
 export const KIND_FILTER: Record<EventKind, string> = {
   stall: 'Engine died', near_stall: 'Near-stall', dropout: 'Link dropout', key_off: 'Key off',
-  vtec: 'VTEC', harsh: 'Harsh', mark: 'Marks',
+  vtec: 'VTEC', harsh_accel: 'Harsh accel', harsh_brake: 'Harsh brake', corner: 'Cornering',
+  knock: 'Knock retard', mark: 'Marks',
 };
-export const KIND_ORDER: EventKind[] = ['stall', 'near_stall', 'dropout', 'key_off', 'vtec', 'harsh', 'mark'];
+export const KIND_ORDER: EventKind[] = ['stall', 'near_stall', 'dropout', 'key_off', 'vtec', 'harsh_accel', 'harsh_brake',
+  'corner', 'knock', 'mark'];
+/** Always given a chip (the rest only when the day has one), as on the desktop. */
+export const KIND_ALWAYS: EventKind[] = ['stall', 'near_stall', 'dropout', 'key_off', 'vtec', 'mark'];
+/** So frequent that "All" leaves them out: they have their own chip (desktop QUIET). */
+export const KIND_QUIET: EventKind[] = ['knock'];
 
-/** |lateral g| that counts as hard cornering */
+/** |lateral g| that counts as hard cornering (desktop Rules.corner_g) */
 export const HARSH_LAT_G = 0.45;
+/** Knock retard: 0x27 (ign_limit, ¼° counts) falls by this many from one read to the next ... */
+export const KNOCK_DROP = 5;
+/** ... with MAP above this; hits closer than KNOCK_MERGE_S are one event (desktop Rules) */
+export const KNOCK_MAP_KPA = 44;
+export const KNOCK_MERGE_S = 2;
 
 const s1 = (x: number) => (Number.isFinite(x) ? x.toFixed(1) : '?');
 
@@ -117,7 +135,7 @@ function fromCore(drive: LoadedDrive, e: AnalysisEvent): Omit<DriveEvent, 'id' |
     case 'harsh_accel':
     case 'harsh_brake': {
       const g = d.peakG ?? NaN;
-      return { ...base, kind: 'harsh', value: g, title: `${e.kind === 'harsh_brake' ? 'Harsh brake' : 'Hard launch'} · ${num(Math.abs(g), 2)} g`, text: e.verdict };
+      return { ...base, kind: e.kind, value: g, title: `${e.kind === 'harsh_brake' ? 'Harsh brake' : 'Harsh accel'} · ${num(Math.abs(g), 2)} g`, text: e.verdict };
     }
     case 'mark':
       return { ...base, kind: 'mark', value: NaN, title: e.label || 'Mark', text: e.verdict, why: '' };
@@ -143,11 +161,43 @@ function corners(drive: LoadedDrive): Omit<DriveEvent, 'id' | 'drive' | 'unix'>[
     const kmh = drive.series.vss ? valueAt(drive.series.vss, t) : NaN;
     const side = g > 0 ? 'right' : 'left';
     out.push({
-      kind: 'harsh', t, t0: lat.t[i]!, t1: lat.t[j]!, value: g, severity: 'warn',
+      kind: 'corner', t, t0: lat.t[i]!, t1: lat.t[j]!, value: g, severity: 'warn',
       title: `Hard ${side} · ${num(Math.abs(g), 2)} g`, text: `cornering ${num(Math.abs(g), 2)} g to the ${side} at ${num(kmh)} km/h`,
       why: `Lateral acceleration from the GPS heading rate peaked at ${num(Math.abs(g), 2)} g to the ${side} at ${num(kmh)} km/h. GPS-derived: a rough figure.`,
     });
     i = j + 1;
+  }
+  return out;
+}
+
+/** Knock retards: 0x27 falls by KNOCK_DROP or more under load (MAP > KNOCK_MAP_KPA). */
+function knocks(drive: LoadedDrive): Omit<DriveEvent, 'id' | 'drive' | 'unix'>[] {
+  const c = drive.series.ign_limit;
+  if (!c || c.t.length < 2) return [];
+  const m = drive.series.map, r = drive.series.rpm;
+  const out: Omit<DriveEvent, 'id' | 'drive' | 'unix'>[] = [];
+  let counts = 0;
+  for (let j = 0; j + 1 < c.t.length; j++) {
+    const drop = c.v[j]! - c.v[j + 1]!;
+    const tj = c.t[j + 1]!;
+    const mk = m ? valueAt(m, tj) : NaN;
+    if (!(drop >= KNOCK_DROP && mk > KNOCK_MAP_KPA)) continue;
+    const last = out[out.length - 1];
+    if (last && tj - last.t1 < KNOCK_MERGE_S) {
+      counts += drop;
+      last.t1 = tj;
+      last.value = counts / 4;
+      last.title = `Knock retard · ${last.value.toFixed(2)}°`;
+      continue;
+    }
+    counts = drop;
+    const rpm = r ? valueAt(r, tj) : NaN;
+    out.push({
+      kind: 'knock', t: tj, t0: tj, t1: tj, value: drop / 4, severity: 'warn',
+      title: `Knock retard · ${(drop / 4).toFixed(2)}°`,
+      text: `timing pulled ${(drop / 4).toFixed(2)}° at ${num(rpm)} rpm, MAP ${num(mk)} kPa`,
+      why: `The ignition correction (0x27, ¼° counts) fell from ${num(c.v[j]!)} to ${num(c.v[j + 1]!)} under load: the ECU pulled timing, most likely knock control (a reading of medium confidence; the byte is read about once a second).`,
+    });
   }
   return out;
 }
@@ -157,7 +207,7 @@ export function eventsOf(drive: LoadedDrive): DriveEvent[] {
   const name = drive.info.name;
   let core: AnalysisEvent[] = [];
   try { core = findEvents(drive); } catch (err) { console.error('findEvents failed', err); }
-  const all = [...core.map((e) => fromCore(drive, e)), ...corners(drive)];
+  const all = [...core.map((e) => fromCore(drive, e)), ...corners(drive), ...knocks(drive)];
   return all
     .map((e) => ({ ...e, id: `${name}@${e.kind}@${e.t.toFixed(2)}`, drive: name, unix: drive.info.startedUnix + e.t }))
     .sort((a, b) => b.unix - a.unix);
@@ -176,7 +226,10 @@ export function autoVerdict(e: DriveEvent, all: DriveEvent[]): string {
     case 'dropout': return e.text.includes('engine ran') ? 'link only, engine ran' : 'link lost, check the engine';
     case 'key_off': return 'normal key-off';
     case 'vtec': return 'normal';
-    case 'harsh': return 'driving';
+    case 'harsh_accel': return Number(/from (\d+) km\/h/.exec(e.text)?.[1] ?? 99) < 10 ? 'hard launch' : 'hard pull';
+    case 'harsh_brake': return 'hard stop';
+    case 'corner': return 'hard corner';
+    case 'knock': return 'knock retard';
     case 'mark': return 'marked by you';
   }
 }

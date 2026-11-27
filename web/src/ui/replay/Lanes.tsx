@@ -197,7 +197,7 @@ export function Lanes(props: LanesProps) {
   const ticks: number[] = [];
   for (let k = Math.ceil(win[0] / step - 1e-9); k * step <= win[1] + 1e-9 && ticks.length < 60; k++) ticks.push(k * step);
 
-  const evColour = (e: DriveEvent) => ({ stall: t.alarm, near_stall: t.warn, dropout: t.series[2], key_off: t.comment, vtec: t.ok, harsh: t.unverified, mark: t.fg }[e.kind]);
+  const evColour = (e: DriveEvent) => ({ stall: t.alarm, near_stall: t.warn, dropout: t.series[2], key_off: t.comment, vtec: t.ok, harsh_accel: t.unverified, harsh_brake: t.unverified, corner: t.unverified, knock: t.unverified, mark: t.fg }[e.kind]);
   const inWin = events.filter((e) => e.t1 + 0.5 >= win[0] + model.origin && e.t0 - 0.5 <= win[1] + model.origin);
 
   return (

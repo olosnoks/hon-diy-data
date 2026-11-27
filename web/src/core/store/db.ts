@@ -168,13 +168,18 @@ export class HondalogDb {
     return heartbeat !== null && now - heartbeat < HEARTBEAT_STALE_S;
   }
 
-  /** Close every drive whose recorder is gone: status "crashed". Returns their ids. */
-  recover(now?: number): number[] {
+  /** Close every drive whose recorder is gone: status "crashed". Returns their ids.
+   *  ``foreign``: this page is the only one with the file open (the app holds a
+   *  Web Lock), so a drive another session left "recording" is dead however
+   *  fresh its heartbeat (a reload, a killed tab). */
+  recover(now?: number, opts: { foreign?: boolean } = {}): number[] {
     const t = now ?? this.now();
     const done: number[] = [];
     for (const [id, pid, hb] of this.conn.all("SELECT id, writer_pid, heartbeat_at FROM drives WHERE status='recording'")) {
       const driveId = Number(id);
-      if (this.writerAlive(driveId, pid === null ? null : Number(pid), hb === null ? null : Number(hb), t)) continue;
+      const owner = pid === null ? null : Number(pid);
+      const foreignDead = !!opts.foreign && owner !== SESSION_PID;
+      if (!foreignDead && this.writerAlive(driveId, owner, hb === null ? null : Number(hb), t)) continue;
       finishDrive(this.conn, driveId, 'crashed', 'crash');
       done.push(driveId);
     }

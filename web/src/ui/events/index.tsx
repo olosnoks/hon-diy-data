@@ -12,7 +12,7 @@ import { FONTS, type Theme } from '../theme';
 import { useDriveSource } from '../replay/source';
 import { openInReplay, showOnMap } from '../../core/session';
 import { clock, day, length } from '../replay/fmt';
-import { autoVerdict, eventsOf, KIND_FILTER, KIND_LABEL, KIND_ORDER, VERDICTS, type DriveEvent, type EventKind } from './detect';
+import { autoVerdict, eventsOf, KIND_ALWAYS, KIND_FILTER, KIND_LABEL, KIND_ORDER, KIND_QUIET, VERDICTS, type DriveEvent, type EventKind } from './detect';
 import { useEventNotes } from './notes';
 import { Timeline } from './Timeline';
 
@@ -25,7 +25,10 @@ function badge(t: Theme, kind: EventKind) {
     case 'near_stall': return filled(t.warn, t.onWarn);
     case 'vtec': return filled(t.ok, t.bg);
     case 'dropout': return outline(t.accent);
-    case 'harsh': return outline(t.unverified);
+    case 'harsh_accel':
+    case 'harsh_brake':
+    case 'corner':
+    case 'knock': return outline(t.unverified);
     case 'mark': return outline(t.fg);
     case 'key_off': return outline(t.line, t.fg2);
   }
@@ -44,7 +47,7 @@ export default function EventsScreen() {
   const [selId, setSelId] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [verdictMenu, setVerdictMenu] = useState(false);
-  const { verdicts, notes, setVerdict, setNote } = useEventNotes();
+  const { verdicts, notes, setVerdict, setNote, error: noteError } = useEventNotes();
 
   // which days have drives; default the newest
   useEffect(() => {
@@ -72,13 +75,15 @@ export default function EventsScreen() {
         try { drives.push(await source.loadDrive(n)); } catch (e) { console.error('cannot load', n, e); }
       }
       const events = drives.flatMap(eventsOf).sort((a, b) => b.unix - a.unix);
+      await useEventNotes.getState().load(source, events);
       if (live) { setData({ drives, events }); setStatus(''); }
     })().catch((e: unknown) => live && setStatus(`Cannot load drives: ${String(e)}`));
     return () => { live = false; };
   }, [dayKey, source, version]);
 
   const events = data?.events ?? [];
-  const shown = useMemo(() => (filter === 'all' ? events : events.filter((e) => e.kind === filter)), [events, filter]);
+  // "All" leaves the many knock retards to their own chip, as the desktop does
+  const shown = useMemo(() => (filter === 'all' ? events.filter((e) => !KIND_QUIET.includes(e.kind)) : events.filter((e) => e.kind === filter)), [events, filter]);
   const sel = shown.find((e) => e.id === selId) ?? shown[0] ?? null;
   const drive = sel ? data?.drives.find((d) => d.info.name === sel.drive) ?? null : null;
   const counts = useMemo(() => {
@@ -118,7 +123,7 @@ export default function EventsScreen() {
 
   return (
     <div style={{ flexGrow: 1, minHeight: 0, display: 'flex', background: t.bg, color: t.fg, fontFamily: FONTS.sans }}>
-      <section style={{ width: 'clamp(320px, 41vw, 560px)', flexShrink: 0, borderRight: `2px solid ${t.rule}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <section style={{ width: 'clamp(320px, 41%, 560px)', flexShrink: 0, borderRight: `2px solid ${t.rule}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px 0', fontSize: 12.5, fontWeight: 600, color: t.fg2 }}>
           {days.length > 1 ? (
             <select aria-label="Day" value={dayKey ?? ''} onChange={(e) => { setDayKey(e.target.value); setSelId(null); }}
@@ -129,8 +134,8 @@ export default function EventsScreen() {
           <span data-testid="summary">· {data?.drives.length ?? 0} drive{data?.drives.length === 1 ? '' : 's'} · {Math.round(totalS / 60)} min</span>
         </div>
         <div role="group" aria-label="Filter" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '10px 12px', borderBottom: `1px solid ${t.rule}` }}>
-          <button type="button" aria-pressed={filter === 'all'} style={chip(filter === 'all')} onClick={() => setFilter('all')}>All {events.length}</button>
-          {KIND_ORDER.map((k) => (
+          <button type="button" aria-pressed={filter === 'all'} style={chip(filter === 'all')} onClick={() => setFilter('all')}>All {events.filter((e) => !KIND_QUIET.includes(e.kind)).length}</button>
+          {KIND_ORDER.filter((k) => counts[k] || KIND_ALWAYS.includes(k)).map((k) => (
             <button key={k} type="button" aria-pressed={filter === k} style={chip(filter === k)} onClick={() => setFilter(filter === k ? 'all' : k)}>
               {KIND_FILTER[k]} {counts[k]}
             </button>
@@ -175,8 +180,9 @@ export default function EventsScreen() {
             )}
             {editing === sel.id && (
               <NoteEditor theme={t} initial={notes[sel.id] ?? ''} onCancel={() => setEditing(null)}
-                onSave={(text) => { setNote(sel.id, text); setEditing(null); }} />
+                onSave={(text) => { setNote(sel, text); setEditing(null); }} />
             )}
+            {noteError && <div role="alert" style={{ color: t.alarm, fontSize: 13, fontWeight: 700 }}>{noteError}</div>}
             <figure style={{ margin: 0, flexGrow: 1, minHeight: 120, border: `1px solid ${t.rule}` }}>
               <Timeline drive={drive} event={sel} theme={t} />
             </figure>
@@ -190,11 +196,11 @@ export default function EventsScreen() {
                 <div role="menu" aria-label="Verdict" style={{ position: 'absolute', bottom: 44, right: 0, background: t.panel, border: `2px solid ${t.rule}`, display: 'flex', flexDirection: 'column', minWidth: 200, zIndex: 10 }}>
                   {VERDICTS.map((v) => (
                     <button key={v} type="button" role="menuitemradio" aria-checked={verdicts[sel.id] === v}
-                      onClick={() => { setVerdict(sel.id, v); setVerdictMenu(false); }}
+                      onClick={() => { setVerdict(sel, v); setVerdictMenu(false); }}
                       style={{ textAlign: 'left', padding: '8px 12px', background: verdicts[sel.id] === v ? t.accent : 'transparent', color: verdicts[sel.id] === v ? t.onAccent : t.fg,
                         border: 0, borderBottom: `1px solid ${t.line}`, fontFamily: FONTS.sans, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{v}</button>
                   ))}
-                  <button type="button" role="menuitemradio" aria-checked={!own} onClick={() => { setVerdict(sel.id, null); setVerdictMenu(false); }}
+                  <button type="button" role="menuitemradio" aria-checked={!own} onClick={() => { setVerdict(sel, null); setVerdictMenu(false); }}
                     style={{ textAlign: 'left', padding: '8px 12px', background: 'transparent', color: t.fg2, border: 0, fontFamily: FONTS.sans, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                     automatic: {autoVerdict(sel, events)}
                   </button>

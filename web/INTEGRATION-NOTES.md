@@ -1,5 +1,26 @@
 # Integration notes (integrator's checklist, from the agents' final reports)
 
+## Finishing pass, 2026-11-27 (second integrator pass): the open items closed
+
+DONE
+- [x] Phone / head-unit landscape. The stage publishes its design size (ui/shell/Stage.tsx StageSizeContext, COMPACT_BELOW = 720). 812x375 gives a 1386x640 stage, 1024x600 a 1140x668 stage (both compact), 1280x720 and 1366x768 the full 1366x768. F1 Live in compact mode: smaller tile metrics (value 19 px, sparkline 10 px, tighter padding, idle bar without its scale line) so 3 tile rows fit every group, and the tile grid scrolls inside its group as a last resort (it does not scroll at any of the four sizes). F2 big values shrink in compact mode; F4 Replay column widths come from the stage (vw/vh were window pixels, not design pixels), the THIS PULL panel is compact and scrolls if needed; F3/F5/F6 side panels use % of the stage instead of vw. The top bar tightens below a 1300 px stage (short stall text, less padding) so the 1140 px head-unit stage fits it. Checked in the browser with a script that flags anything outside the stage or cut by overflow:hidden on F1-F8 and every F7/F8 tab at 812x375, 1024x600, 1280x720, 1366x768: clean (the only report is F2's big digits, whose font line box is taller than the digits; nothing visible is cut).
+- [x] Protocol "OBD2 only": Poller option obd2Only (with an isoFallback): no wake, no ECU-id read, no Honda probes; the 5-baud init starts at once and is retried every ISO_RETRY_S; mode stays 'obd2'; submitted Honda jobs are refused ("protocol is set to OBD2 only"). Controller passes obd2Only for protocol 'obd2' and a makeIsoFallback hook for tests.
+- [x] Poke test pause / resume: Poller.pause()/resume() stop and restart the live block reads (submitted jobs still run, woken at once; no cycles while paused; no rate spike after). AppController.pauseLive()/resumeLive() (counted, survives a reconnect during the run, ECU detail says "live polling paused: poke test"); registerBytesDeps live = those. The runner's withLinePaused always resumes (stop or error included).
+- [x] Event verdicts and notes in hondalog.db: core/store/eventnotes.ts writes the desktop app's rows (events kind 'event_note', key "kind@t" with t to 0.1 s as Python formats it, data = Python json.dumps of {note, verdict, kind, t, updated_unix}, key order and float repr as Python). Cross-checked both ways with the desktop's hondalog/analysis/eventnotes.py (web row read by Python, Python rows read by the web). DriveStore.loadEventNotes/saveEventNote; ui/events/notes.ts loads per day and writes through (the demo drives still use localStorage). Start-up moves any localStorage notes into the DB once (migrateLocalNotes; notes for drives the store does not have stay on the device).
+- [x] Interrupted drive on reload: the app holds the "hondalog.db" Web Lock for the page's life; when it gets it (no other tab), start-up recovery marks every drive another session left "recording" as crashed at once (HondalogDb.recover(now, {foreign:true}), SqliteDriveStore.recoverInterrupted(), AppController.recovered). Another tab holding the lock: left to the heartbeat rule. hondalog.db is persisted on pagehide and on visibilitychange to hidden (wiring/index.ts flushOnHide).
+- [x] Keep flag and imports: DriveInfo.keep (drives.keep), DriveStore.setKeep; drive picker Keep button (aria-pressed), "keep" in the notes column, deleting a keep drive asks twice and passes allowKeep. Import file… takes hondalog.db (importDb) or a CSV / MSL / MLG log (DriveStore.importFile: core/store/importlog.ts over the existing parseTextLog / readMlg and transfer.writeLog, status "imported", imported_from = file name) and selects the new drive. The picker's message line now shows over the empty-list text.
+- [x] Bundle: main.tsx imports src/wiring (and the service worker registration) dynamically after the first paint. Main chunk 700.4 kB -> 195.8 kB (63.9 kB gzip). wiring chunk 352 kB (store + sql.js glue, link, cyd, expr, record, addressmap), sql-wasm 688 kB loaded by it; leaflet (settings-*.js, 171 kB) only with F4/F6, uPlot (58 kB) with F4/F5, esptool-js + pako (lib-*.js, 75 kB) only when Setup flashes the CYD.
+- [x] Flaky tests made deterministic: replay "opens the newest drive" (waits for the lanes' uPlots, made in passive effects after the drive name renders; mock counter reset per test); obd2/clock "RealClock hits absolute deadlines" was the unidentified timing test (now on a controlled performance.now/setTimeout; a real-timer test only checks "never early"); ByteQueue timeouts on fake timers; LOD speed test checks the bound, not wall time; sim/real-clock poller, background writer and tile fetcher tests wait for their condition instead of a fixed sleep; wiring tests have longer condition timeouts. Full suite 3 runs in a row: 67 files, 1393 passed, 1 skipped, 0 failed each.
+- [x] Replay: a remembered drive the store does not have (the demo drive shown before the store opened, now that the store loads in its own chunk) falls back to the newest; a drive opened from the demo source is replaced when the real store arrives.
+- [x] Screenshots (simulator) in docs/screenshots/: 1366x768 F1-F8, 1280x720 F1/F2/F4, 1024x600 F1/F2/F4, 812x375 F1-F4 (old 1366-*.jpg removed).
+
+STILL OPEN
+- Not checked on hardware: KKL cable, CH340 CYD companion/relay, HL session on a real CYD, firmware flash, OBD2 fallback and OBD2-only on a real ECU.
+- poller.obd2(fn) switch-back (Python) still not ported; OBD2-only is a start mode, not a runtime switch.
+- Web event kinds differ from the desktop's for harsh driving ('harsh' cornering vs harsh_accel / harsh_brake), so those notes do not match across apps; stall / near_stall / dropout / key_off / vtec / mark keys match when both apps find the event at the same 0.1 s.
+- No Web Locks API (old web views): start-up recovery assumes this page is the only one.
+- Open from the lists below: pyproject 0.2.0 bump, KML/stall GeoJSON in store, report.py, Drive pinning, CYD-only theme work.
+
 ## Integrator pass, 2026-11-27: status
 
 Wiring lives in `src/wiring/` (not `src/app/`: Windows would clash with `App.tsx`): maps.ts (MapStore), recordermap.ts,
@@ -32,15 +53,15 @@ DONE
 BUG FIXED IN WIRING
 - Poller's EcuRead.t is already "t minus latency"; LiveSession.onBlock subtracts the latency again. The controller passes t + latencyS so the DB gets the ECU sample time once.
 
-NOT DONE / OPEN
+NOT DONE / OPEN (as of the first pass; see the finishing pass above for what was closed)
 - Not checked on hardware: KKL cable, CH340 CYD companion/relay, HL session on a real CYD, firmware flash, OBD2 fallback on a real ECU (all unit-tested against fakes only).
-- Protocol "obd2 only" behaves as "auto" (the poller has no forced-OBD2 start; poller.obd2(fn) not ported).
-- Poke test live pause/resume are no-ops.
-- Events verdicts/notes still in localStorage (not the DB events table); DriveStore has no keep flag or CSV/MSL/MLG import.
-- Phone landscape (812x375): F1 Live clips the bottom tile row of each group (layout, #8); Replay is cramped but works.
-- A drive left "recording" by a reload is marked crashed only once its heartbeat is stale (next open after HEARTBEAT_STALE_S).
-- Main JS chunk 700 kB (sql.js glue, core); consider manualChunks.
-- Flaky under full-suite load: replay.test "opens the newest drive" (uPlot mock count) and once an unidentified timing test; both pass on rerun.
+- ~~Protocol "obd2 only" behaves as "auto"~~ done.
+- ~~Poke test live pause/resume are no-ops~~ done.
+- ~~Events verdicts/notes in localStorage; no keep flag or CSV/MSL/MLG import~~ done.
+- ~~Phone landscape (812x375): F1 Live clips the bottom tile row~~ done.
+- ~~A drive left "recording" by a reload is marked crashed only once its heartbeat is stale~~ done.
+- ~~Main JS chunk 700 kB~~ 196 kB.
+- ~~Flaky tests~~ done.
 - Open from the lists below: pyproject 0.2.0 bump, KML/stall GeoJSON in store, report.py, Drive pinning, CYD-only theme work.
 
 ## #12 platform (done)

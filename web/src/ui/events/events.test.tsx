@@ -86,6 +86,68 @@ describe('F3 Events', () => {
     expect(screen.getByTestId('verdict').textContent).not.toContain('(yours)');
   });
 
+  it('with a drive store: notes and verdicts go into its events table (desktop keys) and come back', async () => {
+    const rowsDb = new Map<string, { note: string; verdict: string; kind: string; t: number | null }>();
+    const calls: string[] = [];
+    class NotesStore extends FixtureStore {
+      async loadEventNotes(drive: string) {
+        const out: Record<string, { note: string; verdict: string; kind: string; t: number | null }> = {};
+        for (const [k, v] of rowsDb) if (k.startsWith(drive + '|')) out[k.slice(drive.length + 1)] = v;
+        return out;
+      }
+      async saveEventNote(drive: string, key: string, c: { note?: string; verdict?: string; kind?: string; t?: number }) {
+        calls.push(`${drive}|${key}`);
+        const old = rowsDb.get(`${drive}|${key}`) ?? { note: '', verdict: '', kind: c.kind ?? '', t: c.t ?? null };
+        rowsDb.set(`${drive}|${key}`, { ...old, ...(c.note !== undefined ? { note: c.note } : {}), ...(c.verdict !== undefined ? { verdict: c.verdict } : {}) });
+      }
+    }
+    setDriveSource(new NotesStore(), false);
+    const list = await open();
+    fireEvent.click(nearRow(list, /5[34]\d rpm/));
+    fireEvent.click(screen.getByText('Add a note'));
+    fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'clutch bite, my fault' } });
+    fireEvent.click(screen.getByText('Save'));
+    fireEvent.click(screen.getByText('Change verdict'));
+    fireEvent.click(within(screen.getByRole('menu')).getByText('driver'));
+    await act(async () => { await Promise.resolve(); });
+    expect(localStorage.getItem('hondalog.events.notes')).toBeNull();          // nothing on the device
+    expect(calls.length).toBe(2);
+    expect(calls[0]).toMatch(/^drive_2026_11_26_\d{4}\|near_stall@\d+\.\d$/);
+    const stored = rowsDb.get(calls[0]!)!;
+    expect(stored).toMatchObject({ note: 'clutch bite, my fault', verdict: 'driver', kind: 'near_stall' });
+    // a fresh screen reads them back from the store
+    cleanup();
+    useEventNotes.setState({ verdicts: {}, notes: {} });
+    const again = await open();
+    await act(async () => { await Promise.resolve(); });
+    const row = nearRow(again, /5[34]\d rpm/);
+    expect(row.textContent).toContain('✎ clutch bite, my fault');
+    fireEvent.click(row);
+    expect(screen.getByTestId('verdict').textContent).toBe('driver (yours)');
+  });
+
+  it('device notes move into the drive database once', async () => {
+    const { SqliteDriveStore } = await import('../../core/store/drivestore');
+    const { MemoryFileStore } = await import('../../core/store/filestore');
+    const { newDrive } = await import('../../core/store/writer');
+    const { column } = await import('../../core/store/model');
+    const { migrateLocalNotes, LOCAL_KEY } = await import('./notes');
+    const store = await SqliteDriveStore.open(new MemoryFileStore());
+    const drive = newDrive(store.hdb, { started_unix: 1794812400.0 }, (d) => { d.addStream('s', [column('rpm')]); d.append('s', 0, [800]); }).drive;
+    localStorage.setItem(LOCAL_KEY, JSON.stringify({
+      verdicts: { [`${drive}@near_stall@229.46`]: 'driver', 'drive_gone@stall@1.00': 'engine died' },
+      notes: { [`${drive}@near_stall@229.46`]: 'clutch bite', [`${drive}@mark@12.00`]: 'pothole' },
+    }));
+    expect(await migrateLocalNotes(store)).toBe(2);
+    const notes = await store.loadEventNotes(drive);
+    expect(notes['near_stall@229.5']).toMatchObject({ note: 'clutch bite', verdict: 'driver', kind: 'near_stall' });
+    expect(notes['mark@12.0']).toMatchObject({ note: 'pothole', verdict: '' });
+    // the drive that is not in the store stays on the device; nothing moves twice
+    expect(JSON.parse(localStorage.getItem(LOCAL_KEY)!)).toEqual({ verdicts: { 'drive_gone@stall@1.00': 'engine died' }, notes: {} });
+    expect(await migrateLocalNotes(store)).toBe(0);
+    expect(Object.keys(await store.loadEventNotes(drive))).toHaveLength(2);
+  });
+
   it('↑ ↓ move through the list, Enter opens in Replay', async () => {
     const list = await open();
     act(() => { fireEvent.keyDown(window, { key: 'ArrowDown' }); });

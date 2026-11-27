@@ -308,6 +308,88 @@ describe('poller', () => {
     expect(pidSeen.length).toBeGreaterThan(10);
     expect(poller.cycles).toBeGreaterThan(5);
   });
+
+  it('OBD2 only: no Honda reads, the 5-baud init at once, retried when nobody answers', async () => {
+    const clock = new VirtualClock();
+    // A Honda-speaking ECU: OBD2-only must still not send a single Honda read.
+    const model = new EcuModel({ clock: clock.now, revEveryS: 0 });
+    const transport = new SimTransport(model, { clock, byteTiming: true });
+    const sent: Uint8Array[] = [];
+    const write = transport.write.bind(transport);
+    transport.write = (d: Uint8Array) => { sent.push(Uint8Array.from(d)); return write(d); };
+    const opened: number[] = [];
+    let pids = 0;
+    const fallback: IsoFallback = {
+      async open(_t, c) {
+        opened.push(c.now());
+        await c.sleep(2.5);                                   // the 5-baud init takes its time
+        if (opened.length === 1) throw new Error('no 0x55 sync');
+        return {
+          label: 'ISO 9141-2 (test)',
+          async next() {
+            await c.sleep(0.1);
+            pids++;
+            return { pid: 0x0d, raw: Uint8Array.of(40), emit: true };
+          },
+          async close() {},
+        };
+      },
+    };
+    const states: LinkState[] = [];
+    const reads: number[] = [];
+    const poller = new Poller(transport, testMap(), {
+      clock, isoFallback: fallback, obd2Only: true, onLink: (s) => states.push(s), onRead: (r) => reads.push(r.addr),
+    });
+    expect(poller.mode).toBe('obd2');
+    await expect(Promise.race([poller.submit((l) => l.readMem(0, 1)), poller.runUntil(1).then(() => 'ran')])).rejects.toThrow(/OBD2 only/);
+    await poller.runUntil(12);
+    await poller.stop();
+    expect(opened[0]!).toBeLessThan(0.5);                     // straight away, not after 12 s of Honda reads
+    expect(opened.length).toBe(2);                           // first init failed, retried ISO_RETRY_S later
+    expect(opened[1]! - opened[0]!).toBeGreaterThanOrEqual(5);
+    expect(states).toContain('iso_only');
+    expect(poller.mode).toBe('obd2');
+    expect(reads).toEqual([]);
+    expect(sent).toEqual([]);                                 // the fake fallback owns the wire: nothing from the Honda link
+    expect(pids).toBeGreaterThan(10);
+  });
+
+  it('pause stops the live reads, jobs still run, resume carries on', async () => {
+    const clock = new VirtualClock();
+    const model = new EcuModel({ clock: clock.now, revEveryS: 0 });
+    const reads: number[] = [];
+    let cycles = 0;
+    const poller = new Poller(new SimTransport(model, { clock, byteTiming: true }), testMap(), {
+      clock, onRead: (r) => reads.push(r.t), onCycle: () => cycles++,
+    });
+    await poller.runUntil(1);
+    expect(reads.length).toBeGreaterThan(5);
+    poller.pause();
+    expect(poller.paused).toBe(true);
+    const before = reads.length;
+    const cyclesBefore = cycles;
+    const job = poller.submit((link) => link.readMem(0x00, 4));
+    await poller.runUntil(3);
+    expect((await job).length).toBe(4);
+    expect(reads.length).toBe(before);
+    expect(cycles).toBe(cyclesBefore);
+    expect(poller.linkState).toBe('ok');
+    poller.resume();
+    await poller.runUntil(4);
+    await poller.stop();
+    expect(reads.length).toBeGreaterThan(before + 5);
+    expect(cycles).toBeGreaterThan(cyclesBefore);
+  });
+
+  it('obd2Only without a fallback is ignored (Honda reads)', async () => {
+    const clock = new VirtualClock();
+    const model = new EcuModel({ clock: clock.now, revEveryS: 0 });
+    const poller = new Poller(new SimTransport(model, { clock, byteTiming: true }), testMap(), { clock, obd2Only: true });
+    expect(poller.obd2Only).toBe(false);
+    await poller.runUntil(1);
+    await poller.stop();
+    expect(poller.reads).toBeGreaterThan(5);
+  });
 });
 
 // ---- golden: the same block reads as the Python poller ----

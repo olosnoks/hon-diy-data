@@ -8,7 +8,11 @@ import { SCREENS, useSession, type CydStatus, type EcuStatus, type StallStatus }
 import type { Theme } from '../theme';
 import { FONTS } from '../theme';
 import { mmss, rate } from './format';
+import { useStageSize } from './Stage';
 import { useTheme } from './useTheme';
+
+/** Below this stage width (design px) the bar tightens: a 1024 x 600 head unit gets a 1140 px wide stage. */
+export const NARROW_BELOW = 1300;
 
 export const TOPBAR_H = 40;
 
@@ -38,13 +42,13 @@ export function ecuChip(ecu: EcuStatus, t: Theme): { text: string; color: string
   }
 }
 
-export function stallText(st: StallStatus): { text: string; hot: boolean } {
+export function stallText(st: StallStatus, short = false): { text: string; hot: boolean } {
   switch (st.state) {
-    case 'armed': return { text: 'Stall catcher armed', hot: false };
-    case 'standby': return { text: 'Stall catcher waits for engine', hot: false };
-    case 'saving': return { text: `STALL CAUGHT, saving +${Math.round(st.postLeftS)} s`, hot: true };
+    case 'armed': return { text: short ? 'Stall armed' : 'Stall catcher armed', hot: false };
+    case 'standby': return { text: short ? 'Stall waits' : 'Stall catcher waits for engine', hot: false };
+    case 'saving': return { text: short ? `STALL +${Math.round(st.postLeftS)} s` : `STALL CAUGHT, saving +${Math.round(st.postLeftS)} s`, hot: true };
     case 'triggered': return { text: 'STALL CAUGHT', hot: true };
-    default: return { text: 'Stall catcher off', hot: false };
+    default: return { text: short ? 'Stall off' : 'Stall catcher off', hot: false };
   }
 }
 
@@ -90,10 +94,11 @@ export function TopBar() {
   const rec = useSession((s) => s.recording);
   const marks = useSession((s) => s.marks.length);
   const now = useSecondTick(rec.active);
+  const narrow = useStageSize().width < NARROW_BELOW;
 
   const e = ecuChip(ecu, t);
   const c = cydChip(cyd, t);
-  const st = stallText(stall);
+  const st = stallText(stall, narrow);
   const elapsed = rec.active && rec.startedUnixMs !== null ? (now - rec.startedUnixMs) / 1000 : 0;
 
   return (
@@ -103,7 +108,7 @@ export function TopBar() {
         borderBottom: `2px solid ${t.rule}`, background: t.bg, color: t.fg, fontFamily: FONTS.sans,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', padding: '0 14px', fontWeight: 800, fontSize: 15, borderRight: `2px solid ${t.rule}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: narrow ? '0 8px' : '0 14px', fontWeight: 800, fontSize: narrow ? 13 : 15, borderRight: `2px solid ${t.rule}` }}>
         HONDALOG
       </div>
       <nav role="tablist" aria-label="Screens" style={{ display: 'flex', alignItems: 'stretch' }}>
@@ -117,7 +122,7 @@ export function TopBar() {
               aria-selected={on}
               onClick={() => setScreen(s.id)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 5, padding: '0 10px', border: 0,
+                display: 'flex', alignItems: 'center', gap: narrow ? 3 : 5, padding: narrow ? '0 6px' : '0 10px', border: 0,
                 borderRight: `1px solid ${t.line}`, cursor: 'pointer', minWidth: 44,
                 background: on ? t.accent : 'transparent', color: on ? t.onAccent : t.fg,
               }}
@@ -129,7 +134,7 @@ export function TopBar() {
         })}
       </nav>
       <div style={{ flexGrow: 1 }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '0 14px', borderLeft: `2px solid ${t.rule}`, minWidth: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: narrow ? 9 : 14, padding: narrow ? '0 8px' : '0 14px', borderLeft: `2px solid ${t.rule}`, minWidth: 0, overflow: 'hidden' }}>
         <button type="button" title="Connection (F8 Setup)" onClick={() => setScreen('setup')} style={chipBtn} data-testid="status-ecu">
           <LampIcon shape={e.shape} color={e.color} />
           {e.text}
@@ -166,7 +171,7 @@ export function TopBar() {
         onClick={() => useSession.getState().mark()}
         style={{
           display: 'flex', alignItems: 'center', gap: 6, border: 0, borderLeft: `2px solid ${t.rule}`,
-          background: t.accent, color: t.onAccent, padding: '0 12px', cursor: 'pointer', fontSize: 13, fontWeight: 800,
+          background: t.accent, color: t.onAccent, padding: narrow ? '0 8px' : '0 12px', cursor: 'pointer', fontSize: 13, fontWeight: 800,
         }}
       >
         MARK

@@ -17,7 +17,7 @@ import { TransportPort } from '../core/cyd/port';
 import { Relay } from '../core/cyd/relay';
 import * as CP from '../core/cyd/serial_proto';
 import { REAL, type Clock } from '../core/link/clock';
-import { Poller, framingOf, type LinkErrorEvent } from '../core/link/poller';
+import { Poller, framingOf, type IsoFallback, type LinkErrorEvent } from '../core/link/poller';
 import { PID_CHANNEL, channelValue, decodePid } from '../core/obd2/obd2';
 import { LiveSession, type LiveFrame } from '../core/record/live';
 import { obd2Stream, type Recorder } from '../core/record/recorder';
@@ -29,7 +29,7 @@ import { refName, type StoreOptions } from '../core/store/writer';
 import type { ChannelSpec, ChannelState, EcuRead, LinkState, LinkStats, MathSpec, PortInfo, Transport, TransportPicker } from '../core/types';
 import { drivesChanged, setDriveSource } from '../ui/replay/source';
 import { MapStore, type LoadedMap } from './maps';
-import { obd2Fallback } from './obd2fallback';
+import { obd2Fallback, type Obd2FallbackHooks } from './obd2fallback';
 import { LivePipeline } from './pipeline';
 import { recorderMapOf } from './recordermap';
 
@@ -44,8 +44,10 @@ export interface ControllerOptions {
   /** Wall time, unix seconds. */
   wallNow?: () => number;
   storeOptions?: StoreOptions;
-  /** Honda reads only, or Honda then OBD2 (default). */
+  /** Honda reads only, Honda then OBD2 (default), or OBD2 (ISO 9141-2) only: no Honda reads. */
   protocol?: () => 'auto' | 'honda' | 'obd2';
+  /** The OBD2 fallback (tests; default obd2Fallback = #6's Iso9141Link + Obd2Session). */
+  makeIsoFallback?: (hooks: Obd2FallbackHooks) => IsoFallback;
   /** Baud override (0 = the map's). */
   baud?: () => number;
   /** Start recording when the link comes up (default true). */
@@ -54,6 +56,25 @@ export interface ControllerOptions {
   companion?: boolean;
   /** Publish to the session store at most this often (Hz, default 10). */
   publishHz?: number;
+  /** True when no other tab has hondalog.db open (default: a Web Lock held for the page's life). */
+  soleOwner?: () => Promise<boolean>;
+}
+
+/** Hold the "hondalog.db" Web Lock while the page lives; false if another tab holds it.
+ *  No Web Locks API (old web views, tests): true. */
+export function holdDbLock(name = 'hondalog.db'): Promise<boolean> {
+  const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+  if (!locks?.request) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    locks.request(name, { ifAvailable: true }, (lock) => {
+      if (!lock) {
+        resolve(false);
+        return undefined;
+      }
+      resolve(true);
+      return new Promise<void>(() => undefined);     // held until the page goes
+    }).catch(() => resolve(true));
+  });
 }
 
 const ECU_DETAIL: Partial<Record<LinkState, string>> = { connecting: 'connecting', error: 'no reply' };
@@ -72,6 +93,8 @@ export class AppController {
   relay: Relay | null = null;
   /** The last thing that went wrong (for Setup and the tests). */
   lastError = '';
+  /** Drives start-up crash recovery marked crashed. */
+  recovered: string[] = [];
 
   private readonly clock: Clock;
   private readonly wallNow: () => number;
@@ -89,6 +112,7 @@ export class AppController {
   private driveRefreshAt = 0;
   private everUp = false;
   private companionPaused = false;
+  private livePauses = 0;
 
   constructor(readonly opts: ControllerOptions) {
     this.maps = new MapStore(opts.files);
@@ -103,6 +127,12 @@ export class AppController {
     this.store = await SqliteDriveStore.open(this.opts.files, {
       parseMap: (text) => { try { return loads(text); } catch { return null; } },
     });
+    // A drive a reload interrupted is "crashed" in the list at once (not after its heartbeat goes stale).
+    try {
+      if (await (this.opts.soleOwner ?? holdDbLock)()) this.recovered = await this.store.recoverInterrupted();
+    } catch (e) {
+      this.lastError = `crash recovery: ${(e as Error).message}`;
+    }
     setDriveSource(this.store);
     await this.useMap(await this.maps.load());
     this.subscribe();
@@ -172,14 +202,15 @@ export class AppController {
     const s = useSession.getState();
     s.clearChannels();
     s.setDemo(false);
-    s.setEcu({ state: 'connecting', rateHz: 0, errors: 0, simulated: sim, obd2: false, detail: sim ? 'simulator' : transport.label });
+    s.setEcu({ state: 'connecting', rateHz: 0, errors: 0, simulated: sim, obd2: false, detail: (sim ? 'simulator' : transport.label) + (protocol === 'obd2' ? ' (OBD2 only)' : '') });
     const poller = new Poller(transport, this.map, {
       clock: this.clock,
       ...(framing ? { framing } : {}),
       ...(transport.usbLatencyS !== undefined ? { usbLatencyS: transport.usbLatencyS } : {}),
-      isoFallback: protocol === 'honda' ? null : obd2Fallback({
+      isoFallback: protocol === 'honda' ? null : (this.opts.makeIsoFallback ?? obd2Fallback)({
         onInit: (phase, detail, hidden) => this.obd2Init(phase, detail, hidden),
       }),
+      obd2Only: protocol === 'obd2',
       onRead: (r) => this.onRead(r),
       onCycle: (t, latency) => this.onCycle(t, latency),
       onLink: (state, stats) => this.onLink(state, stats),
@@ -187,6 +218,7 @@ export class AppController {
       onPid: (t, pid, raw) => this.onPid(t, pid, raw),
     });
     this.poller = poller;
+    if (this.livePauses > 0) poller.pause();      // reconnected during a poke test
     void poller.start().catch((e: unknown) => { this.lastError = `poller: ${String(e)}`; });
     if (this.opts.companion !== false && !sim) void this.startCompanion();
   }
@@ -203,6 +235,29 @@ export class AppController {
     this.source = null;
     useSession.getState().setEcu({ state: 'stopped', rateHz: 0, simulated: false, obd2: false, detail: '' });
     this.markStale();
+  }
+
+  // ------------------------------------------------------------ the poke test
+
+  /** F7 Bytes' poke test borrows the line: the poller stops its live block
+   *  reads (only the scanner's submitted reads run) until resumeLive(). */
+  async pauseLive(): Promise<void> {
+    this.livePauses += 1;
+    const p = this.poller;
+    if (!p) return;
+    p.pause();
+    useSession.getState().setEcu({ detail: 'live polling paused: poke test' });
+  }
+
+  /** Live polling back on (the poke test always calls it, a stop or an error included). */
+  async resumeLive(): Promise<void> {
+    this.livePauses = Math.max(0, this.livePauses - 1);
+    if (this.livePauses > 0) return;
+    const p = this.poller;
+    if (!p?.paused) return;
+    p.resume();
+    const s = useSession.getState();
+    if (s.ecu.detail === 'live polling paused: poke test') s.setEcu({ detail: '' });
   }
 
   /** Stop everything (page unload, tests). */

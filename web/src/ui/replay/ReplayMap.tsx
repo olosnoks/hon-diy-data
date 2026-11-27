@@ -19,7 +19,7 @@ import type { DriveEvent, EventKind } from '../events/detect';
 
 export const COLOUR_CHANNELS = ['vss', 'rpm', 'tps', 'map', 'lat_g', 'accel_g', 'gear', 'power'];
 
-const PIN: Partial<Record<EventKind, PinKind>> = { stall: 'stall', near_stall: 'nearstall', dropout: 'dropout', mark: 'marker', harsh: 'alarm' };
+const PIN: Partial<Record<EventKind, PinKind>> = { stall: 'stall', near_stall: 'nearstall', dropout: 'dropout', mark: 'marker', harsh_accel: 'alarm', harsh_brake: 'alarm', corner: 'alarm' };
 
 let shared: { fetcher: TileFetcher | null; attribution: string } | null = null;
 

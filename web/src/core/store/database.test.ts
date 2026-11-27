@@ -475,10 +475,12 @@ describe('the black box in chunks', () => {
     const drive = store.beginDrive();
     drive.addStream('s', [column('a')]);
     for (let i = 0; i < 50; i++) drive.append('s', i * 0.01, [i]);
-    await new Promise((r) => setTimeout(r, 200));
+    // the timers do it (no flush() or close()); wait for that, not for a fixed time
+    const savedRows = async () => { try { return readDrive((await HondalogDb.open(await files.read('hondalog.db'))).conn, drive.name).rows; } catch { return -1; } };
+    const end = Date.now() + 8000;
+    while ((readDrive(hdb.conn, drive.name).rows !== 50 || (await savedRows()) !== 50) && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
     expect(readDrive(hdb.conn, drive.name).rows).toBe(50);        // without flush() or close()
-    const saved = await HondalogDb.open(await files.read('hondalog.db'));
-    expect(readDrive(saved.conn, drive.name).rows).toBe(50);       // and in the file
+    expect(await savedRows()).toBe(50);                            // and in the file
     await store.close();
     await store.close();                                           // twice is harmless
     expect(store.error).toBeNull();

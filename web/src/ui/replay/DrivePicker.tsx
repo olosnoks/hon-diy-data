@@ -3,14 +3,26 @@
  * first, each followed by its captures (stalls, dropouts). Type to search
  * names, kinds and reasons; ↑/↓ choose, Enter or a double click opens, Esc
  * closes. "Delete…" (or Del) removes the chosen drive with everything in it,
- * or a capture's entry, after a question. "Import hondalog.db…" reads a
- * database file from the Python app or another device.
+ * or a capture's entry, after a question (twice for a drive marked keep).
+ * "Keep" marks a drive so it is never pruned. "Import file…" reads a
+ * hondalog.db from the Python app or another device, or an old CSV, MSL or
+ * MLG log (a new drive).
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { DriveInfo } from '../../core/types';
 import { FONTS, type Theme } from '../theme';
 import { clock, day, pickerLength } from './fmt';
-import type { DriveSource } from './source';
+import { drivesChanged, type DriveSource } from './source';
+
+/** What the import button takes (drivepicker.py IMPORT_FILTER, without the CYD's .bbx). */
+export const IMPORT_ACCEPT = '.csv,.msl,.mlg,.txt,.db,.sqlite,.sqlite3,application/x-sqlite3,text/csv';
+
+const isDatabaseFile = (name: string) => /\.(db|sqlite3?)$/i.test(name);
+
+/** The second question for a drive marked keep (drivepicker.py delete_current). */
+export function keepQuestion(name: string): string {
+  return `${name} is marked keep.\n\nYou marked this drive so that it would not be deleted. Delete it anyway?`;
+}
 
 export interface PickerRow {
   info: DriveInfo;
@@ -77,6 +89,8 @@ export function DrivePicker({ source, theme: t, title, onOpen, onClose, exclude 
   const [sel, setSel] = useState(0);
   const [message, setMessage] = useState('');
   const [asking, setAsking] = useState<PickerRow | null>(null);
+  const [askingKeep, setAskingKeep] = useState(false);
+  const [selectName, setSelectName] = useState<string | null>(null);
   const search = useRef<HTMLInputElement>(null);
   const file = useRef<HTMLInputElement>(null);
 
@@ -86,34 +100,73 @@ export function DrivePicker({ source, theme: t, title, onOpen, onClose, exclude 
   const rows = useMemo(() => pickerRows((all ?? []).filter((d) => d.name !== exclude)).filter((r) => matches(r, query)), [all, query, exclude]);
   const current = rows[Math.min(sel, rows.length - 1)] ?? null;
   const canDelete = !!source.deleteDrive && !!current && current.info.status !== 'recording';
+  const canKeep = !!source.setKeep && !!current && current.info.kind === 'drive';
+  const canImport = !!source.importDb || !!source.importFile;
+
+  // after an import: choose the new drive
+  useEffect(() => {
+    if (!selectName) return;
+    const i = rows.findIndex((r) => r.info.name === selectName);
+    if (i >= 0) { setSel(i); setSelectName(null); }
+  }, [rows, selectName]);
+
+  const closeAsk = () => { setAsking(null); setAskingKeep(false); };
 
   const doDelete = async (row: PickerRow) => {
-    setAsking(null);
+    const keep = row.info.kind === 'drive' && !!row.info.keep;
+    if (keep && !askingKeep) { setAskingKeep(true); return; }      // a drive marked keep: ask twice
+    closeAsk();
     try {
-      await source.deleteDrive!(row.info.name);
+      if (keep) await source.deleteDrive!(row.info.name, { allowKeep: true });
+      else await source.deleteDrive!(row.info.name);
       setMessage(`Deleted ${row.info.name}.`);
+      drivesChanged();
       await refresh();
     } catch (e) {
       setMessage(`Cannot delete ${row.info.name}: ${String(e)}`);
     }
   };
 
-  const onImport = async (f: File | undefined) => {
-    if (!f || !source.importDb) return;
+  const toggleKeep = async (row: PickerRow) => {
+    const keep = !row.info.keep;
     try {
-      const n = await source.importDb(new Uint8Array(await f.arrayBuffer()));
-      setMessage(`Imported ${n} drive${n !== 1 ? 's' : ''} from ${f.name}.`);
+      await source.setKeep!(row.info.name, keep);
+      setMessage(keep ? `${row.info.name} is marked keep: it is never pruned, and deleting it asks twice.` : `${row.info.name} is no longer marked keep.`);
+      drivesChanged();
       await refresh();
-      setSel(0);
+    } catch (e) {
+      setMessage(`Cannot change keep on ${row.info.name}: ${String(e)}`);
+    }
+  };
+
+  const onImport = async (f: File | undefined) => {
+    if (!f) return;
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      if (isDatabaseFile(f.name) || !source.importFile) {
+        if (!source.importDb) throw new Error('this list takes no database files');
+        const n = await source.importDb(bytes);
+        setMessage(`Imported ${n} drive${n !== 1 ? 's' : ''} from ${f.name}.`);
+        setSel(0);
+      } else {
+        const name = await source.importFile(f.name, bytes);
+        setMessage(`Imported ${f.name} as ${name}.`);
+        setQuery('');
+        setSelectName(name);
+      }
+      drivesChanged();
+      await refresh();
     } catch (e) {
       setMessage(`Cannot import ${f.name}: ${String(e)}`);
+    } finally {
+      if (file.current) file.current.value = '';
     }
   };
 
   const onKey = (e: KeyboardEvent) => {
     e.stopPropagation();          // the screen's keys (← → [ ] …) stay out of the dialog
     if (asking) {
-      if (e.key === 'Escape') { setAsking(null); e.preventDefault(); }
+      if (e.key === 'Escape') { closeAsk(); e.preventDefault(); }
       return;
     }
     if (e.key === 'Escape') { onClose(); e.preventDefault(); }
@@ -129,8 +182,8 @@ export function DrivePicker({ source, theme: t, title, onOpen, onClose, exclude 
   });
 
   let empty = message;
-  if (all && !rows.length) {
-    empty = all.length ? 'Nothing matches.' : 'No drives recorded yet. Record one (Ctrl+R on the Drive screen), or import a hondalog.db.';
+  if (all && !rows.length && !message) {
+    empty = all.length ? 'Nothing matches.' : 'No drives recorded yet. Record one (Ctrl+R on the Drive screen), or import a hondalog.db or a CSV, MSL or MLG log.';
   }
 
   return (
@@ -150,7 +203,8 @@ export function DrivePicker({ source, theme: t, title, onOpen, onClose, exclude 
             const on = r === current;
             const d = r.info;
             const flags = d.kind === 'drive'
-              ? [...(r.stalls ? [`${r.stalls} stall${r.stalls !== 1 ? 's' : ''}`] : []), ...(d.status !== 'ok' ? [d.status] : []), ...(d.reason ? [d.reason] : [])]
+              ? [...(r.stalls ? [`${r.stalls} stall${r.stalls !== 1 ? 's' : ''}`] : []), ...(d.status !== 'ok' ? [d.status] : []),
+                ...(d.keep ? ['keep'] : []), ...(d.reason ? [d.reason] : [])]
               : [d.reason ?? ''];
             return (
               <div key={d.name} role="option" aria-selected={on} data-name={d.name}
@@ -168,23 +222,29 @@ export function DrivePicker({ source, theme: t, title, onOpen, onClose, exclude 
         </div>
         <div aria-live="polite" style={{ fontSize: 14, fontWeight: 500, minHeight: 20, color: t.fg2 }}>{all === null ? 'Loading…' : empty}</div>
         {asking ? (
-          <div role="alertdialog" aria-label="Delete" style={{ border: `2px solid ${t.alarm}`, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ whiteSpace: 'pre-wrap', fontSize: 14 }}>{deleteQuestion(asking)}</div>
+          <div role="alertdialog" aria-label={askingKeep ? 'Marked keep' : 'Delete'} style={{ border: `2px solid ${t.alarm}`, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
+            <div style={{ whiteSpace: 'pre-wrap', fontSize: 14 }}>{askingKeep ? keepQuestion(asking.info.name) : deleteQuestion(asking)}</div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button type="button" style={btn()} onClick={() => setAsking(null)} autoFocus>Cancel</button>
+              <button type="button" style={btn()} onClick={closeAsk} autoFocus>Cancel</button>
               <button type="button" style={{ ...btn(), borderColor: t.alarm, background: t.alarm, color: t.onAlarm }} onClick={() => void doDelete(asking)}>Delete</button>
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: 8 }}>
-            {source.importDb && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {canImport && (
               <>
-                <button type="button" style={btn()} onClick={() => file.current?.click()}>Import hondalog.db…</button>
-                <input ref={file} type="file" accept=".db,.sqlite,application/x-sqlite3" hidden aria-label="Import file"
+                <button type="button" style={btn()} onClick={() => file.current?.click()}
+                  title="A hondalog.db from the desktop app or another device, or an old CSV, MSL or MLG log">Import file…</button>
+                <input ref={file} type="file" accept={source.importFile ? IMPORT_ACCEPT : '.db,.sqlite,application/x-sqlite3'} hidden aria-label="Import file"
                   onChange={(e) => void onImport(e.target.files?.[0])} />
               </>
             )}
             {source.deleteDrive && <button type="button" style={btn()} disabled={!canDelete} onClick={() => current && setAsking(current)}>Delete…</button>}
+            {source.setKeep && (
+              <button type="button" style={btn(!!(canKeep && current?.info.keep))} disabled={!canKeep} aria-pressed={!!(canKeep && current?.info.keep)}
+                title="Keep this drive: it is never pruned, and deleting it asks twice"
+                onClick={() => current && void toggleKeep(current)}>Keep</button>
+            )}
             <div style={{ flexGrow: 1 }} />
             <button type="button" style={btn()} onClick={onClose}>Cancel</button>
             <button type="button" style={btn(true)} disabled={!current} onClick={() => current && onOpen(current.info.name)}>Open</button>

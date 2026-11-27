@@ -9,6 +9,7 @@ import { memo } from 'react';
 import { alarmLevel, alarmUnacked, useSession } from '../../core/session';
 import { FONTS } from '../theme';
 import { formatBound, formatValue, isFlag, isVerified, unitsOf } from '../shell/format';
+import { COMPACT_BELOW, useStageSize } from '../shell/Stage';
 import { useTheme } from '../shell/useTheme';
 import { hatch, LevelIcon, Sparkline, VerifiedMark } from '../live/marks';
 
@@ -20,6 +21,7 @@ export function bigValuePx(text: string, base = 104): number {
 }
 
 export const BigTile = memo(function BigTile({ name }: { name: string }) {
+  const compact = useStageSize().height < COMPACT_BELOW;   // a phone in landscape: the number fits its box
   const t = useTheme();
   const st = useSession((s) => s.channels[name]);
   const history = useSession((s) => s.history[name]);
@@ -61,7 +63,7 @@ export const BigTile = memo(function BigTile({ name }: { name: string }) {
           ink={alarm ? t.onAlarm : warn ? t.onWarn : undefined} />
       </div>
       <div style={{ flexGrow: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 14px', overflow: 'hidden' }}>
-        <span data-testid={`bigvalue-${name}`} style={{ fontFamily: FONTS.mono, fontSize: bigValuePx(text), fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em', whiteSpace: 'nowrap' }}>
+        <span data-testid={`bigvalue-${name}`} style={{ fontFamily: FONTS.mono, display: 'block', fontSize: bigValuePx(text, compact ? 84 : 104), fontWeight: 700, lineHeight: compact ? 0.9 : 1, letterSpacing: '-0.03em', whiteSpace: 'nowrap' }}>
           {text}
         </span>
       </div>

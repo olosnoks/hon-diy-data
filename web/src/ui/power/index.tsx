@@ -191,7 +191,7 @@ export function PowerView({ t, drive, focus, header, save = saveText }: PowerVie
 
   return (
     <div style={{ height: '100%', minHeight: 0, display: 'flex', background: t.bg, color: t.fg, fontFamily: FONTS.sans }}>
-      <aside aria-label="Pulls found" style={{ width: 'clamp(210px, 21vw, 290px)', flexShrink: 0, borderRight: `2px solid ${t.rule}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <aside aria-label="Pulls found" style={{ width: 'clamp(210px, 21%, 290px)', flexShrink: 0, borderRight: `2px solid ${t.rule}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <Section t={t}>
           {header}
           <H2>PULLS FOUND</H2>
@@ -250,7 +250,7 @@ export function PowerView({ t, drive, focus, header, save = saveText }: PowerVie
         {tab === 'curve' && <div style={{ fontSize: 11.5, color: t.fg2 }}>Measured + modelled. Reference: {REFERENCE_D16Y8.ratedHp} hp @ {thousands(REFERENCE_D16Y8.ratedHpRpm)}, {REFERENCE_D16Y8.ratedNm} N·m @ {thousands(REFERENCE_D16Y8.ratedNmRpm)}; the shape between is approximate. Band = grade, mass, drivetrain and tyre uncertainty.</div>}
       </section>
 
-      <aside aria-label="Result" style={{ width: 'clamp(230px, 22vw, 300px)', flexShrink: 0, borderLeft: `2px solid ${t.rule}`, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+      <aside aria-label="Result" style={{ width: 'clamp(230px, 22%, 300px)', flexShrink: 0, borderLeft: `2px solid ${t.rule}`, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
         <Section t={t}>
           <H2 style={{ marginBottom: 2 }}>RESULT{title ? ` · ${title.toUpperCase()}` : ''}</H2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>

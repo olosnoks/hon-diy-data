@@ -241,7 +241,7 @@ export function GpsView(props: GpsViewProps) {
         </figure>
       </section>
 
-      <aside aria-label="Map panel" style={{ width: 'clamp(250px, 26vw, 360px)', flexShrink: 0, borderLeft: `2px solid ${t.rule}`, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+      <aside aria-label="Map panel" style={{ width: 'clamp(250px, 26%, 360px)', flexShrink: 0, borderLeft: `2px solid ${t.rule}`, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
         <Section t={t}>{header}</Section>
         {mode === 'drive' ? <>
           <Section t={t}>

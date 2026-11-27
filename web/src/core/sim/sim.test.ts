@@ -318,7 +318,9 @@ describe('live demo on the real clock (no cable)', () => {
     let reads = 0;
     const poller = new Poller(t, testMap(), { onRead: () => { reads++; } });
     await poller.start();
-    await new Promise((r) => setTimeout(r, 1200));
+    // wait for the condition, not a fixed time (the suite under load is slow)
+    const end = Date.now() + 8000;
+    while (!(poller.linkState === 'ok' && reads > 10) && Date.now() < end) await new Promise((r) => setTimeout(r, 25));
     expect(poller.linkState).toBe('ok');
     expect(new TextDecoder().decode(poller.ecuId!)).toBe('SIM-P2P\x00\x00\x01');
     expect(reads).toBeGreaterThan(10);

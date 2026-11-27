@@ -48,12 +48,12 @@ export function UnknownView(props: { store: NotesStore; scanner: MemoryScanner; 
               const now = v < 0 ? '--' : e.bit === null ? hex2(v) : String((v >> e.bit) & 1);
               return (
                 <tr key={e.key} onClick={() => { setSel(e.key); props.onPick(e.addr); }} aria-selected={on}
-                  style={{ background: on ? t.fg : 'transparent', color: on ? t.bg : t.fg, cursor: 'pointer', borderBottom: `2px solid ${t.sunk}` }}>
-                  <td style={{ ...mono, fontWeight: 700, padding: '6px 4px', whiteSpace: 'nowrap' }}>{e.bit === null ? e.key : `${e.key.split('.')[0]} b${e.bit}`}</td>
+                  style={{ background: on ? t.sunk : 'transparent', color: t.fg, cursor: 'pointer', borderBottom: `2px solid ${t.sunk}` }}>
+                  <td style={{ ...mono, fontWeight: 700, padding: '6px 4px', whiteSpace: 'nowrap', boxShadow: on ? `inset 5px 0 0 ${t.accent}` : 'none', paddingLeft: 10 }}>{e.bit === null ? e.key : `${e.key.split('.')[0]} b${e.bit}`}</td>
                   <td style={{ ...mono, fontWeight: 700 }}>{e.name}</td>
                   <td>{e.what}{e.notes ? <em> · {e.notes}</em> : null}</td>
                   <td style={{ ...mono, fontWeight: 700 }}>{now}</td>
-                  <td><span style={{ ...mono, fontWeight: 700, color: on ? t.bg : confColor(e.confidence) }}>{e.confidence}</span></td>
+                  <td><span style={{ ...mono, fontWeight: 700, color: confColor(e.confidence) }}>{e.confidence}</span></td>
                 </tr>
               );
             })}

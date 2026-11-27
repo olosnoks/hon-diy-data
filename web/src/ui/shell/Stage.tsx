@@ -5,7 +5,7 @@
  * shorter side maps to the design size. On a small landscape phone the
  * design is relaxed to 1140 x 640 so text stays readable.
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { DESIGN } from '../theme';
 
 export const PHONE = { width: 1140, height: 640 };
@@ -17,6 +17,13 @@ export function stageFit(w: number, h: number): { scale: number; width: number; 
   if (scale < 0.75) scale = Math.max(scale, Math.min(w / PHONE.width, h / PHONE.height));
   return { scale, width: w / scale, height: h / scale };
 }
+
+/** The stage's inner size in design pixels (a phone in landscape: 1386 x 640, a 1024 x 600 head unit: 1365 x 800). */
+export const StageSizeContext = createContext<{ width: number; height: number; scale: number }>({ width: DESIGN.width, height: DESIGN.height, scale: 1 });
+export const useStageSize = () => useContext(StageSizeContext);
+
+/** Below this design height the screens use their compact metrics (a phone in landscape). */
+export const COMPACT_BELOW = 720;
 
 function windowSize(): { w: number; h: number } {
   if (typeof window === 'undefined') return { w: DESIGN.width, h: DESIGN.height };
@@ -45,7 +52,7 @@ export function Stage({ background, children }: { background: string; children: 
           transform: `scale(${fit.scale})`, transformOrigin: '0 0',
         }}
       >
-        {children}
+        <StageSizeContext.Provider value={fit}>{children}</StageSizeContext.Provider>
       </div>
     </div>
   );

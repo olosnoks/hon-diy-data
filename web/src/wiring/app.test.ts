@@ -2,7 +2,7 @@
  * The integrator's wiring end to end on the built-in simulator (real clock,
  * byte timing): poller -> live session -> session store and hondalog.db.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_MAP_TEXT } from '../core/addressmap';
 import { resetSession, useSession } from '../core/session';
 import { MemoryFileStore } from '../core/store/filestore';
@@ -88,7 +88,7 @@ describe('AppController on the simulator', () => {
     expect(Object.keys(s.raw).length).toBeGreaterThan(10);
     expect(s.recording.active).toBe(true);                     // auto-record when the link comes up
     useSession.getState().mark('test mark');
-    await until(() => (useSession.getState().recording.drive?.name ?? '') !== '', 8000);
+    await until(() => (useSession.getState().recording.drive?.name ?? '') !== '', 15000);
     await new Promise((r) => setTimeout(r, 600));
     useSession.getState().stopRecording();
     await until(() => !app!.live!.recording);
@@ -100,6 +100,133 @@ describe('AppController on the simulator', () => {
     await app.disconnect();
     expect(useSession.getState().ecu.state).toBe('stopped');
   }, 30000);
+});
+
+describe('AppController protocol "OBD2 only"', () => {
+  it('skips Honda reads and starts in the ISO 9141 path', async () => {
+    const files = new MemoryFileStore();
+    let opens = 0;
+    let hondaWrites = 0;
+    const { createSimTransport } = await import('../core/sim/transport');
+    app = new AppController({
+      files, picker: null, protocol: () => 'obd2', autoRecord: false, companion: false,
+      makeSim: () => {
+        const t = createSimTransport({ preset: 'p2p-car' });
+        const write = t.write.bind(t);
+        t.write = (d: Uint8Array) => { hondaWrites++; return write(d); };
+        return t;
+      },
+      makeIsoFallback: (hooks) => ({
+        async open(_t, c) {
+          opens++;
+          hooks.onInit?.('start', 'OBD2 5-baud init', false);
+          await c.sleep(0.05);
+          hooks.onInit?.('ok', 'ISO 9141-2 (fake)', false);
+          return {
+            label: 'ISO 9141-2 (fake)',
+            async next() { await c.sleep(0.02); return { pid: 0x0c, raw: Uint8Array.of(0x0b, 0xb8), emit: true }; },
+            async close() {},
+          };
+        },
+      }),
+    });
+    await app.init();
+    await app.connect({ kind: 'sim' });
+    expect(app.poller!.obd2Only).toBe(true);
+    await until(() => useSession.getState().ecu.obd2 && useSession.getState().ecu.state === 'iso_only', 12000);
+    expect(opens).toBe(1);
+    expect(hondaWrites).toBe(0);
+    expect(app.poller!.reads).toBeGreaterThan(0);
+    expect(app.poller!.ecuId).toBeNull();
+  }, 30000);
+});
+
+describe('poke test live pause / resume', () => {
+  it('stops the live poller around the run and always resumes it', async () => {
+    const { withLinePaused } = await import('../ui/bytes/poke/runner');
+    const { memLinkOf } = await import('./index');
+    const files = new MemoryFileStore();
+    app = new AppController({ files, picker: null, autoRecord: false, companion: false });
+    await app.init();
+    await app.connect({ kind: 'sim' });
+    await until(() => useSession.getState().ecu.state === 'ok', 15000);
+    const live = { pause: () => app!.pauseLive(), resume: () => app!.resumeLive() };
+    const mem = memLinkOf(app);
+    let cyclesDuring = -1;
+    const got = await withLinePaused(live, async () => {
+      expect(app!.poller!.paused).toBe(true);
+      expect(useSession.getState().ecu.detail).toMatch(/paused/);
+      const c0 = app!.poller!.cycles;
+      const bytes = await mem.readMem(0x00, 8);          // the scanner's reads still go through
+      await new Promise((r) => setTimeout(r, 300));
+      cyclesDuring = app!.poller!.cycles - c0;
+      return bytes;
+    });
+    expect(got.length).toBe(8);
+    expect(cyclesDuring).toBe(0);
+    expect(app.poller!.paused).toBe(false);
+    const c1 = app.poller!.cycles;
+    await until(() => app!.poller!.cycles > c1 + 2, 15000);
+    // an error inside the run still resumes
+    await expect(withLinePaused(live, async () => { throw new Error('boom'); })).rejects.toThrow('boom');
+    expect(app.poller!.paused).toBe(false);
+  }, 40000);
+});
+
+describe('a drive interrupted by a reload', () => {
+  async function leftRecording(files: MemoryFileStore): Promise<string> {
+    const { HondalogDb, SESSION_PID } = await import('../core/store/db');
+    const { Store } = await import('../core/store/writer');
+    const { column } = await import('../core/store/model');
+    const hdb = await HondalogDb.openFile(files);
+    const store = new Store(hdb, { background: false, checkpointS: 0 });
+    const d = store.beginDrive({ started_unix: Date.now() / 1000 - 60 });
+    d.addStream('s', [column('rpm')]);
+    for (let i = 0; i < 10; i++) d.append('s', i, [800]);
+    store.flush();
+    hdb.conn.run('UPDATE drives SET writer_pid=?, heartbeat_at=?', [SESSION_PID + 7, Date.now() / 1000 - 2]);   // the page before the reload
+    await hdb.persist();
+    return d.name;
+  }
+
+  it('is crashed in the list as soon as the app starts', async () => {
+    const files = new MemoryFileStore();
+    const name = await leftRecording(files);
+    app = new AppController({ files, picker: null, soleOwner: async () => true });
+    await app.init();
+    expect(app.recovered).toEqual([name]);
+    const d = (await useDriveSource.getState().source.listDrives()).find((x) => x.name === name)!;
+    expect(d.status).toBe('crashed');
+  });
+
+  it('is left alone while another tab holds the database', async () => {
+    const files = new MemoryFileStore();
+    const name = await leftRecording(files);
+    app = new AppController({ files, picker: null, soleOwner: async () => false });
+    await app.init();
+    expect(app.recovered).toEqual([]);
+    expect((await app.store!.listDrives()).find((x) => x.name === name)!.status).toBe('recording');
+  });
+
+  it('the database is written when the page is hidden or goes away', async () => {
+    const { flushOnHide } = await import('./index');
+    const files = new MemoryFileStore();
+    app = new AppController({ files, picker: null });
+    await app.init();
+    const persist = vi.spyOn(app.store!, 'persist');
+    const off = flushOnHide(app, window, document);
+    window.dispatchEvent(new Event('pagehide'));
+    expect(persist).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(persist).toHaveBeenCalledTimes(2);
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(persist).toHaveBeenCalledTimes(2);
+    off();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(persist).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('Setup CYD client over the HL session', () => {

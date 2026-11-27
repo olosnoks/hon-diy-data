@@ -2,6 +2,7 @@
  * The small timeline of one event: RPM with the idle target, throttle and MAP
  * from 10 s before to 5 s after it (design canvas "F3 Events").
  */
+import { useEffect, useRef, useState, type RefObject, type SVGProps } from 'react';
 import type { LoadedDrive } from '../../core/types';
 import { valueAt } from '../../core/analysis/cursors';
 import { searchSorted } from '../../core/analysis/series';
@@ -42,6 +43,30 @@ function extent(pts: [number, number][], extra: number[] = []): [number, number]
   return Number.isFinite(lo) ? [lo, hi] : [0, 1];
 }
 
+/** The figure stretches the 760 x 330 drawing to its box (preserveAspectRatio
+ *  none, as the artboard does); this is the vertical factor that puts the text
+ *  back to the horizontal scale, so labels are never squashed or stretched. */
+function useTextUnstretch(): [RefObject<SVGSVGElement>, number] {
+  const ref = useRef<SVGSVGElement>(null);
+  const [f, setF] = useState(1);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth, h = el.clientHeight;
+      if (w > 0 && h > 0) setF((w / 760) / (h / 330));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, f];
+}
+
+/** SVG text scaled by f vertically about its own baseline point. */
+function Txt({ x, y, f, ...rest }: SVGProps<SVGTextElement> & { x: number; y: number; f: number }) {
+  return <text x={x} y={y} transform={f === 1 ? undefined : `translate(0 ${y}) scale(1 ${f.toFixed(4)}) translate(0 ${-y})`} {...rest} />;
+}
+
 export function Timeline({ drive, event: e, theme: c }: { drive: LoadedDrive; event: DriveEvent; theme: Theme }) {
   const a = e.t - BEFORE_S, b = e.t + AFTER_S;
   const x = (tt: number) => X0 + ((tt - a) / (b - a)) * (X1 - X0);
@@ -60,8 +85,9 @@ export function Timeline({ drive, event: e, theme: c }: { drive: LoadedDrive; ev
   const danger = [Math.max(rlo, 400), Math.min(rhi, 600)];
   const low = rpm.reduce<[number, number] | null>((m, p) => (p[0] >= e.t - 1.5 && p[0] <= e.t + 1.5 && (!m || p[1] < m[1]) ? p : m), null);
 
+  const [ref, f] = useTextUnstretch();
   return (
-    <svg viewBox="0 0 760 330" width="100%" height="100%" preserveAspectRatio="none" role="img"
+    <svg ref={ref} viewBox="0 0 760 330" width="100%" height="100%" preserveAspectRatio="none" role="img"
       aria-label={`RPM, idle target, throttle and MAP from ${BEFORE_S} s before to ${AFTER_S} s after the event`}>
       <g stroke={c.line} strokeWidth="1">
         {TICKS.map((k) => <line key={k} x1={x(e.t + k)} y1="10" x2={x(e.t + k)} y2="300" />)}
@@ -71,27 +97,27 @@ export function Timeline({ drive, event: e, theme: c }: { drive: LoadedDrive; ev
       )}
       <line x1={x(e.t)} y1="10" x2={x(e.t)} y2="300" stroke={c.alarm} strokeWidth="2" />
       <g fontFamily="Inter" fontSize="12" fontWeight="700" fill={c.fg}>
-        <text x="8" y="40">RPM</text><text x="8" y="175">Throttle</text><text x="8" y="255">MAP</text>
+        <Txt f={f} x={8} y={40}>RPM</Txt><Txt f={f} x={8} y={175}>Throttle</Txt><Txt f={f} x={8} y={255}>MAP</Txt>
       </g>
       {danger[1]! > danger[0]! && <rect x={X0} y={yr(danger[1]!)} width={X1 - X0} height={yr(danger[0]!) - yr(danger[1]!)} fill={c.warn} opacity="0.3" />}
       {Number.isFinite(target) && (
         <>
           <line x1={X0} y1={yr(target)} x2={X1} y2={yr(target)} stroke={c.fg} strokeWidth="1.5" strokeDasharray="6 4" />
-          <text x={X1 - 2} y={yr(target) - 6} textAnchor="end" fontFamily="JetBrains Mono" fontSize="11" fill={c.fg}>target {num(target)}</text>
+          <Txt f={f} x={X1 - 2} y={yr(target) - 6} textAnchor="end" fontFamily="JetBrains Mono" fontSize="11" fill={c.fg}>target {num(target)}</Txt>
         </>
       )}
       <polyline data-testid="tl-rpm" points={line(rpm, yr)} fill="none" stroke={c.series[0]} strokeWidth="3" />
       {low && (e.kind === 'near_stall' || e.kind === 'stall') && (
-        <text x={x(low[0]) + 6} y={yr(low[1]) + 18} fontFamily="JetBrains Mono" fontSize="11" fontWeight="700" fill={c.alarm}>{num(low[1])}</text>
+        <Txt f={f} x={x(low[0]) + 6} y={yr(low[1]) + 18} fontFamily="JetBrains Mono" fontSize="11" fontWeight="700" fill={c.alarm}>{num(low[1])}</Txt>
       )}
       <line x1={X0} y1="200" x2={X1} y2="200" stroke={c.rule} strokeWidth="1" />
       <polyline data-testid="tl-tps" points={line(tps, yt)} fill="none" stroke={c.series[1]} strokeWidth="3" />
       <line x1={X0} y1="290" x2={X1} y2="290" stroke={c.rule} strokeWidth="1" />
       <polyline data-testid="tl-map" points={line(map, ym)} fill="none" stroke={c.series[2]} strokeWidth="3" />
       <g fontFamily={FONTS.mono} fontSize="11" fill={c.fg}>
-        {TICKS.map((k) => <text key={k} x={x(e.t + k)} y="318" textAnchor="middle">{k === -10 ? '−10 s' : k < 0 ? `−${-k}` : k > 0 ? `+${k}` : '0'}</text>)}
+        {TICKS.map((k) => <Txt f={f} key={k} x={x(e.t + k)} y={318} textAnchor="middle">{k === -10 ? '−10 s' : k < 0 ? `−${-k}` : k > 0 ? `+${k}` : '0'}</Txt>)}
       </g>
-      {!rpm.length && <text x="420" y="90" textAnchor="middle" fontFamily="Inter" fontSize="13" fill={c.fg2}>no ECU data around this moment</text>}
+      {!rpm.length && <Txt f={f} x={420} y={90} textAnchor="middle" fontFamily="Inter" fontSize="13" fill={c.fg2}>no ECU data around this moment</Txt>}
     </svg>
   );
 }

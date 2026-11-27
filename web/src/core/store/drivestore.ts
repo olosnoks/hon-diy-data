@@ -5,7 +5,9 @@
  * and can be opened (what has been committed so far).
  */
 
-import type { AddressMap, DriveInfo, DriveStore, EcuRead, LoadedDrive } from '../types';
+import type { AddressMap, DriveInfo, DriveStore, EcuRead, EventNote, LoadedDrive } from '../types';
+import { loadEventNotes, saveEventNote, type SaveNote } from './eventnotes';
+import { importLogFile } from './importlog';
 import { DB_NAME, HondalogDb } from './db';
 import type { CaptureRow } from './export/track';
 import { Track } from './export/track';
@@ -13,7 +15,7 @@ import type { FileStore } from './filestore';
 import { type DriveEntry, deleteEntry, listEntries } from './library';
 import { type Log, readDrive } from './reader';
 import { importDatabase } from './transfer';
-import { Store } from './writer';
+import { Store, annotate } from './writer';
 
 export interface DriveStoreOptions {
   fileName?: string;
@@ -31,6 +33,7 @@ export function driveInfo(e: DriveEntry, mapVersion = e.mapVersion): DriveInfo {
   return {
     id: e.driveId, name: e.name, kind, startedUnix: e.startedUnix, durationS: e.duration, rows: e.rows, status,
     mapVersion, ecuId: e.ecuId, ...(reason ? { reason } : {}), ...(e.kind !== 'drive' ? { captureKind: e.kind } : {}),
+    ...(e.kind === 'drive' ? { keep: e.keep } : {}),
   };
 }
 
@@ -91,6 +94,40 @@ export class SqliteDriveStore implements DriveStore {
 
   async exportDb(): Promise<Uint8Array> {
     return this.hdb.export();
+  }
+
+  /** drives.keep (Python Library.set_notes(keep=)). */
+  async setKeep(name: string, keep: boolean): Promise<void> {
+    const entry = this.entries().find((e) => e.name === name);
+    if (!entry || entry.kind !== 'drive') throw new Error(`${name}: only a drive can be marked keep`);
+    annotate(this.hdb, entry.ref.drive, { keep });
+    await this.hdb.persist();
+  }
+
+  /** A CSV / MSL / MLG file as a new drive (status "imported"). */
+  async importFile(fileName: string, bytes: Uint8Array): Promise<string> {
+    const name = importLogFile(this.hdb, fileName, bytes);
+    await this.hdb.persist();
+    return name;
+  }
+
+  async loadEventNotes(drive: string): Promise<Record<string, EventNote>> {
+    return loadEventNotes(this.hdb.conn, drive);
+  }
+
+  async saveEventNote(drive: string, key: string, change: SaveNote): Promise<void> {
+    saveEventNote(this.hdb, drive, key, change);
+    await this.hdb.persist();
+  }
+
+  /** Start-up crash recovery when this page is the file's only user: every
+   *  drive another session left "recording" (a reload, a killed tab) becomes
+   *  "crashed" now, not once its heartbeat is stale. Persists; returns the names. */
+  async recoverInterrupted(): Promise<string[]> {
+    const before = new Map(this.hdb.conn.all("SELECT id, name FROM drives WHERE status='recording'").map(([id, n]) => [Number(id), String(n)]));
+    const ids = this.hdb.recover(undefined, { foreign: true });
+    if (ids.length) await this.hdb.persist();
+    return ids.map((id) => before.get(id) ?? String(id));
   }
 
   /** Write the file now. */

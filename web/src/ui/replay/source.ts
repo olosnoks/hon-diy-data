@@ -1,13 +1,14 @@
 /**
- * Where Replay and Events get drives. Until the drive store (#4) provides a
- * DriveStore instance, the synthetic drives of fixture.ts stand in.
- * TODO(integrator): call setDriveSource(store) once the store is opened.
+ * Where Replay and Events get drives: the app's drive store (wiring calls
+ * setDriveSource(store) at start-up); until then, and in the tests, the
+ * synthetic drives of fixture.ts stand in.
  */
 import { create } from 'zustand';
 import type { DriveStore } from '../../core/types';
 import { FixtureStore } from './fixture';
 
-export type DriveSource = Pick<DriveStore, 'listDrives' | 'loadDrive'> & Partial<Pick<DriveStore, 'deleteDrive' | 'importDb'>>;
+export type DriveSource = Pick<DriveStore, 'listDrives' | 'loadDrive'>
+  & Partial<Pick<DriveStore, 'deleteDrive' | 'importDb' | 'importFile' | 'setKeep' | 'loadEventNotes' | 'saveEventNote'>>;
 
 interface SourceState { source: DriveSource; demo: boolean; version: number }
 

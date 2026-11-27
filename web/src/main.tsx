@@ -1,17 +1,18 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { startApp } from './wiring';
-import { registerServiceWorker } from './platform';
 import './ui/shell/fonts.css';
 
-// The real data path: platform files -> hondalog.db + address map, the
-// poller on a granted KKL cable or the simulator, the CYD companion
-// (src/app/). The UI renders at once; values arrive when the link is up.
-void startApp().catch((e: unknown) => {
-  console.error('hondalog did not start', e);
-});
-void registerServiceWorker();
+// The shell paints first; the data path (platform files -> hondalog.db +
+// address map, the poller on a granted KKL cable or the simulator, the CYD
+// companion: src/wiring/) loads in its own chunk right after, with sql.js.
+// Values arrive when the link is up.
+void import('./wiring')
+  .then((m) => m.startApp())
+  .catch((e: unknown) => {
+    console.error('hondalog did not start', e);
+  });
+void import('./platform/pwa').then((m) => m.registerServiceWorker()).catch(() => undefined);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

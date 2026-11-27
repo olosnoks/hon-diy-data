@@ -88,6 +88,9 @@ export interface PollerOptions {
   framing?: FullFraming;
   planner?: BlockPlanner;
   isoFallback?: IsoFallback | null;
+  /** Protocol "OBD2 only": no Honda reads at all; start straight in the
+   *  isoFallback's 5-baud init (and retry it) instead of after ISO_AFTER_S. */
+  obd2Only?: boolean;
   usbLatencyS?: number;
   onRead?: (read: EcuRead) => void;
   onLink?: (state: LinkState, stats: LinkStats) => void;
@@ -115,6 +118,8 @@ export class Poller {
   readonly link: Link;
   readonly planner: BlockPlanner;
   isoFallback: IsoFallback | null;
+  /** No Honda reads: OBD2 (ISO 9141-2) from the start. */
+  readonly obd2Only: boolean;
 
   onRead: ((read: EcuRead) => void) | null;
   onLink: ((state: LinkState, stats: LinkStats) => void) | null;
@@ -166,6 +171,8 @@ export class Poller {
   private hondaSeen = false;
   private nextIsoTry = 0;
   private jobs: Job[] = [];
+  private jobWake: (() => void) | null = null;
+  private pausedLive = false;
   private stopping = false;
   private stopWake: (() => void) | null = null;
   private stopSignal: Promise<void>;
@@ -183,6 +190,8 @@ export class Poller {
     this.framing = opts.framing ?? framingOf(amap);
     this.planner = opts.planner ?? defaultPlanner;
     this.isoFallback = opts.isoFallback ?? null;
+    this.obd2Only = !!opts.obd2Only && this.isoFallback !== null;
+    if (this.obd2Only) this.mode = 'obd2';
     this.link = new Link(transport, this.framing, this.clock, opts.usbLatencyS);
     this.link.onError = (addr, length, error, attempt, tReq) => this.linkError(addr, length, error, attempt, tReq);
     this.onRead = opts.onRead ?? null;
@@ -308,7 +317,27 @@ export class Poller {
         return;
       }
       this.jobs.push({ fn, resolve: resolve as (v: unknown) => void, reject });
+      this.jobWake?.();
     });
+  }
+
+  /** Stop the live block reads (the poke test borrows the line): only
+   *  submitted jobs run until resume(). The port stays open, the link state
+   *  stays as it was; no cycles are emitted meanwhile. */
+  pause(): void {
+    this.pausedLive = true;
+  }
+
+  /** Back to live polling after pause(). */
+  resume(): void {
+    if (!this.pausedLive) return;
+    this.pausedLive = false;
+    this.lastEmit = null;          // no rate spike from the gap
+    this.jobWake?.();
+  }
+
+  get paused(): boolean {
+    return this.pausedLive;
   }
 
   /** Read only these channels, as fast as the line goes, for a while.
@@ -371,6 +400,10 @@ export class Poller {
 
   private async iterate(): Promise<void> {
     if (this.jobs.length) await this.runJob();
+    if (this.pausedLive && this.state !== 'port lost') {
+      if (!this.jobs.length && !this.stopping) await this.waitForJob(0.25);
+      return;
+    }
     if (this.iso) await this.isoStep();
     else if (this.state === 'ok') await this.step();
     else if (this.state === 'port lost') {
@@ -378,7 +411,10 @@ export class Poller {
       await this.sleep(this.reopenWait);
       await this.reopen();
     } else if (this.isoDue()) await this.tryIso();
-    else await this.probe();
+    else if (this.obd2Only) {
+      // OBD2 only: never a Honda probe; wait for the next 5-baud init
+      await this.sleep(Math.max(PROBE_MIN_S, Math.min(PROBE_MAX_S, this.nextIsoTry - this.clock.now())));
+    } else await this.probe();
   }
 
   private async finish(): Promise<void> {
@@ -393,6 +429,20 @@ export class Poller {
     }
     this.failJobs('disconnected');
     this.notify(true);
+  }
+
+  /** Paused: until a job arrives, resume() or stop(), at most `seconds`. */
+  private async waitForJob(seconds: number): Promise<void> {
+    if (this.clock.virtual) {
+      await this.clock.sleep(seconds);
+      return;
+    }
+    const woken = new Promise<void>((r) => { this.jobWake = r; });
+    try {
+      await Promise.race([this.clock.sleep(seconds), this.stopSignal, woken]);
+    } finally {
+      this.jobWake = null;
+    }
   }
 
   private async sleep(seconds: number): Promise<void> {
@@ -422,6 +472,19 @@ export class Poller {
   private async connect(): Promise<void> {
     this.connected = true;
     this.notify(true);
+    if (this.obd2Only) {
+      try {
+        await this.transport.open({ baud: this.framing.baud });
+        this.link.reset();
+      } catch (exc) {
+        this.portLost(exc);
+        this.readyResolve();
+        return;
+      }
+      // 'connecting' until the first 5-baud init answers (tryIso -> 'ok')
+      this.readyResolve();
+      return;
+    }
     try {
       await this.transport.open({ baud: this.framing.baud });
       this.link.reset();
@@ -668,7 +731,7 @@ export class Poller {
   private portLost(exc: unknown): void {
     const iso = this.iso;
     this.iso = null;
-    this.mode = 'honda';
+    this.mode = this.obd2Only ? 'obd2' : 'honda';
     this.errors += 1;
     this.lastError = `port: ${errText(exc)}`;
     this.linkDown();
@@ -710,8 +773,10 @@ export class Poller {
       job.reject(new TransportError(this.lastError));
       return;
     }
-    if (this.iso) {
-      job.reject(new ProtocolError('Honda reads are off: this ECU answers standard OBD2 only'));
+    if (this.iso || this.obd2Only) {
+      job.reject(new ProtocolError(this.obd2Only
+        ? 'Honda reads are off: protocol is set to OBD2 only'
+        : 'Honda reads are off: this ECU answers standard OBD2 only'));
       return;
     }
     try {
@@ -731,8 +796,10 @@ export class Poller {
   // -- OBD2-only live mode --
 
   private isoDue(): boolean {
-    if (!this.isoFallback || this.hondaSeen) return false;
+    if (!this.isoFallback) return false;
     const now = this.clock.now();
+    if (this.obd2Only) return now >= this.nextIsoTry;
+    if (this.hondaSeen) return false;
     return now >= this.quietUntil && now - this.hondaLastOk >= ISO_AFTER_S && now >= this.nextIsoTry;
   }
 
@@ -747,8 +814,9 @@ export class Poller {
         return;
       }
       this.lastError = `OBD2: ${errText(exc)}`;
-      this.mode = 'honda';
+      this.mode = this.obd2Only ? 'obd2' : 'honda';
       this.link.reset();
+      if (this.obd2Only && this.state === 'connecting') this.setState('no reply');
       this.nextIsoTry = this.clock.now() + ISO_RETRY_S;
       return;
     }
@@ -797,7 +865,7 @@ export class Poller {
   private async isoLeave(why: string): Promise<void> {
     const iso = this.iso;
     this.iso = null;
-    this.mode = 'honda';
+    this.mode = this.obd2Only ? 'obd2' : 'honda';
     this.lastError = `OBD2 session lost: ${why}`;
     this.linkDown();
     this.emitDown();

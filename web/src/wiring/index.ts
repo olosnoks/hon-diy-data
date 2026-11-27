@@ -12,6 +12,7 @@ import { capabilities, getFileStore, getTransportPicker } from '../platform';
 import { WebSerialTransport } from '../platform/webserial';
 import { registerBytesDeps } from '../ui/bytes/deps';
 import type { MemLink } from '../ui/bytes/model/scanner';
+import { migrateLocalNotes } from '../ui/events/notes';
 import { drivesChanged } from '../ui/replay/source';
 import { registerSetupDeps, type ConnectionControl } from '../ui/setup/deps';
 import { alarmSourceFromEngine } from '../ui/setup/AlarmsTab';
@@ -59,8 +60,8 @@ function registerDeps(app: AppController): void {
   registerBytesDeps({
     link: memLinkOf(app),
     demo: false,
-    // The poller interleaves the poke test's reads with its own: nothing to pause.
-    live: { pause: async () => undefined, resume: async () => undefined },
+    // The poke test: the poller stops its live reads (the scanner's reads still go through it), always resumed.
+    live: { pause: () => app.pauseLive(), resume: () => app.resumeLive() },
     mapText: app.mapText,
     saveMap,
   });
@@ -124,6 +125,27 @@ async function firstConnect(app: AppController): Promise<void> {
   else if (cable.simWhenNoCable) await app.connect({ kind: 'sim' });
 }
 
+/** Write hondalog.db (the writers' buffers included) when the page is hidden
+ *  or goes away: a reload or a swiped-away tab loses at most the last moment. */
+export function flushOnHide(app: AppController, win: Window = window, doc: Document = document): () => void {
+  const flush = () => {
+    const store = app.store;
+    if (!store) return;
+    try {
+      void store.persist().catch((e: unknown) => { app.lastError = `save: ${String(e)}`; });
+    } catch (e) {
+      app.lastError = `save: ${String(e)}`;
+    }
+  };
+  const onVisibility = () => { if (doc.visibilityState === 'hidden') flush(); };
+  win.addEventListener('pagehide', flush);
+  doc.addEventListener('visibilitychange', onVisibility);
+  return () => {
+    win.removeEventListener('pagehide', flush);
+    doc.removeEventListener('visibilitychange', onVisibility);
+  };
+}
+
 let started: AppController | null = null;
 
 export async function startApp(): Promise<AppController> {
@@ -137,9 +159,11 @@ export async function startApp(): Promise<AppController> {
   });
   started = app;
   await app.init();
+  // Event notes kept on the device before they went into hondalog.db: moved once.
+  if (app.store) await migrateLocalNotes(app.store).catch((e: unknown) => { app.lastError = `notes: ${String(e)}`; });
   registerDeps(app);
   if (typeof window !== 'undefined') {
-    window.addEventListener('pagehide', () => { void app.store?.persist(); });
+    flushOnHide(app);
     (window as unknown as { hondalog?: AppController }).hondalog = app;   // the console, for the owner
   }
   await firstConnect(app);

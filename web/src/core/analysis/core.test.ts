@@ -75,9 +75,9 @@ describe('envelope', () => {
     const close = p.envelope(777.7, 777.9, 500);
     expect(close.reduced).toBe(false);
     expect(Math.max(...close.hi)).toBe(99);
-    const start = performance.now();
-    for (let i = 0; i < 20; i++) p.envelope(i * 10, i * 10 + 600, 1366);
-    expect((performance.now() - start) / 20).toBeLessThan(20);
+    // fast because it is bounded: a window of the big series comes back at about the
+    // asked width, whatever its length (no wall-clock budget: that flakes under load)
+    for (let i = 0; i < 20; i++) expect(p.envelope(i * 10, i * 10 + 600, 1366).t.length).toBeLessThanOrEqual(2 * 1366 + 2);
     expect(new LodPyramid(new Float64Array(0), new Float64Array(0)).envelope().t.length).toBe(0);
   });
 
