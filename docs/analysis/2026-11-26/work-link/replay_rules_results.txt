@@ -1,0 +1,22 @@
+== C:/Users/skons/Documents/hon-diy-data (before)
+drive_2026_11_25_1801: 3670 rows; FIRED link_loss@939.1
+drive_2026_11_25_1854_2: 534 rows; FIRED link_loss@38.2
+drive_2026_11_25_1911: 10591 rows; FIRED link_loss@1036.9
+drive_2026_11_25_1932: 6556 rows; FIRED link_loss@1390.2
+drive_2026_11_25_1943: 17717 rows; FIRED link_loss@1817.2
+drive_2026_11_25_2045: 18531 rows; FIRED link_loss@1837.9
+drive_2026_11_25_2142: 28050 rows; FIRED link_loss@5566.4; FIRED link_loss@6537.7
+drive_2026_11_25_2237: 4161 rows; FIRED link_loss@7154.8
+drive_2026_11_26_2045: 16154 rows; FIRED link_loss@1536.7
+drive_2026_11_26_2114: 12465 rows; nothing
+== C:/Users/skons/Documents/hon-diy-data-linkfix (after)
+drive_2026_11_25_1801: 3670 rows; FIRED link_loss@942.9
+drive_2026_11_25_1854_2: 534 rows; FIRED link_loss@39.8
+drive_2026_11_25_1911: 10591 rows; FIRED link_loss@1038.5
+drive_2026_11_25_1932: 6556 rows; nothing
+drive_2026_11_25_1943: 17717 rows; FIRED link_loss@1818.6
+drive_2026_11_25_2045: 18531 rows; FIRED link_loss@1839.9
+drive_2026_11_25_2142: 28050 rows; FIRED link_loss@5568.5; revoked link_loss@5568.5 at 5582.8; FIRED link_loss@6539.6
+drive_2026_11_25_2237: 4161 rows; FIRED link_loss@7156.9
+drive_2026_11_26_2045: 16154 rows; nothing
+drive_2026_11_26_2114: 12465 rows; nothing

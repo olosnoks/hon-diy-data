@@ -1,0 +1,284 @@
+# hondalog ECU probe, 2026-11-25 18:17:43, port COM21
+# ms from first event, direction, bytes
+       0.0  NOTE  stage B first: Honda reads before any ISO 9141-2 init
+     500.6  NOTE  Honda read 00/2 @9600
+     550.9  TX    20 05 00 02 D9
+     569.1  RX    20 05 00 02 D9
+     652.7  NOTE  Honda read row 00 @9600
+     703.0  TX    20 05 00 10 CB
+     721.2  RX    20 05 00 10 CB
+     809.0  NOTE  Honda read row 10 @9600
+     859.3  TX    20 05 10 10 BB
+     864.6  RX    20 05 10
+     880.3  RX    10 77
+     967.7  NOTE  Honda read row 20 @9600
+    1018.2  TX    20 05 20 10 AB
+    1025.2  RX    20 05 20 10 AB
+    1107.6  NOTE  Honda read ECU id 76 @9600
+    1158.3  TX    20 05 76 0A 5B
+    1169.4  RX    20 05 76 0A 5B
+    1263.9  NOTE  Honda read batt 17 @9600
+    1314.2  TX    20 05 17 01 C3
+    1350.3  RX    20 05 17 01 C3
+    1435.0  NOTE  Honda read 00/2 @9600 + wake
+    1496.6  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    1809.6  TX    20 05 00 02 D9
+    1826.7  RX    20 05 00 02 D9
+    1917.0  NOTE  Honda read row 00 @9600 + wake
+    1967.2  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    2267.9  TX    20 05 00 10 CB
+    2271.8  RX    20 05
+    2288.9  RX    00 10 CB
+    2385.9  NOTE  Honda read row 10 @9600 + wake
+    2436.4  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    2737.1  TX    20 05 10 10 BB
+    2752.7  RX    20 05 10 10 BB
+    2839.6  NOTE  Honda read row 20 @9600 + wake
+    2902.2  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    3202.5  TX    20 05 20 10 AB
+    3216.6  RX    20 05 20 10 AB
+    3307.9  NOTE  Honda read ECU id 76 @9600 + wake
+    3358.2  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    3672.4  TX    20 05 76 0A 5B
+    3680.5  RX    20 05 76 0A 5B
+    3777.4  NOTE  Honda read batt 17 @9600 + wake
+    3827.8  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    4128.5  TX    20 05 17 01 C3
+    4144.2  RX    20 05 17 01 C3
+    4242.8  NOTE  Honda read 00/2 @10400
+    4242.8  BAUD  10400
+    4293.8  TX    20 05 00 02 D9
+    4304.1  RX    20 05 00 02 D9
+    4399.0  NOTE  Honda read row 00 @10400
+    4449.5  TX    20 05 00 10 CB
+    4464.2  RX    20 05 00 10 CB
+    4571.9  NOTE  Honda read row 10 @10400
+    4622.7  TX    20 05 10 10 BB
+    4640.1  RX    20 05 10 10 BB
+    4727.2  NOTE  Honda read row 20 @10400
+    4777.7  TX    20 05 20 10 AB
+    4783.7  RX    20 05 20 10
+    4798.7  RX    AB
+    4882.6  NOTE  Honda read ECU id 76 @10400
+    4933.0  TX    20 05 76 0A 5B
+    4944.0  RX    20 05 76 0A 5B
+    5037.7  NOTE  Honda read batt 17 @10400
+    5088.1  TX    20 05 17 01 C3
+    5104.0  RX    20 05 17 01 C3
+    5192.4  NOTE  Honda read 00/2 @10400 + wake
+    5243.0  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    5543.4  TX    20 05 00 02 D9
+    5552.0  RX    20 05 00 02 D9 00
+    5567.5  RX    05 0A 74 7D
+    5659.3  NOTE  Honda read row 00 @10400 + wake
+    5709.4  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    6011.8  TX    20 05 00 10 CB
+    6014.4  RX    20
+    6037.3  RX    05 00 10 CB 00 13 0A 78 00 00 00 00 00 00 84 00 90
+    6048.0  RX    41 01 00 00 01 14
+    6142.0  NOTE  Honda read row 10 @10400 + wake
+    6192.4  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    6492.7  TX    20 05 10 10 BB
+    6516.3  RX    20 05 10 10 BB 00 13 22 6A 2B 93 14 09 00 92 98 9D
+    6526.0  RX    00
+    6539.8  RX    00 9D 00 00 00 22
+    6642.5  NOTE  Honda read row 20 @10400 + wake
+    6702.3  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    7003.1  TX    20 05 20 10 AB
+    7006.3  RX    20 05
+    7026.0  RX    20 10 AB 00 13 8E 00 8D 00 02 62 5C 00
+    7033.6  RX    0A 52 06
+    7039.6  RX    00 00 00 00 00 B0
+    7136.9  NOTE  Honda read ECU id 76 @10400 + wake
+    7187.5  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    7487.8  TX    20 05 76 0A 5B
+    7520.0  RX    20 05 76 0A 5B 00 0D 0A 78 10 99 0A 04 24 00 03 01 92
+    7604.9  NOTE  Honda read batt 17 @10400 + wake
+    7664.4  TX    68 6A F5 AF BF B3 B2 C1 DB B3 E9
+    7965.6  TX    20 05 17 01 C3
+    7984.2  RX    20 05 17 01 C3 00 04 93 69
+    8073.2  NOTE  stage A: ISO 9141-2 init
+    8076.6  BREAK off (line high)
+    8076.6  BAUD  10400
+    8428.2  NOTE  5-baud init, address 33: 0110011001
+    8428.2  BREAK on (line low)
+    8637.3  BREAK off (line high)
+    9040.9  BREAK on (line low)
+    9428.6  BREAK off (line high)
+    9837.5  BREAK on (line low)
+   10242.0  BREAK off (line high)
+   10601.7  RX    55
+   10606.6  RX    08 08
+   10636.9  TX    F7
+   10653.8  RX    F7
+   10685.6  RX    CC
+   10685.6  NOTE  session up: ISO 9141-2 via 5-baud init, key bytes 08 08
+   10685.7  NOTE  A1 Mode 01 bitmaps
+   10773.2  TX    68 6A F1 01 00 C4
+   10783.5  RX    68 6A F1 01 00 C4
+   10814.4  RX    48 6B 10
+   10844.8  RX    41 00 BE 3E B8 10 C8
+   10946.2  TX    68 6A F1 01 20 E4
+   10960.3  RX    68 6A F1 01 20 E4
+   11214.7  TX    68 6A F1 01 40 04
+   11250.2  RX    68 6A F1 01 40 04
+   11479.4  NOTE  A2 Mode 05 O2 tests
+   11479.5  TX    68 6A F1 05 00 C8
+   11487.8  RX    68 6A F1 05 00
+   11501.4  RX    C8
+   11744.8  TX    68 6A F1 05 00 01 C9
+   11759.9  RX    68 6A F1 05 00 01 C9
+   11791.7  RX    48 6B 10 45 00 01
+   11806.6  RX    00 00 00 01 0A
+   11907.5  TX    68 6A F1 05 01 01 CA
+   11919.7  RX    68 6A F1 05 01 01 CA
+   12177.2  TX    68 6A F1 05 02 01 CB
+   12192.3  RX    68 6A F1 05 02 01 CB
+   12448.2  TX    68 6A F1 05 03 01 CC
+   12463.6  RX    68 6A F1 05 03 01 CC
+   12712.5  TX    68 6A F1 05 04 01 CD
+   12718.2  RX    68 6A F1 05 04
+   12742.4  RX    01 CD
+   12975.2  TX    68 6A F1 05 05 01 CE
+   12992.4  RX    68 6A F1 05 05 01 CE
+   13241.0  TX    68 6A F1 05 06 01 CF
+   13245.6  RX    68 6A F1
+   13262.0  RX    05 06 01 CF
+   13509.0  TX    68 6A F1 05 07 01 D0
+   13518.9  RX    68 6A F1 05 07 01 D0
+   13775.4  TX    68 6A F1 05 08 01 D1
+   13792.2  RX    68 6A F1 05 08 01 D1
+   14039.1  TX    68 6A F1 05 09 01 D2
+   14046.3  RX    68 6A F1 05 09
+   14063.0  RX    01 A2
+   14302.3  TX    68 6A F1 05 0A 01 D3
+   14319.7  RX    68 6A F1 05 0A 01 D3
+   14568.3  TX    68 6A F1 05 01 02 CB
+   14573.5  RX    68 6A F1
+   14598.1  RX    05 01 02 CB
+   14834.1  TX    68 6A F1 05 02 02 CC
+   14846.5  RX    68 6A F1 05 02 02 CC
+   15099.4  NOTE  keepalive 01 00
+   15099.4  TX    68 6A F1 01 00 C4
+   15118.4  RX    68 6A F1 01 00 C4
+   15150.9  RX    48 6B 10 41 00 BE 3E
+   15164.8  RX    B8 10 C8
+   15271.2  TX    68 6A F1 05 03 02 CD
+   15277.5  RX    68 6A F1 05
+   15299.2  RX    03 02 CD
+   15537.1  TX    68 6A F1 05 04 02 CE
+   15550.4  RX    68 6A F1 05 04 02 CE
+   15800.1  TX    68 6A F1 05 05 02 CF
+   15805.5  RX    68 6A F1 05 0B
+   15821.4  RX    02 CF
+   16065.3  TX    68 6A F1 05 06 02 D0
+   16079.1  RX    68 6A F1 05 06 02 D0
+   16329.9  TX    68 6A F1 05 07 02 D1
+   16334.5  RX    68 6A F1 09
+   16350.6  RX    07 02 D1
+   16601.8  TX    68 6A F1 05 08 02 D2
+   16603.3  RX    D0
+   16620.4  RX    6A F1 05 08 02 D2
+   16872.7  TX    68 6A F1 05 09 02 D3
+   16874.6  RX    68
+   16892.3  RX    6A F1 05 09 02 D3
+   17140.5  TX    68 6A F1 05 0A 02 D4
+   17148.5  RX    68 6A F1 05 0A
+   17163.0  RX    02 D4
+   17412.2  NOTE  A3 Mode 06
+   17412.4  TX    68 6A F1 06 00 C9
+   17421.0  RX    68 6A F1 06 00
+   17434.4  RX    C9
+   17470.0  RX    48 6B 10 46 00 FF 00 01 81 81 0B
+   17577.0  TX    68 6A F1 06 01 CA
+   17596.1  RX    68 6A F1 06 01 CA
+   17844.3  TX    68 6A F1 06 02 CB
+   17852.3  RX    68 6A F1 06 02
+   17866.3  RX    CB
+   18109.9  TX    68 6A F1 06 03 CC
+   18125.4  RX    68 6A F1 06 03 CC
+   18374.6  TX    68 6A F1 06 05 CE
+   18378.8  RX    68 6A F1
+   18395.2  RX    06 05 CE
+   18639.6  TX    68 6A F1 06 21 EA
+   18652.3  RX    68 6A F1 06 21 EA
+   18906.1  NOTE  A4 Mode 09
+   18906.2  TX    68 6A F1 09 00 CC
+   18923.5  RX    68 6A F1 09 00 CC
+   19171.1  TX    68 6A F1 09 02 CE
+   19179.7  RX    68 6A F1 09 02 CE
+   19434.2  TX    68 6A F1 09 04 D0
+   19452.5  RX    68 6A F1 09 04 D0
+   19706.6  NOTE  A5 Mode 02 freeze frame
+   19706.6  TX    68 6A F1 02 02 00 C7
+   19724.8  RX    68 6A F1 02 02 00 C7
+   19755.4  RX    48 6B 10 42 02 00
+   19784.5  RX    00 00 07
+   19886.8  TX    68 6A F1 02 0C 00 D1
+   19900.4  RX    68 6A F1 02 0C 00 D1
+   19968.0  RX    48 6B 10 42 0C 00 00 00 11
+   20073.1  NOTE  A6 0x1A read ECU id
+   20073.1  TX    68 6A F1 1A 80 5D
+   20091.4  RX    68 6A F1 1A 80 5D
+   20290.8  TX    68 6A F1 1A 90 6D
+   20299.3  RX    68 6A F1 1A 90 6D
+   20510.5  NOTE  A7 0x21 local id
+   20510.5  TX    68 6A F1 21 00 E4
+   20523.4  RX    68 6A F1 21 00 E4
+   20742.7  TX    68 6A F1 21 01 E5
+   20747.4  RX    68 6A F1 42
+   20762.7  RX    01 E5
+   20962.9  TX    68 6A F1 21 02 E6
+   20972.1  RX    68 6A F1 21 02 E6
+   21179.0  TX    68 6A F1 21 03 E7
+   21196.3  RX    68 6A F1 21 03 E7
+   21395.3  TX    68 6A F1 21 04 E8
+   21404.4  RX    68 6A F1 21 04
+   21418.1  RX    E8
+   21614.7  TX    68 6A F1 21 05 E9
+   21628.0  RX    68 6A F1 21 05 E9
+   21837.1  NOTE  A8 0x22 data id
+   21837.1  TX    68 6A F1 22 00 00 E5
+   21852.5  RX    68 6A F1 22 00 00 E5
+   22050.4  TX    68 6A F1 22 01 00 E6
+   22060.7  RX    68 6A F1 22 01 00 E6
+   22269.5  TX    68 6A F1 22 F1 90 66
+   22284.7  RX    68 6A F1 22 F1 90 66
+   22488.5  NOTE  A9 0x23 read memory
+   22488.5  TX    68 6A F1 23 00 00 00 04 EA
+   22509.5  RX    68 6A F1 23 00 00 00 04 EA
+   22707.0  TX    68 6A F1 23 00 00 04 EA
+   22715.9  RX    68 6A F1 23 00 00
+   22730.2  RX    04 EA
+   22924.8  TX    68 6A F1 23 00 04 EA
+   22940.8  RX    68 6A F1 23 00 04 EA
+   23144.0  NOTE  keepalive 01 00
+   23144.0  TX    68 6A F1 01 00 C4
+   23145.7  RX    68
+   23174.5  RX    6A F1 01 00 C4
+   23196.8  RX    48 6B 10 41 00 BE 3E B8 10 C8
+   23299.8  TX    68 6A F1 23 12 00 00 04 FC
+   23307.2  RX    68 6A F1 23 12 80
+   23321.9  RX    00 04
+   23331.3  RX    FC
+   23519.8  TX    68 6A F1 23 00 00 10 04 FA
+   23532.9  RX    68 6A F1 23 00 00 10 04 FA
+   23737.7  TX    68 6A F1 23 00 10 04 FA
+   23755.5  RX    68 6A F1 23 00 10 04 FA
+   23957.4  TX    68 6A F1 23 10 04 FA
+   23962.1  RX    68 6A F1
+   23978.3  RX    23 20 04 FA
+   24172.8  TX    68 6A F1 23 12 00 10 04 0C
+   24187.8  RX    68 6A F1 23 12 00 10 04 0C
+   24393.2  TX    68 6A F1 23 00 00 20 04 0A
+   24412.0  RX    68 6A F1 23 00 00 20 04 0A
+   24611.0  TX    68 6A F1 23 00 20 04 0A
+   24619.2  RX    68 6A F1 23 00 20 08
+   24634.2  RX    12
+   24828.5  TX    68 6A F1 23 20 04 0A
+   24845.1  RX    68 6A F1 23 20 04 0A
+   25048.0  TX    68 6A F1 23 12 00 20 04 1C
+   25049.7  RX    68
+   25083.0  RX    6A F1 23 12 00 20 04 1C
+   25265.5  BREAK off (line high)
+   25265.5  BAUD  9600

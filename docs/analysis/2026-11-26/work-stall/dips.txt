@@ -1,0 +1,87 @@
+n dips (<650 rpm, excl. 30 s after crank): 51
+#35 11-26 21:41:25.99 min  581 (from  670)  ECT20s 81..84    now  83.6  ELD max  25.4  IACV  0.0-> 5.9  MAP 27.2  batt 13.6 x29 90.0
+#25 11-25 20:31:18.24 min  595 (from  661)  ECT20s 40..41    now  40.9  ELD max  37.6  IACV  4.7-> 7.5  MAP 28.7  batt 13.3 x29 nan
+#23 11-25 20:18:09.96 min  602 (from  672)  ECT20s 78..87    now  78.4  ELD max  15.6  IACV  1.6-> 1.2  MAP 27.2  batt 14.2 x29 nan
+#28 11-25 21:20:06.88 min  606 (from  944)  ECT20s 88..88    now  88.4  ELD max  12.8  IACV  nan-> 2.4  MAP 26.5  batt 14.1 x29 nan
+#4 11-25 18:17:29.88 min  619 (from 1026)  ECT20s -         now   nan  ELD max   nan  IACV  nan-> nan  MAP  nan  batt  nan x29 nan
+#11 11-25 18:40:43.05 min  627 (from  653)  ECT20s 75..85    now  82.5  ELD max  20.7  IACV  3.5-> 9.8  MAP 30.1  batt 14.1 x29 nan
+#23 11-25 20:25:50.54 min  628 (from  746)  ECT20s 81..87    now  81.5  ELD max  29.4  IACV  6.3-> 4.3  MAP 29.4  batt 14.1 x29 nan
+#11 11-25 18:43:34.32 min  633 (from  654)  ECT20s 83..84    now  83.6  ELD max  22.3  IACV  3.1-> 3.5  MAP 29.4  batt 14.3 x29 nan
+#33 11-26 21:09:20.81 min  634 (from  713)  ECT20s 72..79    now  79.4  ELD max  10.8  IACV  0.0-> 0.8  MAP 25.1  batt 14.3 x29 53.0
+#29 11-25 22:27:52.13 min  634 (from  659)  ECT20s 84..84    now  83.6  ELD max  23.5  IACV  3.1-> 3.5  MAP 27.2  batt 14.2 x29 nan
+#29 11-25 22:21:23.45 min  634 (from  660)  ECT20s 81..83    now  82.5  ELD max  23.1  IACV  2.7-> 3.1  MAP 26.5  batt 14.2 x29 nan
+#9 11-25 18:37:48.22 min  635 (from  659)  ECT20s 57..84    now  83.6  ELD max  22.3  IACV  3.5-> 4.3  MAP 25.8  batt 14.3 x29 nan
+#19 11-25 19:09:17.29 min  636 (from  668)  ECT20s 78..78    now  78.4  ELD max  28.2  IACV  2.4-> 2.4  MAP 32.9  batt 13.7 x29 nan
+#35 11-26 21:43:32.80 min  636 (from  672)  ECT20s 85..85    now  84.8  ELD max   9.3  IACV  0.0-> 0.0  MAP 23.6  batt 14.2 x29 38.0
+#22 11-25 20:07:56.12 min  638 (from  675)  ECT20s 87..87    now  87.1  ELD max  27.4  IACV  4.3-> 4.3  MAP 28.7  batt 13.9 x29 nan
+#22 11-25 20:05:50.33 min  640 (from  660)  ECT20s 87..87    now  87.1  ELD max  30.6  IACV  3.1-> 3.5  MAP 26.5  batt 14.2 x29 nan
+#23 11-25 20:21:42.61 min  640 (from  658)  ECT20s 88..90    now  89.6  ELD max  27.0  IACV  3.5-> 3.9  MAP 26.5  batt 14.0 x29 nan
+#23 11-25 20:25:21.98 min  641 (from  657)  ECT20s 87..87    now  87.1  ELD max  22.3  IACV  3.1-> 3.5  MAP 27.2  batt 14.1 x29 nan
+#28 11-25 21:20:22.16 min  642 (from  664)  ECT20s 32..88    now  34.7  ELD max  11.6  IACV  1.6-> 1.2  MAP 25.8  batt 14.3 x29 nan
+#29 11-25 22:08:15.14 min  642 (from  756)  ECT20s 84..91    now  83.6  ELD max  14.0  IACV  6.3-> 4.3  MAP 27.2  batt 14.4 x29 nan
+#30 11-25 22:43:59.79 min  642 (from  663)  ECT20s 84..84    now  83.6  ELD max  23.8  IACV  4.7-> 5.1  MAP 26.5  batt 14.1 x29 nan
+#4 11-25 18:02:18.03 min  643 (from  676)  ECT20s -         now   nan  ELD max   nan  IACV  nan-> nan  MAP  nan  batt  nan x29 nan
+#21 11-25 19:38:22.26 min  643 (from  658)  ECT20s 84..85    now  84.8  ELD max  23.8  IACV  3.5-> 3.9  MAP 27.2  batt 14.1 x29 nan
+#29 11-25 22:24:36.20 min  644 (from  659)  ECT20s 83..84    now  83.6  ELD max  14.8  IACV  3.1-> 3.5  MAP 25.8  batt 14.1 x29 nan
+#28 11-25 21:28:04.44 min  644 (from  677)  ECT20s 75..79    now  77.4  ELD max  12.0  IACV  2.4-> 2.7  MAP 25.8  batt 14.2 x29 nan
+#29 11-25 22:14:10.31 min  645 (from  658)  ECT20s 81..83    now  81.5  ELD max  16.0  IACV  3.9-> 3.9  MAP 26.5  batt 14.4 x29 nan
+#35 11-26 21:41:37.21 min  646 (from  691)  ECT20s 83..84    now  83.6  ELD max  16.0  IACV  5.1-> 4.7  MAP 26.5  batt 14.1 x29 84.0
+#20 11-25 19:18:30.62 min  646 (from  660)  ECT20s 83..83    now  82.5  ELD max  15.6  IACV  3.5-> 3.9  MAP 26.5  batt 14.0 x29 nan
+#4 11-25 18:07:16.79 min  646 (from  669)  ECT20s -         now   nan  ELD max   nan  IACV  nan-> nan  MAP  nan  batt  nan x29 nan
+#11 11-25 18:43:25.89 min  646 (from  660)  ECT20s 81..86    now  83.6  ELD max  13.2  IACV  2.7-> 3.1  MAP 25.8  batt 14.3 x29 nan
+#21 11-25 19:38:08.18 min  647 (from  661)  ECT20s 85..85    now  84.8  ELD max  14.8  IACV  3.1-> 3.5  MAP 26.5  batt 14.2 x29 nan
+#29 11-25 22:13:41.55 min  647 (from  662)  ECT20s 85..86    now  85.9  ELD max  13.6  IACV  3.1-> 3.1  MAP 26.5  batt 14.2 x29 nan
+#29 11-25 22:27:40.47 min  647 (from  660)  ECT20s 84..84    now  83.6  ELD max  14.4  IACV  2.7-> 3.1  MAP 27.2  batt 14.2 x29 nan
+#29 11-25 21:54:55.99 min  647 (from  662)  ECT20s 90..91    now  90.9  ELD max  24.6  IACV  4.3-> 4.3  MAP 25.8  batt 14.1 x29 nan
+#9 11-25 18:37:41.53 min  648 (from  665)  ECT20s 57..83    now  82.5  ELD max  14.8  IACV  2.7-> 3.9  MAP 25.8  batt 14.1 x29 nan
+#28 11-25 21:28:32.07 min  648 (from  672)  ECT20s 73..79    now  72.9  ELD max  12.0  IACV  2.4-> 2.4  MAP 26.5  batt 14.2 x29 nan
+#29 11-25 22:14:00.44 min  648 (from  658)  ECT20s 81..86    now  82.5  ELD max  15.6  IACV  3.5-> 3.9  MAP 26.5  batt 14.5 x29 nan
+#29 11-25 22:17:01.43 min  648 (from  658)  ECT20s 84..84    now  83.6  ELD max  15.6  IACV  3.1-> 3.5  MAP 25.8  batt 14.4 x29 nan
+#11 11-25 18:40:29.28 min  648 (from  659)  ECT20s 83..84    now  82.5  ELD max  14.0  IACV  3.1-> 3.5  MAP 27.2  batt 14.3 x29 nan
+#29 11-25 21:55:23.77 min  648 (from  746)  ECT20s 86..91    now  87.1  ELD max  15.6  IACV  6.3-> 4.3  MAP 25.8  batt 14.3 x29 nan
+#11 11-25 18:43:15.69 min  648 (from  664)  ECT20s 81..86    now  82.5  ELD max  14.0  IACV  2.7-> 2.7  MAP 26.5  batt 14.2 x29 nan
+#29 11-25 21:54:32.93 min  648 (from  663)  ECT20s 90..90    now  89.6  ELD max  15.6  IACV  3.5-> 3.9  MAP 25.8  batt 14.2 x29 nan
+#29 11-25 22:13:51.51 min  648 (from  660)  ECT20s 81..86    now  82.5  ELD max  16.4  IACV  3.1-> 3.5  MAP 25.8  batt 14.1 x29 nan
+#29 11-25 22:17:10.47 min  648 (from  657)  ECT20s 84..85    now  84.8  ELD max  14.4  IACV  3.5-> 3.9  MAP 26.5  batt 14.2 x29 nan
+#29 11-25 22:17:16.51 min  648 (from  657)  ECT20s 84..85    now  84.8  ELD max  16.0  IACV  3.5-> 4.3  MAP 26.5  batt 14.3 x29 nan
+#20 11-25 19:18:20.97 min  650 (from  662)  ECT20s 83..83    now  82.5  ELD max  16.4  IACV  3.1-> 3.5  MAP 27.2  batt 14.1 x29 nan
+#20 11-25 19:19:41.59 min  650 (from  668)  ECT20s 84..84    now  83.6  ELD max  25.4  IACV  5.1-> 5.1  MAP 26.5  batt 14.2 x29 nan
+#29 11-25 22:14:18.65 min  650 (from  657)  ECT20s 80..83    now  82.5  ELD max  16.4  IACV  3.9-> 4.7  MAP 26.5  batt 14.2 x29 nan
+#30 11-25 22:43:15.21 min  650 (from  662)  ECT20s 80..81    now  81.5  ELD max  14.8  IACV  3.5-> 3.5  MAP 25.8  batt 14.3 x29 nan
+#30 11-25 22:43:22.98 min  650 (from  660)  ECT20s 81..83    now  82.5  ELD max  16.4  IACV  3.5-> 3.9  MAP 25.8  batt 14.3 x29 nan
+#20 11-25 19:18:41.53 min  650 (from  662)  ECT20s 83..83    now  82.5  ELD max  15.2  IACV  4.3-> 4.3  MAP 26.5  batt 14.2 x29 nan
+
+#2 min running rpm 659 at 11-25 17:57:53.62, p1 662
+#3 min running rpm 660 at 11-25 18:01:00.86, p1 663
+#4 min running rpm 619 at 11-25 18:17:29.88, p1 659
+#5 min running rpm 652 at 11-25 18:19:01.36, p1 657
+#6 min running rpm 661 at 11-25 18:19:30.24, p1 663
+#7 min running rpm 656 at 11-25 18:21:00.15, p1 657
+#8 min running rpm 656 at 11-25 18:21:11.80, p1 659
+#9 min running rpm 635 at 11-25 18:37:48.22, p1 653
+#10 min running rpm 656 at 11-25 18:40:12.72, p1 659
+#11 min running rpm 627 at 11-25 18:40:43.05, p1 648
+#12 min running rpm 762 at 11-25 18:48:46.07, p1 772
+#13 min running rpm 752 at 11-25 18:50:29.34, p1 785
+#14 min running rpm 714 at 11-25 18:54:32.74, p1 718
+#15 min running rpm 776 at 11-25 18:54:38.07, p1 787
+#16 min running rpm 656 at 11-25 19:01:23.16, p1 660
+#17 min running rpm 654 at 11-25 19:01:40.64, p1 662
+#18 min running rpm 658 at 11-25 19:08:40.05, p1 662
+#19 min running rpm 636 at 11-25 19:09:17.29, p1 660
+#20 min running rpm 646 at 11-25 19:18:30.62, p1 657
+#21 min running rpm 643 at 11-25 19:38:22.26, p1 655
+#22 min running rpm 638 at 11-25 20:07:56.12, p1 660
+#23 min running rpm 602 at 11-25 20:18:09.96, p1 650
+#24 min running rpm 778 at 11-25 20:28:17.29, p1 790
+#25 min running rpm 595 at 11-25 20:31:18.24, p1 657
+#26 min running rpm 806 at 11-25 20:44:52.83, p1 807
+#27 min running rpm 742 at 11-25 20:52:53.85, p1 786
+#28 min running rpm 606 at 11-25 21:20:06.88, p1 659
+#29 min running rpm 634 at 11-25 22:27:52.13, p1 654
+#30 min running rpm 642 at 11-25 22:43:59.79, p1 654
+#31 min running rpm 979 at 11-26 20:33:53.62, p1 984
+#32 min running rpm 861 at 11-26 20:44:29.43, p1 870
+#33 min running rpm 634 at 11-26 21:09:20.81, p1 697
+#34 min running rpm 658 at 11-26 21:36:02.14, p1 668
+#35 min running rpm 581 at 11-26 21:41:25.99, p1 655

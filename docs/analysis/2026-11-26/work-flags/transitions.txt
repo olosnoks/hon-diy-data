@@ -1,0 +1,115 @@
+0x08 b0: set 3/18822 = 0.02%  transitions 5  drives starting set: 1/32
+  d16 11-25 18:58:15.26 1->0  gap   1.2s | rpm  1333 ect  81.5 eld 166 batt 14.1 x27  4 iacv  32 itgt - | 08..0F 132   0 144  65   1   0   0   0
+  d21 11-25 19:32:23.63 0->1  gap   1.0s | rpm  1544 ect  82.5 eld 173 batt 13.9 x27  4 iacv  24 itgt - | 08..0F 133   0 144  65   1   0   0   0
+  d21 11-25 19:32:24.66 1->0  gap   1.0s | rpm  1136 ect  82.5 eld 166 batt 14.0 x27  4 iacv  36 itgt - | 08..0F 132   0 144  65   1   0   0   0
+  d31 11-26 20:32:13.17 0->1  gap   1.0s | rpm  1379 ect  60.5 eld 172 batt 14.1 x27  4 iacv  25 itgt - | 08..0F 133   0 144  65   1   0   0   0
+  d31 11-26 20:32:14.19 1->0  gap   1.0s | rpm  1614 ect  60.5 eld 173 batt 14.2 x27  4 iacv  23 itgt - | 08..0F 132   0 144  65   1   0   0   0
+0x08 b1: set 15/18822 = 0.08%  transitions 8  drives starting set: 0/32
+  d17 11-25 19:06:31.96 0->1  gap   1.0s | rpm   816 ect  69.7 eld 112 batt 14.1 x27  1 iacv  53 itgt - | 08..0F 134   0 144  65   1   0   0   1
+  d17 11-25 19:06:34.00 1->0  gap   1.0s | rpm  1062 ect  71.3 eld 140 batt 14.2 x27  3 iacv  15 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d19 11-25 19:09:17.10 0->1  gap   1.0s | rpm   664 ect  78.4 eld 124 batt 13.7 x27  0 iacv  44 itgt - | 08..0F 134   0 144  65   1   0   0   1
+  d19 11-25 19:09:22.18 1->0  gap   1.0s | rpm   897 ect  77.4 eld 155 batt 14.2 x27  0 iacv  10 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d20 11-25 19:12:39.97 0->1  gap   2.3s | rpm  1048 ect  82.5 eld 105 batt 14.0 x27  4 iacv  48 itgt - | 08..0F 134   0 144  67   1   0   0   1
+  d20 11-25 19:12:47.05 1->0  gap   1.0s | rpm   968 ect  82.5 eld 159 batt 14.1 x27  2 iacv  14 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d32 11-26 20:35:38.01 0->1  gap   1.0s | rpm  1072 ect  70.5 eld 128 batt 14.3 x27  4 iacv  33 itgt - | 08..0F 134   0 144  67   1   0   0   1
+  d32 11-26 20:35:39.04 1->0  gap   1.0s | rpm  1342 ect  70.5 eld 154 batt 14.2 x27  4 iacv  14 itgt - | 08..0F 132   0 144  67   1   0   0   1
+0x08 b2: set 18821/18822 = 99.99%  transitions 2  drives starting set: 32/32
+  d27 11-25 21:12:08.48 1->0  gap   1.0s | rpm   792 ect  85.9 eld 152 batt 14.1 x27  0 iacv  18 itgt - | 08..0F 128   0 144  65   1   0   0   1
+  d27 11-25 21:12:09.55 0->1  gap   1.1s | rpm   814 ect  87.1 eld 152 batt 14.2 x27  0 iacv  18 itgt - | 08..0F 132   0 144  65   1   0   0   1
+0x08 b3: set 3/18822 = 0.02%  transitions 6  drives starting set: 0/32
+  d33 11-26 21:09:17.18 0->1  gap   1.0s | rpm   715 ect  79.4 eld 170 batt 14.0 x27  0 iacv   0 itgt - | 08..0F 140   0 144  65   1   0   0   1
+  d33 11-26 21:09:18.19 1->0  gap   1.0s | rpm   692 ect  79.4 eld 168 batt 14.1 x27  0 iacv   0 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d33 11-26 21:09:20.32 0->1  gap   1.1s | rpm   668 ect  79.4 eld 171 batt 14.3 x27  0 iacv   2 itgt - | 08..0F 140   0 144  65   1   0   0   1
+  d33 11-26 21:09:21.35 1->0  gap   1.0s | rpm   690 ect  79.4 eld 170 batt 14.2 x27  0 iacv   1 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d33 11-26 21:09:22.38 0->1  gap   1.0s | rpm   718 ect  79.4 eld 171 batt 14.1 x27  0 iacv   2 itgt - | 08..0F 140   0 144  65   1   0   0   1
+  d33 11-26 21:09:23.38 1->0  gap   1.0s | rpm   742 ect  79.4 eld 171 batt 14.3 x27  0 iacv   1 itgt - | 08..0F 132   0 144  65   1   0   0   1
+0x08 b4: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x08 b5: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x08 b6: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x08 b7: set 18822/18822 = 100.00%  transitions 0  drives starting set: 32/32
+0x09 b0: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x09 b1: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x09 b2: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x09 b3: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x09 b4: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x09 b5: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x09 b6: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x09 b7: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0A b0: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0A b1: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0A b2: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0A b3: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0A b4: set 18822/18822 = 100.00%  transitions 0  drives starting set: 32/32
+0x0A b5: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0A b6: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0A b7: set 18821/18822 = 99.99%  transitions 1  drives starting set: 31/32
+  d21 11-25 19:32:23.63 0->1  gap   1.0s | rpm  1544 ect  82.5 eld 173 batt 13.9 x27  4 iacv  24 itgt - | 08..0F 133   0 144  65   1   0   0   0
+0x0B b0: set 18807/18822 = 99.92%  transitions 1  drives starting set: 31/32
+  d31 11-26 20:32:13.17 0->1  gap   1.0s | rpm  1379 ect  60.5 eld 172 batt 14.1 x27  4 iacv  25 itgt - | 08..0F 133   0 144  65   1   0   0   0
+0x0B b1: set 14/18822 = 0.07%  transitions 8  drives starting set: 0/32
+  d17 11-25 19:06:32.98 0->1  gap   1.0s | rpm  1234 ect  68.2 eld 112 batt 14.1 x27  4 iacv  22 itgt - | 08..0F 134   0 144  67   1   0   0   1
+  d17 11-25 19:06:34.00 1->0  gap   1.0s | rpm  1062 ect  71.3 eld 140 batt 14.2 x27  3 iacv  15 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d19 11-25 19:09:18.11 0->1  gap   1.0s | rpm  1046 ect  78.4 eld 127 batt 14.2 x27  4 iacv  36 itgt - | 08..0F 134   0 144  67   1   0   0   1
+  d19 11-25 19:09:22.18 1->0  gap   1.0s | rpm   897 ect  77.4 eld 155 batt 14.2 x27  0 iacv  10 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d20 11-25 19:12:39.97 0->1  gap   2.3s | rpm  1048 ect  82.5 eld 105 batt 14.0 x27  4 iacv  48 itgt - | 08..0F 134   0 144  67   1   0   0   1
+  d20 11-25 19:12:47.05 1->0  gap   1.0s | rpm   968 ect  82.5 eld 159 batt 14.1 x27  2 iacv  14 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d32 11-26 20:35:38.01 0->1  gap   1.0s | rpm  1072 ect  70.5 eld 128 batt 14.3 x27  4 iacv  33 itgt - | 08..0F 134   0 144  67   1   0   0   1
+  d32 11-26 20:35:40.05 1->0  gap   1.0s | rpm  1235 ect  70.5 eld 164 batt 14.3 x27  4 iacv   6 itgt - | 08..0F 132   0 144  65   1   0   0   1
+0x0B b2: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0B b3: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0B b4: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0B b5: set 1/18822 = 0.01%  transitions 1  drives starting set: 1/32
+  d21 11-25 19:32:23.63 1->0  gap   1.0s | rpm  1544 ect  82.5 eld 173 batt 13.9 x27  4 iacv  24 itgt - | 08..0F 133   0 144  65   1   0   0   0
+0x0B b6: set 18806/18822 = 99.91%  transitions 2  drives starting set: 30/32
+  d21 11-25 19:32:23.63 0->1  gap   1.0s | rpm  1544 ect  82.5 eld 173 batt 13.9 x27  4 iacv  24 itgt - | 08..0F 133   0 144  65   1   0   0   0
+  d31 11-26 20:32:13.17 0->1  gap   1.0s | rpm  1379 ect  60.5 eld 172 batt 14.1 x27  4 iacv  25 itgt - | 08..0F 133   0 144  65   1   0   0   0
+0x0B b7: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0C b0: set 18819/18822 = 99.98%  transitions 6  drives starting set: 32/32
+  d22 11-25 19:48:08.77 1->0  gap   1.0s | rpm   770 ect  68.2 eld 108 batt 12.9 x27  0 iacv  32 itgt - | 08..0F 132   0 144  65   0   0   0   1
+  d22 11-25 19:48:09.79 0->1  gap   1.0s | rpm   808 ect  69.0 eld 138 batt 14.2 x27  0 iacv  21 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d22 11-25 19:56:12.22 1->0  gap   1.0s | rpm   804 ect  82.5 eld 116 batt 13.2 x27  0 iacv  36 itgt - | 08..0F 132   0 144  65   0   0   0   1
+  d22 11-25 19:56:13.25 0->1  gap   1.0s | rpm   849 ect  82.5 eld 139 batt 14.1 x27  1 iacv  24 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d35 11-26 21:48:01.41 1->0  gap   1.0s | rpm   927 ect  30.6 eld 115 batt 13.4 x27  2 iacv  36 itgt - | 08..0F 132   0 144  65   0   0   0   1
+  d35 11-26 21:48:02.45 0->1  gap   1.0s | rpm   948 ect  30.6 eld 149 batt 14.1 x27  2 iacv  23 itgt - | 08..0F 132   0 144  65   1   0   0   1
+0x0C b1: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0C b2: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0C b3: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0C b4: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0C b5: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0C b6: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0C b7: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0D b0: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0D b1: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0D b2: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0D b3: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0D b4: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0D b5: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0D b6: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0D b7: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0E b0: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0E b1: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0E b2: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0E b3: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0E b4: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0E b5: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0E b6: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0E b7: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0F b0: set 18731/18822 = 99.52%  transitions 11  drives starting set: 27/32
+  d16 11-25 18:58:27.45 0->1  gap   1.0s | rpm   659 ect  80.4 eld 154 batt 14.2 x27  0 iacv   5 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d19 11-25 19:10:45.55 1->0  gap   1.0s | rpm  1728 ect  81.5 eld 155 batt 14.2 x27  4 iacv  12 itgt - | 08..0F 132   0 144  65   1   0   0   0
+  d19 11-25 19:10:46.56 0->1  gap   1.0s | rpm   840 ect  81.5 eld 154 batt 14.1 x27  0 iacv  14 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d20 11-25 19:13:06.81 1->0  gap   1.0s | rpm  2444 ect  80.4 eld 153 batt 14.1 x27  4 iacv   8 itgt - | 08..0F 132   0 144  65   1   0   0   0
+  d20 11-25 19:13:08.85 0->1  gap   1.0s | rpm   796 ect  80.4 eld 154 batt 14.2 x27  0 iacv  12 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d21 11-25 19:32:37.11 0->1  gap   1.0s | rpm   666 ect  81.5 eld 156 batt 14.1 x27  0 iacv   7 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d22 11-25 20:00:45.34 1->0  gap   1.0s | rpm  1433 ect  82.5 eld 152 batt 14.2 x27  4 iacv  11 itgt - | 08..0F 132   0 144  65   1   0   0   0
+  d22 11-25 20:00:46.36 0->1  gap   1.0s | rpm   854 ect  82.5 eld 153 batt 14.3 x27  0 iacv  15 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d23 11-25 20:18:10.35 0->1  gap   1.0s | rpm   665 ect  78.4 eld 170 batt 14.2 x27  0 iacv   9 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d28 11-25 21:20:15.02 0->1  gap   1.0s | rpm   662 ect  35.9 eld 171 batt 14.1 x27  0 iacv   3 itgt - | 08..0F 132   0 144  65   1   0   0   1
+  d31 11-26 20:32:32.50 0->1  gap   1.0s | rpm  1068 ect  62.9 eld 152 batt 14.3 x27  4 iacv   1 itgt - | 08..0F 132   0 144  65   1   0   0   1
+0x0F b1: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0F b2: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0F b3: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0F b4: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0F b5: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0F b6: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32
+0x0F b7: set 0/18822 = 0.00%  transitions 0  drives starting set: 0/32

@@ -1,0 +1,30 @@
+C:/Users/skons/Documents/hon-diy-data: 1720 s simulated in 3 s; injected {'garble': 1246, 'single': 286, 'deaf': 106}
+  requests 71280 ok 69515 timeouts 519 bad_frames 1243 echo 1246 retries 1607 wakes 29
+  link-down episodes 107 (3.7/min)
+  rpm reads 20964 = 12.19 Hz; gaps >0.3 s: 232, >1 s: 26, worst 1.49 s; time in gaps >0.15 s: 373.6 s
+  stall rule firings: []
+C:/Users/skons/Documents/hon-diy-data-linkfix: 1722 s simulated in 3 s; injected {'garble': 1299, 'single': 281, 'deaf': 113}
+  requests 72936 ok 71080 timeouts 557 bad_frames 1297 echo 1299 retries 1693 wakes 1
+  link-down episodes 17 (0.6/min)
+  rpm reads 21204 = 12.32 Hz; gaps >0.3 s: 231, >1 s: 13, worst 1.41 s; time in gaps >0.15 s: 388.7 s
+  stall rule firings: []
+C:/Users/skons/Documents/hon-diy-data: 1719 s simulated in 3 s; injected {'garble': 1149, 'single': 277, 'deaf': 116}
+  requests 71471 ok 69790 timeouts 532 bad_frames 1144 echo 1149 retries 1510 wakes 35
+  link-down episodes 113 (3.9/min)
+  rpm reads 21022 = 12.23 Hz; gaps >0.3 s: 246, >1 s: 31, worst 1.49 s; time in gaps >0.15 s: 360.8 s
+  stall rule firings: []
+C:/Users/skons/Documents/hon-diy-data-linkfix: 1718 s simulated in 3 s; injected {'garble': 1165, 'single': 276, 'deaf': 118}
+  requests 71901 ok 70175 timeouts 561 bad_frames 1163 echo 1165 retries 1558 wakes 1
+  link-down episodes 17 (0.6/min)
+  rpm reads 21056 = 12.26 Hz; gaps >0.3 s: 239, >1 s: 13, worst 1.47 s; time in gaps >0.15 s: 363.6 s
+  stall rule firings: []
+C:/Users/skons/Documents/hon-diy-data: 1718 s simulated in 3 s; injected {'garble': 1154, 'single': 283, 'deaf': 113}
+  requests 71916 ok 70223 timeouts 539 bad_frames 1153 echo 1154 retries 1522 wakes 38
+  link-down episodes 117 (4.1/min)
+  rpm reads 21131 = 12.30 Hz; gaps >0.3 s: 229, >1 s: 33, worst 1.52 s; time in gaps >0.15 s: 366.2 s
+  stall rule firings: []
+C:/Users/skons/Documents/hon-diy-data-linkfix: 1726 s simulated in 3 s; injected {'garble': 1175, 'single': 284, 'deaf': 112}
+  requests 72182 ok 70456 timeouts 551 bad_frames 1175 echo 1175 retries 1577 wakes 1
+  link-down episodes 12 (0.4/min)
+  rpm reads 21175 = 12.27 Hz; gaps >0.3 s: 247, >1 s: 9, worst 1.34 s; time in gaps >0.15 s: 368.8 s
+  stall rule firings: []

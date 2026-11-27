@@ -1,0 +1,26 @@
+sweeps 210, ECT raw>100 (false-cold) 76
+0x86=-7 while false-cold: 8/76; while warm: 8/134
+21:49:39 x86 -7 ect 138 stft 142 o2 38 rpm 936 tgt 932 x29 92 x2A 6
+21:49:40 x86 -3 ect 132 stft 140 o2 43 rpm 934 tgt 932 x29 89 x2A 6
+21:49:47 x86 -7 ect 143 stft 142 o2 43 rpm 937 tgt 932 x29 92 x2A 6
+21:49:48 x86 -7 ect 143 stft 140 o2 45 rpm 938 tgt 932 x29 89 x2A 6
+21:49:49 x86 -7 ect 145 stft 139 o2 42 rpm 928 tgt 932 x29 90 x2A 6
+21:49:50 x86 -3 ect 144 stft 137 o2 28 rpm 922 tgt 932 x29 92 x2A 6
+21:49:54 x86 -7 ect 148 stft 143 o2 34 rpm 946 tgt 932 x29 92 x2A 6
+21:49:55 x86 -7 ect 149 stft 141 o2 45 rpm 932 tgt 932 x29 90 x2A 6
+21:49:56 x86 -7 ect 152 stft 139 o2 44 rpm 932 tgt 932 x29 91 x2A 6
+21:49:57 x86 -3 ect 151 stft 138 o2 41 rpm 933 tgt 932 x29 89 x2A 6
+21:50:04 x86 -7 ect 63 stft 140 o2 45 rpm 935 tgt 932 x29 93 x2A 6
+21:50:05 x86 -7 ect 67 stft 139 o2 44 rpm 936 tgt 973 x29 91 x2A 6
+21:50:06 x86 -3 ect 68 stft 138 o2 42 rpm 947 tgt 1000 x29 93 x2A 6
+21:50:53 x86 -7 ect 66 stft 136 o2 25 rpm 1068 tgt 1014 x29 97 x2A 6
+21:50:54 x86 -7 ect 66 stft 135 o2 41 rpm 1061 tgt 1014 x29 96 x2A 6
+21:50:55 x86 -7 ect 66 stft 134 o2 44 rpm 1025 tgt 1014 x29 94 x2A 6
+21:50:56 x86 -3 ect 66 stft 132 o2 45 rpm 1023 tgt 1014 x29 93 x2A 6
+21:51:10 x86 -7 ect 70 stft 137 o2 21 rpm 1074 tgt 1068 x29 96 x2A 6
+21:51:11 x86 -7 ect 140 stft 136 o2 40 rpm 1070 tgt 1068 x29 96 x2A 6
+21:51:12 x86 -3 ect 69 stft 134 o2 41 rpm 1064 tgt 1068 x29 95 x2A 6
+21:51:17 x86 -7 ect 66 stft 136 o2 42 rpm 1068 tgt 1027 x29 93 x2A 6
+21:51:18 x86 -3 ect 67 stft 134 o2 45 rpm 1038 tgt 1027 x29 94 x2A 6
+21:52:55 x86 -7 ect 52 stft 134 o2 38 rpm 952 tgt 837 x29 92 x2A 6
+21:52:56 x86 -3 ect 53 stft 134 o2 17 rpm 914 tgt 837 x29 93 x2A 6

@@ -1,0 +1,83 @@
+210 sweeps, 209.1 s, mean sweep 0.583 s
+  rpm        min   799.5 max  1074.0 mean  989.02
+  b10_ect    min    51.0 max   183.0 mean   91.04
+  b11_iat    min    87.0 max    89.0 mean   87.92
+  b12_map    min    38.0 max    42.0 mean   39.35
+  b14_tps    min    20.0 max    21.0 mean   20.06
+  b15_o2     min     6.0 max    46.0 mean   27.89
+  b17_batt   min   146.0 max   151.0 mean  148.03
+  b19_eld    min   149.0 max   174.0 mean  169.02
+  b20_stft   min   128.0 max   143.0 mean  134.09
+  b22_ltft   min   139.0 max   139.0 mean  139.00
+  b24_inj    min     2.0 max     2.0 mean    2.00
+  b26_ign    min   106.0 max   124.0 mean  114.65
+  b28_iacv   min    16.0 max    27.0 mean   21.34
+  b29_iac    min    89.0 max   100.0 mean   93.64
+addr=0x00 | replies=210 | kind=continuous | min=12 | max=16 | mean=14.92 | std=0.75 | n_unique=5 | frac_changed=0.115 | changing_bits=00011111 | best_corr=rpm | spearman=0.881 | values=12 13 14 15 16
+addr=0x01 | replies=210 | kind=continuous | min=2 | max=254 | mean=135.59 | std=78.18 | n_unique=141 | frac_changed=0.981 | changing_bits=11111111 | counter_like=step 6 in 2% | best_corr=b11_iat | spearman=0.298 | values=2 3 4 5 7 8 9 10 11 12 13 14 ...
+addr=0x08 | replies=210 | kind=constant | min=132 | max=132 | mean=132.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=132
+addr=0x0A | replies=210 | kind=constant | min=144 | max=144 | mean=144.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=144
+addr=0x0B | replies=210 | kind=constant | min=65 | max=65 | mean=65.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=65
+addr=0x0C | replies=210 | kind=constant | min=1 | max=1 | mean=1.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=1
+addr=0x0F | replies=210 | kind=constant | min=1 | max=1 | mean=1.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=1
+addr=0x10 | replies=210 | kind=continuous | min=51 | max=183 | mean=91.04 | std=34.9 | n_unique=49 | frac_changed=0.632 | changing_bits=11111111 | counter_like=step 0 in 37% | best_corr=b11_iat | spearman=0.636 | values=51 52 53 61 62 63 64 65 66 67 68 69 ...
+addr=0x11 | replies=210 | kind=few values | min=87 | max=89 | mean=87.92 | std=0.8 | n_unique=3 | frac_changed=0.072 | changing_bits=00001111 | best_corr=b10_ect | spearman=0.636 | values=87 88 89
+addr=0x12 | replies=210 | kind=continuous | min=38 | max=42 | mean=39.35 | std=0.8 | n_unique=5 | frac_changed=0.579 | changing_bits=00001111 | counter_like=step 0 in 42% | best_corr=b19_eld | spearman=-0.297 | values=38 39 40 41 42
+addr=0x13 | replies=210 | kind=constant | min=147 | max=147 | mean=147.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=147
+addr=0x14 | replies=210 | kind=bit field | min=20 | max=21 | mean=20.06 | std=0.23 | n_unique=2 | frac_changed=0.115 | changing_bits=00000001 | best_corr=b12_map | spearman=-0.134 | values=20 21
+addr=0x15 | replies=210 | kind=continuous | min=6 | max=46 | mean=27.89 | std=13.52 | n_unique=41 | frac_changed=0.928 | changing_bits=00111111 | counter_like=step 253 in 8% | best_corr=rpm | spearman=0.166 | values=6 7 8 9 10 11 12 13 14 15 16 17 ...
+addr=0x17 | replies=210 | kind=continuous | min=146 | max=151 | mean=148.03 | std=0.75 | n_unique=5 | frac_changed=0.679 | changing_bits=00000111 | counter_like=step 0 in 32% | best_corr=b29_iac | spearman=-0.257 | values=146 147 148 149 151
+addr=0x18 | replies=210 | kind=continuous | min=72 | max=124 | mean=82.94 | std=7.95 | n_unique=34 | frac_changed=0.914 | changing_bits=00111111 | counter_like=step 255 in 11% | best_corr=rpm | spearman=-0.603 | values=72 73 74 75 76 77 78 79 80 81 82 83 ...
+addr=0x19 | replies=210 | kind=continuous | min=149 | max=174 | mean=169.02 | std=6.28 | n_unique=13 | frac_changed=0.636 | changing_bits=00111111 | counter_like=step 0 in 36% | best_corr=b12_map | spearman=-0.297 | equal_to=0x1C(100%) | values=149 151 153 154 165 166 168 169 170 171 172 173 ...
+addr=0x1C | replies=210 | kind=continuous | min=149 | max=174 | mean=169.02 | std=6.28 | n_unique=13 | frac_changed=0.636 | changing_bits=00111111 | counter_like=step 0 in 36% | best_corr=b19_eld | spearman=1.0 | equal_to=0x19(100%) | values=149 151 153 154 165 166 168 169 170 171 172 173 ...
+addr=0x20 | replies=210 | kind=continuous | min=128 | max=143 | mean=134.09 | std=3.34 | n_unique=16 | frac_changed=0.9 | changing_bits=00001111 | counter_like=step 1 in 26% | best_corr=b28_iacv | spearman=-0.612 | values=128 129 130 131 132 133 134 135 136 137 138 139 ...
+addr=0x22 | replies=210 | kind=constant | min=139 | max=139 | mean=139.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=139
+addr=0x24 | replies=210 | kind=constant | min=2 | max=2 | mean=2.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=2
+addr=0x25 | replies=210 | kind=continuous | min=34 | max=78 | mean=53.6 | std=8.32 | n_unique=41 | frac_changed=0.957 | changing_bits=01111111 | counter_like=step 2 in 6% | best_corr=b20_stft | spearman=0.338 | values=34 35 36 37 39 40 42 43 44 45 46 47 ...
+addr=0x26 | replies=210 | kind=continuous | min=106 | max=124 | mean=114.65 | std=3.49 | n_unique=19 | frac_changed=0.876 | changing_bits=00011111 | counter_like=step 0 in 12% | best_corr=b20_stft | spearman=-0.271 | values=106 107 108 109 110 111 112 113 114 115 116 117 ...
+addr=0x27 | replies=210 | kind=continuous | min=0 | max=4 | mean=3.09 | std=0.84 | n_unique=5 | frac_changed=0.153 | changing_bits=00000111 | best_corr=rpm | spearman=0.92 | values=0 1 2 3 4
+addr=0x28 | replies=210 | kind=continuous | min=16 | max=27 | mean=21.34 | std=1.99 | n_unique=12 | frac_changed=0.191 | changing_bits=00001111 | best_corr=b29_iac | spearman=0.813 | values=16 17 18 19 20 21 22 23 24 25 26 27
+addr=0x29 | replies=210 | kind=continuous | min=89 | max=100 | mean=93.64 | std=2.26 | n_unique=12 | frac_changed=0.78 | changing_bits=00111111 | counter_like=step 0 in 22% | best_corr=b28_iacv | spearman=0.813 | values=89 90 91 92 93 94 95 96 97 98 99 100
+addr=0x2A | replies=210 | kind=constant | min=6 | max=6 | mean=6.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=6
+addr=0x2F | replies=210 | kind=bit field | min=0 | max=1 | mean=0.02 | std=0.15 | n_unique=2 | frac_changed=0.005 | changing_bits=00000001 | best_corr=b12_map | spearman=0.283 | values=0 1
+addr=0x32 | replies=210 | kind=bit field | min=44 | max=45 | mean=44.94 | std=0.24 | n_unique=2 | frac_changed=0.124 | changing_bits=00000001 | best_corr=b12_map | spearman=0.203 | values=44 45
+addr=0x33 | replies=210 | kind=constant | min=55 | max=55 | mean=55.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=55
+addr=0x35 | replies=210 | kind=constant | min=45 | max=45 | mean=45.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=45
+addr=0x36 | replies=210 | kind=constant | min=7 | max=7 | mean=7.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=7
+addr=0x37 | replies=210 | kind=bit field | min=44 | max=45 | mean=44.88 | std=0.32 | n_unique=2 | frac_changed=0.206 | changing_bits=00000001 | best_corr=b12_map | spearman=0.275 | values=44 45
+addr=0x38 | replies=210 | kind=constant | min=25 | max=25 | mean=25.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=25
+addr=0x39 | replies=210 | kind=constant | min=25 | max=25 | mean=25.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=25
+addr=0x3A | replies=210 | kind=constant | min=25 | max=25 | mean=25.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=25
+addr=0x3C | replies=210 | kind=bit field | min=1 | max=2 | mean=1.06 | std=0.24 | n_unique=2 | frac_changed=0.115 | changing_bits=00000011 | best_corr=b12_map | spearman=-0.223 | values=1 2
+addr=0x76 | replies=210 | kind=continuous | min=12 | max=16 | mean=14.9 | std=0.73 | n_unique=5 | frac_changed=0.033 | changing_bits=00011111 | best_corr=rpm | spearman=0.825 | values=12 13 14 15 16
+addr=0x77 | replies=210 | kind=continuous | min=14 | max=254 | mean=142.01 | std=79.1 | n_unique=13 | frac_changed=0.091 | changing_bits=11111111 | best_corr=b29_iac | spearman=0.366 | values=14 20 52 69 107 123 129 145 162 178 216 222 ...
+addr=0x78 | replies=210 | kind=constant | min=16 | max=16 | mean=16.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=16
+addr=0x79 | replies=210 | kind=constant | min=153 | max=153 | mean=153.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=153
+addr=0x7A | replies=210 | kind=constant | min=10 | max=10 | mean=10.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=10
+addr=0x7B | replies=210 | kind=constant | min=4 | max=4 | mean=4.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=4
+addr=0x7C | replies=210 | kind=constant | min=36 | max=36 | mean=36.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=36
+addr=0x7E | replies=210 | kind=constant | min=3 | max=3 | mean=3.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=3
+addr=0x7F | replies=210 | kind=constant | min=1 | max=1 | mean=1.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=1
+addr=0x80 | replies=210 | kind=constant | min=248 | max=248 | mean=248.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=248
+addr=0x82 | replies=210 | kind=constant | min=249 | max=249 | mean=249.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=249
+addr=0x84 | replies=210 | kind=constant | min=240 | max=240 | mean=240.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=240
+addr=0x86 | replies=210 | kind=bit field | min=249 | max=253 | mean=252.7 | std=1.06 | n_unique=2 | frac_changed=0.077 | changing_bits=00000100 | best_corr=b20_stft | spearman=-0.327 | values=249 253
+addr=0x87 | replies=210 | kind=constant | min=248 | max=248 | mean=248.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=248
+addr=0x88 | replies=210 | kind=constant | min=252 | max=252 | mean=252.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=252
+addr=0x89 | replies=210 | kind=constant | min=240 | max=240 | mean=240.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=240
+addr=0x8B | replies=210 | kind=constant | min=244 | max=244 | mean=244.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=244
+addr=0x8C | replies=210 | kind=constant | min=248 | max=248 | mean=248.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=248
+addr=0x8F | replies=210 | kind=constant | min=142 | max=142 | mean=142.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=142
+addr=0x94 | replies=210 | kind=constant | min=2 | max=2 | mean=2.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=2
+addr=0x95 | replies=210 | kind=constant | min=15 | max=15 | mean=15.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=15
+addr=0x96 | replies=210 | kind=constant | min=4 | max=4 | mean=4.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=4
+addr=0x99 | replies=210 | kind=constant | min=5 | max=5 | mean=5.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=5
+addr=0x9A | replies=210 | kind=constant | min=2 | max=2 | mean=2.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=2
+addr=0x9C | replies=210 | kind=continuous | min=53 | max=62 | mean=57.67 | std=1.47 | n_unique=6 | frac_changed=0.555 | changing_bits=00001111 | counter_like=step 0 in 44% | best_corr=b12_map | spearman=0.42 | values=53 55 57 59 60 62
+addr=0xA0 | replies=210 | kind=continuous | min=47 | max=50 | mean=49.5 | std=0.63 | n_unique=4 | frac_changed=0.354 | changing_bits=00011111 | best_corr=b15_o2 | spearman=0.745 | values=47 48 49 50
+addr=0xA4 | replies=210 | kind=bit field | min=160 | max=161 | mean=160.21 | std=0.41 | n_unique=2 | frac_changed=0.019 | changing_bits=00000001 | best_corr=rpm | spearman=0.622 | values=160 161
+addr=0xAD | replies=210 | kind=constant | min=1 | max=1 | mean=1.0 | std=0.0 | n_unique=1 | frac_changed=0.0 | changing_bits=00000000 | values=1
+
+16-bit candidates (hi,lo) where lo wraps and hi changes in the same sweep:
+  0x00:0x01  lo wraps 28, hi moves opposite in 79%
+  0x76:0x77  lo wraps 5, hi moves opposite in 100%

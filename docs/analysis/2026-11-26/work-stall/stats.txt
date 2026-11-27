@@ -1,0 +1,49 @@
+== ECT glitch edges (|dECT| >= 15 C between consecutive reads <= 3 s apart) ==
+#6 drive_2026_11_25_1819 run 0.01 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#7 drive_2026_11_25_1820 run 0.01 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#8 drive_2026_11_25_1821 run 0.02 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 98.4 %
+#9 drive_2026_11_25_1835 run 0.05 h  edges 2 (drops 1)  rate 44.2/h  false-cold 15.9 %  partial 26.1 %
+#10 drive_2026_11_25_1838 run 0.03 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#11 drive_2026_11_25_1840 run 0.11 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#12 drive_2026_11_25_1847 run 0.03 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#13 drive_2026_11_25_1849 run 0.09 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#14 drive_2026_11_25_1854 run 0.01 h  edges 1 (drops 0)  rate 192.9/h  false-cold 15.8 %  partial 26.3 %
+#15 drive_2026_11_25_1854_2 run 0.01 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 14.3 %
+#16 drive_2026_11_25_1858 run 0.05 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#17 drive_2026_11_25_1901 run 0.09 h  edges 2 (drops 1)  rate 23.5/h  false-cold 0.0 %  partial 49.7 %
+#18 drive_2026_11_25_1906 run 0.03 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#19 drive_2026_11_25_1908 run 0.04 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#20 drive_2026_11_25_1911 run 0.29 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#21 drive_2026_11_25_1932 run 0.18 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.2 %
+#22 drive_2026_11_25_1943 run 0.50 h  edges 8 (drops 4)  rate 15.9/h  false-cold 0.3 %  partial 1.3 %
+#23 drive_2026_11_25_2017 run 0.16 h  edges 2 (drops 1)  rate 12.4/h  false-cold 1.2 %  partial 0.0 %
+#24 drive_2026_11_25_2028 run 0.01 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#25 drive_2026_11_25_2028_2 run 0.26 h  edges 6 (drops 3)  rate 22.8/h  false-cold 28.5 %  partial 7.4 %
+#26 drive_2026_11_25_2044 run 0.00 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#27 drive_2026_11_25_2045 run 0.51 h  edges 0 (drops 0)  rate 0.0/h  false-cold 0.0 %  partial 0.0 %
+#28 drive_2026_11_25_2120 run 0.38 h  edges 17 (drops 9)  rate 45.0/h  false-cold 73.1 %  partial 6.9 %
+#29 drive_2026_11_25_2142 run 0.86 h  edges 25 (drops 12)  rate 29.1/h  false-cold 16.2 %  partial 26.2 %
+#30 drive_2026_11_25_2237 run 0.11 h  edges 5 (drops 3)  rate 44.3/h  false-cold 21.6 %  partial 1.3 %
+#31 drive_2026_11_26_2031 run 0.03 h  edges 3 (drops 2)  rate 94.0/h  false-cold 1.6 %  partial 98.4 %
+#32 drive_2026_11_26_2034 run 0.17 h  edges 5 (drops 2)  rate 29.6/h  false-cold 1.4 %  partial 77.6 %
+#33 drive_2026_11_26_2045 run 0.48 h  edges 3 (drops 2)  rate 6.3/h  false-cold 0.5 %  partial 63.6 %
+#34 drive_2026_11_26_2114 run 0.36 h  edges 27 (drops 11)  rate 75.2/h  false-cold 22.2 %  partial 61.0 %
+#35 drive_2026_11_26_2137 run 0.21 h  edges 3 (drops 2)  rate 14.6/h  false-cold 20.5 %  partial 13.1 %
+day 11-25: 68 edges (34 drops) in 3.85 h running (Honda logging) = 17.7 edges/h, 8.8 drops/h
+day 11-26: 41 edges (19 drops) in 1.24 h running (Honda logging) = 33.0 edges/h, 15.3 drops/h
+
+== ECT state and edges before each engine-off event ==
+11-25 18:55:13 ECT 81 C; edges in last 10 min 1, last 2 min 1; last edge 55 s before
+11-25 19:29:06 ECT 84 C; edges in last 10 min 0, last 2 min 0; last edge 1507 s before
+11-25 20:13:43 ECT 86 C; edges in last 10 min 0, last 2 min 0; last edge 767 s before
+11-25 21:16:09 ECT 88 C; edges in last 10 min 0, last 2 min 0; last edge 2449 s before
+
+== 10 s minimum rpm in the 10 min before each event (stitched across drives) ==
+11-25 18:55:13 min per 10 s (oldest first): [656, 663, 788, 791, 796, 775, 798, 774, 796, 805, 793, 799, 797, 791, 792, 792, 792, 789, 791, 765, 797, 761, 797, 807, 801, 797, 799, 798, 792, 795, 791, 751, 794, 752, 803, 806, 805, 802, 796, 795, 789, 800, 792, 796, 796, 796, 794, 794, 793, 798, 796, 796, 798, 796, 794, 714, 725, 800, 809, 801]
+   median of 10 s minima: -10..-5 min 792, -5..0 min 796; overall min 656
+11-25 19:29:06 min per 10 s (oldest first): [659, 657, 661, 649, 754, 738, 659, 809, 807, 795, 798, 795, 797, 791, 796, 794, 791, 793, 791, 793, 755, 775, 777, 782, 793, 802, 803, 795, 787, 802, 799, 798, 798, 796, 794, 796, 798, 802, 796, 800, 801, 800, 800, 793, 791, 801, 799, 799, 795, 798, 796, 799, 795, 793, 790, 799, 797, 758, 806, 766]
+   median of 10 s minima: -10..-5 min 792, -5..0 min 798; overall min 649
+11-25 20:13:43 min per 10 s (oldest first): [656, 662, 661, 662, 659, 662, 664, 661, 659, 658, 650, 651, 639, 713, 650, 652, 655, 658, 655, 656, 661, 660, 659, 661, 653, 638, 751, 798, 784, 792, 775, 796, 803, 797, 793, 796, 798, 797, 795, 793, 796, 800, 793, 792, 750, 786, 773, 797, 800, 798, 795, 794, 795, 793, 795, 795, 796, 794, 794, 747]
+   median of 10 s minima: -10..-5 min 659, -5..0 min 795; overall min 638
+11-25 21:16:09 min per 10 s (oldest first): [800, 798, 797, 791, 800, 799, 792, 795, 766, 797, 782, 781, 802, 807, 800, 797, 799, 801, 800, 795, 796, 795, 795, 795, 752, 800, 781, 795, 802, 805, 800, 803, 800, 796, 801, 745, 798, 800, 798, 799, 793, 792, 763, 791, 789, 798, 804, 796, 794, 799, 799, 794, 800, 799, 792, 794, 796, 796, 797, 764]
+   median of 10 s minima: -10..-5 min 797, -5..0 min 796; overall min 745

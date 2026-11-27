@@ -1,0 +1,441 @@
+
+=== ELD load step (>=6 raw, ~+2.4 A)  n=23
+byte        pre    peak+    peak-   post10  first resp (s, |mean dev|>thr)
+rpm       841.2      8.6    -21.1     -2.9  -
+ect        56.4      2.2     -4.2      1.5  -
+map        39.7      0.9     -0.1      0.2  -
+batt      148.5      0.1     -0.4     -0.1  -
+altfr      99.6     10.0     -0.9      2.8  +0 s
+eld       169.2     -0.6    -14.1     -3.6  -2 s
+x1C       169.2     -0.6    -14.1     -3.6  -2 s
+stft      139.7      0.9     -0.7      0.4  -
+ign       112.8      1.6     -3.4     -1.3  +20 s
+x27         0.9      0.1     -0.3     -0.2  -
+iacv        9.0      1.8      0.0      0.9  -
+x29        66.8      6.1      1.8      5.4  -
+x2A         4.9      0.0      0.0      0.0  -
+x2F         0.0      0.2      0.0      0.2  -
+x32        45.0      0.0     -0.1      0.0  -
+x37        44.9      0.1     -0.1      0.0  -
+knock       1.1      0.0     -0.1     -0.0  -
+
+=== ECT false-cold entry (raw +8)  n=22
+byte        pre    peak+    peak-   post10  first resp (s, |mean dev|>thr)
+rpm       870.4     74.1      2.7     18.8  +3 s
+ect        67.1     23.2     -6.4      8.0  +0 s
+map        39.8      0.4     -0.5      0.0  -
+batt      148.3      0.1     -0.2      0.1  -
+altfr      97.1     -0.4     -8.2     -2.5  +20 s
+eld       168.9      2.0     -1.3      1.0  -
+x1C       168.9      2.0     -1.3      1.0  -
+stft      137.7     -0.4     -2.6     -1.7  +9 s
+ign       111.2      3.5     -0.8      0.6  -
+x27         1.4      0.9     -0.0      0.3  -
+iacv       13.8      3.7      0.3      1.4  -
+x29        81.9      5.4      0.6      3.7  -
+x2A         4.4      0.1      0.0      0.0  -
+x2F         0.2     -0.0     -0.2     -0.2  -
+x32        45.0      0.0     -0.0      0.0  -
+x37        44.9      0.1     -0.2     -0.0  -
+knock       1.0      0.1     -0.0     -0.0  -
+
+=== ECT snap back warm (raw -8)  n=22
+byte        pre    peak+    peak-   post10  first resp (s, |mean dev|>thr)
+rpm       888.1     45.2    -58.0    -34.7  -
+ect        72.3     19.0    -16.8     -3.5  -1 s
+map        39.9      0.6     -0.8      0.1  -
+batt      148.3      0.4     -0.3      0.2  -
+altfr      96.2      5.4     -4.8      2.9  -
+eld       168.0      3.2      0.4      1.5  -
+x1C       168.0      3.2      0.4      1.5  -
+stft      137.5      0.7     -1.9      0.3  -
+ign       110.2      3.9     -2.2     -0.6  -
+x27         1.7      0.4     -0.8     -0.4  -
+iacv       14.9      2.5     -3.3     -2.9  -
+x29        84.5      1.9     -7.4     -7.0  +12 s
+x2A         4.4      0.0      0.0      0.0  -
+x2F         0.1      0.1     -0.1     -0.1  -
+x32        45.0      0.0     -0.1      0.0  -
+x37        44.9      0.1     -0.1      0.0  -
+knock       1.0      0.0     -0.0     -0.0  -
+
+=== IACV step up (>=3 raw)  n=24
+byte        pre    peak+    peak-   post10  first resp (s, |mean dev|>thr)
+rpm       826.8    178.2     50.7    123.4  -1 s
+ect        72.9      6.6    -11.9     -0.8  -
+map        40.1      0.3     -1.1     -0.5  +3 s
+batt      148.3      0.3     -0.3     -0.1  -
+altfr     100.7     -5.4    -15.0     -9.5  -1 s
+eld       170.0      1.2     -3.7     -2.1  +0 s
+x1C       170.0      1.2     -3.7     -2.1  +0 s
+stft      138.6     -0.2     -5.6     -4.3  +1 s
+ign       109.4      9.0      3.4      4.8  +0 s
+x27         0.9      2.0      0.5      1.7  +1 s
+iacv       12.3      9.7      2.7      6.5  -1 s
+x29        81.5     12.7      4.1      8.5  -1 s
+x2A         4.2      0.0      0.0      0.0  -
+x2F         0.2     -0.1     -0.2     -0.2  -
+x32        45.0      0.0     -0.1     -0.0  -
+x37        44.9      0.1     -0.1     -0.0  -
+knock       1.0      0.1     -0.0     -0.0  -
+
+=== link drop (short, engine running)  n=100
+byte        pre    peak+    peak-   post10  first resp (s, |mean dev|>thr)
+rpm       825.4      9.6     -4.0      8.3  -
+ect        55.5      1.1     -0.8     -0.1  -
+map        40.0      0.1     -0.2     -0.1  -
+batt      148.5      0.1     -0.2     -0.0  -
+altfr     101.5      0.5     -1.9     -1.2  -
+eld       168.5      0.5     -0.9      0.1  -
+x1C       168.5      0.5     -0.9      0.1  -
+stft      140.0      0.4     -0.4      0.1  -
+ign       111.4      0.6     -0.3     -0.0  -
+x27         0.7      0.1     -0.0      0.1  -
+iacv        8.3      0.5     -0.1      0.4  -
+x29        68.4      0.4     -1.2      0.3  -
+x2A         5.1      0.0     -0.0      0.0  -
+x2F         0.1      0.1      0.0      0.0  -
+x32        45.0      0.0     -0.0     -0.0  -
+x37        44.9      0.1     -0.0      0.0  -
+knock       1.0      0.0     -0.0      0.0  -
+
+=== knock byte 1->2  n=79
+byte        pre    peak+    peak-   post10  first resp (s, |mean dev|>thr)
+rpm       855.8     21.1      3.7     11.9  -
+ect        58.1      0.1     -2.9     -2.1  -
+map        39.7      0.1     -0.3     -0.0  -
+batt      148.5      0.1     -0.1     -0.0  -
+altfr      97.3      1.5     -1.9     -0.3  -
+eld       168.4      0.0     -1.9     -0.6  +22 s
+x1C       168.4      0.0     -1.9     -0.6  +22 s
+stft      139.9      0.1     -0.9     -0.5  -
+ign       112.5      0.4     -1.1      0.2  -
+x27         0.9      0.2      0.0      0.1  -
+iacv        9.7      1.1      0.2      0.6  -
+x29        72.7      1.6      0.4      1.0  -
+x2A         5.4      0.0     -0.0     -0.0  -
+x2F         0.1     -0.0     -0.1     -0.0  -
+x32        45.0      0.0     -0.0      0.0  -
+x37        44.9      0.1     -0.1      0.0  -
+knock       1.1      0.9     -0.1      0.0  -
+
+=== 0x08 bit3 set  n=3
+byte        pre    peak+    peak-   post10  first resp (s, |mean dev|>thr)
+rpm       712.5     31.6    -37.0     -5.9  +1 s
+ect        42.0     -1.0     -1.0     -1.0  -
+map        40.6      1.7     -0.3      0.3  +1 s
+batt      148.2      1.2     -0.5      0.2  -
+altfr     117.0     19.7     -7.3      0.5  -2 s
+eld       167.8      2.8     -2.5     -0.6  -
+x1C       167.8      2.8     -2.5     -0.6  -
+stft      142.7      1.0     -1.0      0.0  -
+ign       110.0      2.7     -6.0     -3.1  +10 s
+x27         0.0      0.0      0.0      0.0  -
+iacv        0.0      1.3      0.0      0.0  +1 s
+x29        37.8      9.6      0.2      1.3  -1 s
+x2A         5.0      0.0      0.0      0.0  -
+x2F         0.0      0.0      0.0      0.0  -
+x32        44.9      0.1     -0.3      0.1  -
+x37        44.9      0.1     -0.3      0.1  -
+knock       1.0      0.0      0.0      0.0  -
+
+=== x2F increments  n=5
+byte        pre    peak+    peak-   post10  first resp (s, |mean dev|>thr)
+rpm       772.1     71.9    -19.5     43.1  +5 s
+ect        79.5      0.3    -14.3    -11.5  -
+map        40.0      1.0     -0.6     -0.0  +1 s
+batt      148.2      0.6     -0.4      0.2  -
+altfr     104.3      4.3    -10.1     -5.4  +6 s
+eld       170.3      2.9     -3.9      2.1  +0 s
+x1C       170.3      2.9     -3.9      2.1  +0 s
+stft      141.3      1.9     -3.9     -1.3  -1 s
+ign       109.9      6.1     -0.7      2.7  +6 s
+x27         0.0      0.8      0.0      0.4  -
+iacv        8.7      4.9     -0.7      3.1  +5 s
+x29        79.1      7.1     -1.5      5.1  +16 s
+x2A         4.0      0.0      0.0      0.0  -
+x2F         1.2      2.0      0.0      1.2  +0 s
+x32        45.0      0.0     -0.2      0.0  -
+x37        44.9      0.1     -0.3      0.0  -
+knock       1.0      0.2     -0.0     -0.0  -
+
+
+EVENT LIST
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 212.9 | 20:48:50
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 214.9 | 20:48:52
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 459.8 | 20:52:57
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 479.9 | 20:53:17
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 518.3 | 20:53:56
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 738.0 | 20:57:35
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 746.8 | 20:57:44
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 1109.2 | 21:03:47
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 1296.7 | 21:06:54
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 1434.3 | 21:09:12
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 1523.8 | 21:10:41
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 1532.2 | 21:10:50
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2045 | 1627.2 | 21:12:25
+ECT false-cold entry (raw +8) | drive_2026_11_26_2045 | 88.3 | 20:46:46
+ECT false-cold entry (raw +8) | drive_2026_11_26_2045 | 536.7 | 20:54:14
+ECT false-cold entry (raw +8) | drive_2026_11_26_2045 | 736.9 | 20:57:34
+ECT false-cold entry (raw +8) | drive_2026_11_26_2045 | 843.7 | 20:59:21
+ECT snap back warm (raw -8) | drive_2026_11_26_2045 | 89.3 | 20:46:47
+ECT snap back warm (raw -8) | drive_2026_11_26_2045 | 527.4 | 20:54:05
+ECT snap back warm (raw -8) | drive_2026_11_26_2045 | 611.7 | 20:55:29
+ECT snap back warm (raw -8) | drive_2026_11_26_2045 | 1283.8 | 21:06:41
+ECT snap back warm (raw -8) | drive_2026_11_26_2045 | 1391.1 | 21:08:28
+IACV step up (>=3 raw) | drive_2026_11_26_2045 | 485.7 | 20:53:23
+IACV step up (>=3 raw) | drive_2026_11_26_2045 | 512.1 | 20:53:50
+IACV step up (>=3 raw) | drive_2026_11_26_2045 | 538.1 | 20:54:15
+link drop (short, engine running) | drive_2026_11_26_2045 | 35.0 | 20:45:52
+link drop (short, engine running) | drive_2026_11_26_2045 | 44.6 | 20:46:02
+link drop (short, engine running) | drive_2026_11_26_2045 | 89.6 | 20:46:47
+link drop (short, engine running) | drive_2026_11_26_2045 | 109.7 | 20:47:07
+link drop (short, engine running) | drive_2026_11_26_2045 | 127.9 | 20:47:25
+link drop (short, engine running) | drive_2026_11_26_2045 | 155.4 | 20:47:53
+link drop (short, engine running) | drive_2026_11_26_2045 | 169.2 | 20:48:07
+link drop (short, engine running) | drive_2026_11_26_2045 | 176.2 | 20:48:14
+link drop (short, engine running) | drive_2026_11_26_2045 | 210.5 | 20:48:48
+link drop (short, engine running) | drive_2026_11_26_2045 | 248.3 | 20:49:26
+link drop (short, engine running) | drive_2026_11_26_2045 | 289.3 | 20:50:07
+link drop (short, engine running) | drive_2026_11_26_2045 | 330.6 | 20:50:48
+link drop (short, engine running) | drive_2026_11_26_2045 | 361.4 | 20:51:19
+link drop (short, engine running) | drive_2026_11_26_2045 | 396.3 | 20:51:54
+link drop (short, engine running) | drive_2026_11_26_2045 | 416.4 | 20:52:14
+link drop (short, engine running) | drive_2026_11_26_2045 | 459.0 | 20:52:56
+link drop (short, engine running) | drive_2026_11_26_2045 | 504.7 | 20:53:42
+link drop (short, engine running) | drive_2026_11_26_2045 | 545.1 | 20:54:22
+link drop (short, engine running) | drive_2026_11_26_2045 | 561.8 | 20:54:39
+link drop (short, engine running) | drive_2026_11_26_2045 | 567.6 | 20:54:45
+link drop (short, engine running) | drive_2026_11_26_2045 | 596.4 | 20:55:14
+link drop (short, engine running) | drive_2026_11_26_2045 | 612.8 | 20:55:30
+link drop (short, engine running) | drive_2026_11_26_2045 | 622.3 | 20:55:40
+link drop (short, engine running) | drive_2026_11_26_2045 | 648.4 | 20:56:06
+link drop (short, engine running) | drive_2026_11_26_2045 | 712.7 | 20:57:10
+link drop (short, engine running) | drive_2026_11_26_2045 | 738.8 | 20:57:36
+link drop (short, engine running) | drive_2026_11_26_2045 | 768.2 | 20:58:06
+link drop (short, engine running) | drive_2026_11_26_2045 | 784.2 | 20:58:22
+link drop (short, engine running) | drive_2026_11_26_2045 | 816.5 | 20:58:54
+link drop (short, engine running) | drive_2026_11_26_2045 | 833.2 | 20:59:11
+link drop (short, engine running) | drive_2026_11_26_2045 | 906.0 | 21:00:23
+link drop (short, engine running) | drive_2026_11_26_2045 | 926.2 | 21:00:44
+link drop (short, engine running) | drive_2026_11_26_2045 | 939.2 | 21:00:57
+link drop (short, engine running) | drive_2026_11_26_2045 | 963.2 | 21:01:21
+link drop (short, engine running) | drive_2026_11_26_2045 | 988.9 | 21:01:46
+link drop (short, engine running) | drive_2026_11_26_2045 | 1013.0 | 21:02:10
+link drop (short, engine running) | drive_2026_11_26_2045 | 1040.7 | 21:02:38
+link drop (short, engine running) | drive_2026_11_26_2045 | 1049.0 | 21:02:46
+link drop (short, engine running) | drive_2026_11_26_2045 | 1130.4 | 21:04:08
+link drop (short, engine running) | drive_2026_11_26_2045 | 1136.0 | 21:04:13
+link drop (short, engine running) | drive_2026_11_26_2045 | 1144.8 | 21:04:22
+link drop (short, engine running) | drive_2026_11_26_2045 | 1153.0 | 21:04:30
+link drop (short, engine running) | drive_2026_11_26_2045 | 1210.2 | 21:05:28
+link drop (short, engine running) | drive_2026_11_26_2045 | 1260.4 | 21:06:18
+link drop (short, engine running) | drive_2026_11_26_2045 | 1296.5 | 21:06:54
+link drop (short, engine running) | drive_2026_11_26_2045 | 1306.3 | 21:07:04
+link drop (short, engine running) | drive_2026_11_26_2045 | 1345.0 | 21:07:42
+link drop (short, engine running) | drive_2026_11_26_2045 | 1368.4 | 21:08:06
+link drop (short, engine running) | drive_2026_11_26_2045 | 1383.7 | 21:08:21
+link drop (short, engine running) | drive_2026_11_26_2045 | 1416.3 | 21:08:54
+link drop (short, engine running) | drive_2026_11_26_2045 | 1429.8 | 21:09:07
+link drop (short, engine running) | drive_2026_11_26_2045 | 1453.1 | 21:09:30
+link drop (short, engine running) | drive_2026_11_26_2045 | 1493.8 | 21:10:11
+link drop (short, engine running) | drive_2026_11_26_2045 | 1507.5 | 21:10:25
+link drop (short, engine running) | drive_2026_11_26_2045 | 1521.4 | 21:10:39
+link drop (short, engine running) | drive_2026_11_26_2045 | 1535.5 | 21:10:53
+link drop (short, engine running) | drive_2026_11_26_2045 | 1544.8 | 21:11:02
+link drop (short, engine running) | drive_2026_11_26_2045 | 1557.7 | 21:11:15
+link drop (short, engine running) | drive_2026_11_26_2045 | 1570.1 | 21:11:27
+link drop (short, engine running) | drive_2026_11_26_2045 | 1606.8 | 21:12:04
+link drop (short, engine running) | drive_2026_11_26_2045 | 1615.8 | 21:12:13
+link drop (short, engine running) | drive_2026_11_26_2045 | 1630.3 | 21:12:28
+link drop (short, engine running) | drive_2026_11_26_2045 | 1648.0 | 21:12:45
+link drop (short, engine running) | drive_2026_11_26_2045 | 1656.9 | 21:12:54
+knock byte 1->2 | drive_2026_11_26_2045 | 66.4 | 20:46:24
+knock byte 1->2 | drive_2026_11_26_2045 | 112.2 | 20:47:10
+knock byte 1->2 | drive_2026_11_26_2045 | 114.2 | 20:47:12
+knock byte 1->2 | drive_2026_11_26_2045 | 130.9 | 20:47:28
+knock byte 1->2 | drive_2026_11_26_2045 | 139.0 | 20:47:36
+knock byte 1->2 | drive_2026_11_26_2045 | 180.9 | 20:48:18
+knock byte 1->2 | drive_2026_11_26_2045 | 185.0 | 20:48:22
+knock byte 1->2 | drive_2026_11_26_2045 | 204.8 | 20:48:42
+knock byte 1->2 | drive_2026_11_26_2045 | 239.9 | 20:49:17
+knock byte 1->2 | drive_2026_11_26_2045 | 246.1 | 20:49:23
+knock byte 1->2 | drive_2026_11_26_2045 | 290.8 | 20:50:08
+knock byte 1->2 | drive_2026_11_26_2045 | 313.0 | 20:50:30
+knock byte 1->2 | drive_2026_11_26_2045 | 405.0 | 20:52:02
+knock byte 1->2 | drive_2026_11_26_2045 | 412.3 | 20:52:10
+knock byte 1->2 | drive_2026_11_26_2045 | 418.9 | 20:52:16
+knock byte 1->2 | drive_2026_11_26_2045 | 445.7 | 20:52:43
+knock byte 1->2 | drive_2026_11_26_2045 | 464.0 | 20:53:01
+knock byte 1->2 | drive_2026_11_26_2045 | 554.9 | 20:54:32
+knock byte 1->2 | drive_2026_11_26_2045 | 563.2 | 20:54:41
+knock byte 1->2 | drive_2026_11_26_2045 | 573.0 | 20:54:50
+knock byte 1->2 | drive_2026_11_26_2045 | 576.2 | 20:54:54
+knock byte 1->2 | drive_2026_11_26_2045 | 580.4 | 20:54:58
+knock byte 1->2 | drive_2026_11_26_2045 | 584.4 | 20:55:02
+knock byte 1->2 | drive_2026_11_26_2045 | 591.7 | 20:55:09
+knock byte 1->2 | drive_2026_11_26_2045 | 683.3 | 20:56:41
+knock byte 1->2 | drive_2026_11_26_2045 | 708.1 | 20:57:05
+knock byte 1->2 | drive_2026_11_26_2045 | 721.4 | 20:57:19
+knock byte 1->2 | drive_2026_11_26_2045 | 745.9 | 20:57:43
+knock byte 1->2 | drive_2026_11_26_2045 | 757.5 | 20:57:55
+knock byte 1->2 | drive_2026_11_26_2045 | 790.9 | 20:58:28
+knock byte 1->2 | drive_2026_11_26_2045 | 796.0 | 20:58:33
+knock byte 1->2 | drive_2026_11_26_2045 | 811.8 | 20:58:49
+knock byte 1->2 | drive_2026_11_26_2045 | 815.0 | 20:58:52
+knock byte 1->2 | drive_2026_11_26_2045 | 819.0 | 20:58:56
+knock byte 1->2 | drive_2026_11_26_2045 | 861.3 | 20:59:39
+knock byte 1->2 | drive_2026_11_26_2045 | 878.7 | 20:59:56
+knock byte 1->2 | drive_2026_11_26_2045 | 884.1 | 21:00:01
+knock byte 1->2 | drive_2026_11_26_2045 | 895.2 | 21:00:13
+knock byte 1->2 | drive_2026_11_26_2045 | 897.3 | 21:00:15
+knock byte 1->2 | drive_2026_11_26_2045 | 907.5 | 21:00:25
+knock byte 1->2 | drive_2026_11_26_2045 | 917.3 | 21:00:35
+knock byte 1->2 | drive_2026_11_26_2045 | 927.3 | 21:00:45
+knock byte 1->2 | drive_2026_11_26_2045 | 958.8 | 21:01:16
+knock byte 1->2 | drive_2026_11_26_2045 | 998.9 | 21:01:56
+knock byte 1->2 | drive_2026_11_26_2045 | 1009.2 | 21:02:07
+knock byte 1->2 | drive_2026_11_26_2045 | 1016.5 | 21:02:14
+knock byte 1->2 | drive_2026_11_26_2045 | 1027.0 | 21:02:24
+knock byte 1->2 | drive_2026_11_26_2045 | 1051.5 | 21:02:49
+knock byte 1->2 | drive_2026_11_26_2045 | 1061.0 | 21:02:58
+knock byte 1->2 | drive_2026_11_26_2045 | 1067.1 | 21:03:05
+knock byte 1->2 | drive_2026_11_26_2045 | 1104.8 | 21:03:42
+knock byte 1->2 | drive_2026_11_26_2045 | 1153.3 | 21:04:31
+knock byte 1->2 | drive_2026_11_26_2045 | 1201.1 | 21:05:18
+knock byte 1->2 | drive_2026_11_26_2045 | 1204.3 | 21:05:22
+knock byte 1->2 | drive_2026_11_26_2045 | 1243.0 | 21:06:00
+knock byte 1->2 | drive_2026_11_26_2045 | 1510.0 | 21:10:27
+0x08 bit3 set | drive_2026_11_26_2045 | 1439.3 | 21:09:17
+0x08 bit3 set | drive_2026_11_26_2045 | 1442.5 | 21:09:20
+0x08 bit3 set | drive_2026_11_26_2045 | 1444.5 | 21:09:22
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2114 | 63.5 | 21:15:54
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2114 | 243.5 | 21:18:54
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2114 | 298.9 | 21:19:50
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2114 | 443.9 | 21:22:15
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2114 | 458.6 | 21:22:29
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2114 | 517.2 | 21:23:28
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2114 | 550.1 | 21:24:01
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2114 | 682.0 | 21:26:13
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2114 | 759.9 | 21:27:31
+ELD load step (>=6 raw, ~+2.4 A) | drive_2026_11_26_2114 | 897.2 | 21:29:48
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 308.2 | 21:19:59
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 430.4 | 21:22:01
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 627.8 | 21:25:18
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 630.9 | 21:25:22
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 648.4 | 21:25:39
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 661.7 | 21:25:52
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 686.4 | 21:26:17
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 708.1 | 21:26:39
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 710.1 | 21:26:41
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 727.5 | 21:26:58
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 729.5 | 21:27:00
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 739.4 | 21:27:10
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 767.1 | 21:27:38
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 830.1 | 21:28:41
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 831.1 | 21:28:42
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 847.6 | 21:28:58
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 902.0 | 21:29:53
+ECT false-cold entry (raw +8) | drive_2026_11_26_2114 | 907.0 | 21:29:58
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 293.4 | 21:19:44
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 309.2 | 21:20:00
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 476.6 | 21:22:47
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 631.9 | 21:25:23
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 685.4 | 21:26:16
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 705.0 | 21:26:36
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 709.1 | 21:26:40
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 717.2 | 21:26:48
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 730.6 | 21:27:01
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 731.6 | 21:27:02
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 763.9 | 21:27:35
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 826.0 | 21:28:37
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 832.1 | 21:28:43
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 848.6 | 21:28:59
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 857.5 | 21:29:08
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 903.0 | 21:29:54
+ECT snap back warm (raw -8) | drive_2026_11_26_2114 | 935.3 | 21:30:26
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 243.5 | 21:18:54
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 429.5 | 21:22:00
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 430.6 | 21:22:01
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 458.6 | 21:22:29
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 631.0 | 21:25:22
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 632.1 | 21:25:23
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 654.7 | 21:25:45
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 662.9 | 21:25:54
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 663.9 | 21:25:55
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 704.8 | 21:26:35
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 720.4 | 21:26:51
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 721.5 | 21:26:52
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 722.5 | 21:26:53
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 729.6 | 21:27:00
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 730.7 | 21:27:01
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 830.3 | 21:28:41
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 831.3 | 21:28:42
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 832.3 | 21:28:43
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 833.2 | 21:28:44
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 856.6 | 21:29:07
+IACV step up (>=3 raw) | drive_2026_11_26_2114 | 897.3 | 21:29:48
+link drop (short, engine running) | drive_2026_11_26_2114 | 39.9 | 21:15:31
+link drop (short, engine running) | drive_2026_11_26_2114 | 51.8 | 21:15:43
+link drop (short, engine running) | drive_2026_11_26_2114 | 72.7 | 21:16:03
+link drop (short, engine running) | drive_2026_11_26_2114 | 91.1 | 21:16:22
+link drop (short, engine running) | drive_2026_11_26_2114 | 147.8 | 21:17:19
+link drop (short, engine running) | drive_2026_11_26_2114 | 154.5 | 21:17:25
+link drop (short, engine running) | drive_2026_11_26_2114 | 160.3 | 21:17:31
+link drop (short, engine running) | drive_2026_11_26_2114 | 218.5 | 21:18:29
+link drop (short, engine running) | drive_2026_11_26_2114 | 241.0 | 21:18:52
+link drop (short, engine running) | drive_2026_11_26_2114 | 310.1 | 21:20:01
+link drop (short, engine running) | drive_2026_11_26_2114 | 334.7 | 21:20:25
+link drop (short, engine running) | drive_2026_11_26_2114 | 399.1 | 21:21:30
+link drop (short, engine running) | drive_2026_11_26_2114 | 405.1 | 21:21:36
+link drop (short, engine running) | drive_2026_11_26_2114 | 429.0 | 21:22:00
+link drop (short, engine running) | drive_2026_11_26_2114 | 442.8 | 21:22:14
+link drop (short, engine running) | drive_2026_11_26_2114 | 463.9 | 21:22:35
+link drop (short, engine running) | drive_2026_11_26_2114 | 478.7 | 21:22:49
+link drop (short, engine running) | drive_2026_11_26_2114 | 519.1 | 21:23:30
+link drop (short, engine running) | drive_2026_11_26_2114 | 534.3 | 21:23:45
+link drop (short, engine running) | drive_2026_11_26_2114 | 554.1 | 21:24:05
+link drop (short, engine running) | drive_2026_11_26_2114 | 582.3 | 21:24:33
+link drop (short, engine running) | drive_2026_11_26_2114 | 600.9 | 21:24:52
+link drop (short, engine running) | drive_2026_11_26_2114 | 653.6 | 21:25:44
+link drop (short, engine running) | drive_2026_11_26_2114 | 666.7 | 21:25:57
+link drop (short, engine running) | drive_2026_11_26_2114 | 713.2 | 21:26:44
+link drop (short, engine running) | drive_2026_11_26_2114 | 737.1 | 21:27:08
+link drop (short, engine running) | drive_2026_11_26_2114 | 754.6 | 21:27:25
+link drop (short, engine running) | drive_2026_11_26_2114 | 772.5 | 21:27:43
+link drop (short, engine running) | drive_2026_11_26_2114 | 788.8 | 21:28:00
+link drop (short, engine running) | drive_2026_11_26_2114 | 824.8 | 21:28:35
+link drop (short, engine running) | drive_2026_11_26_2114 | 832.9 | 21:28:44
+link drop (short, engine running) | drive_2026_11_26_2114 | 852.2 | 21:29:03
+link drop (short, engine running) | drive_2026_11_26_2114 | 883.2 | 21:29:34
+link drop (short, engine running) | drive_2026_11_26_2114 | 906.7 | 21:29:57
+link drop (short, engine running) | drive_2026_11_26_2114 | 922.3 | 21:30:13
+link drop (short, engine running) | drive_2026_11_26_2114 | 952.7 | 21:30:43
+knock byte 1->2 | drive_2026_11_26_2114 | 52.2 | 21:15:43
+knock byte 1->2 | drive_2026_11_26_2114 | 58.5 | 21:15:49
+knock byte 1->2 | drive_2026_11_26_2114 | 60.7 | 21:15:51
+knock byte 1->2 | drive_2026_11_26_2114 | 142.1 | 21:17:13
+knock byte 1->2 | drive_2026_11_26_2114 | 196.1 | 21:18:07
+knock byte 1->2 | drive_2026_11_26_2114 | 209.9 | 21:18:21
+knock byte 1->2 | drive_2026_11_26_2114 | 220.9 | 21:18:32
+knock byte 1->2 | drive_2026_11_26_2114 | 272.6 | 21:19:23
+knock byte 1->2 | drive_2026_11_26_2114 | 323.2 | 21:20:14
+knock byte 1->2 | drive_2026_11_26_2114 | 333.5 | 21:20:24
+knock byte 1->2 | drive_2026_11_26_2114 | 393.7 | 21:21:24
+knock byte 1->2 | drive_2026_11_26_2114 | 431.7 | 21:22:02
+knock byte 1->2 | drive_2026_11_26_2114 | 438.1 | 21:22:09
+knock byte 1->2 | drive_2026_11_26_2114 | 445.1 | 21:22:16
+knock byte 1->2 | drive_2026_11_26_2114 | 452.5 | 21:22:23
+knock byte 1->2 | drive_2026_11_26_2114 | 463.0 | 21:22:34
+knock byte 1->2 | drive_2026_11_26_2114 | 623.1 | 21:25:14
+knock byte 1->2 | drive_2026_11_26_2114 | 633.4 | 21:25:24
+knock byte 1->2 | drive_2026_11_26_2114 | 790.2 | 21:28:01
+knock byte 1->2 | drive_2026_11_26_2114 | 813.0 | 21:28:24
+knock byte 1->2 | drive_2026_11_26_2114 | 817.1 | 21:28:28
+knock byte 1->2 | drive_2026_11_26_2114 | 832.4 | 21:28:43
+knock byte 1->2 | drive_2026_11_26_2114 | 883.5 | 21:29:34
+x2F increments | drive_2026_11_26_2114 | 517.3 | 21:23:28
+x2F increments | drive_2026_11_26_2114 | 549.2 | 21:24:00
+x2F increments | drive_2026_11_26_2114 | 584.7 | 21:24:35
+x2F increments | drive_2026_11_26_2114 | 793.3 | 21:28:04
+x2F increments | drive_2026_11_26_2114 | 827.2 | 21:28:38
