@@ -1,0 +1,13 @@
+# Golden-test fixtures are compared byte for byte with output from the Python
+# app: never convert their line endings on checkout.
+src/**/__fixtures__/** -text
+src/**/fixtures/** -text
+src/**/golden/** -text
+src/**/*.golden.* -text
+*.json -text
+*.toml -text
+*.csv -text
+*.msl -text
+*.mlg binary
+*.db binary
+*.HHD binary

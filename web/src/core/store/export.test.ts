@@ -49,7 +49,8 @@ describe('golden files from the Python exporter', () => {
   it('CSV and MSL: every row the same, the header the same but for Python reprs', async () => {
     const log = await pythonSim();
     const cmp = (mine: string, theirs: string) => {
-      const a = mine.split('\n'), b = theirs.split('\n');
+      // line endings differ between checkouts (git normalises the fixture); compare lines
+      const a = mine.split(/\r?\n/), b = theirs.split(/\r?\n/);
       expect(a.length).toBe(b.length);
       a.forEach((line, i) => { if (!unstable(line) || !unstable(b[i]!)) expect(line).toBe(b[i]); });
     };

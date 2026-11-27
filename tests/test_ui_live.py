@@ -138,7 +138,9 @@ def test_car_map_fills_the_panels_like_the_artboard(shell, app):
     assert live.raw_button.text == f"Raw bytes ({len(drawer)}) ▸"
     # names and the web's notes
     assert tile(live, "tps")._label == "Throttle" and tile(live, "tps")._note_src == "opening, closed = 0"
-    assert tile(live, "ect")._note_src == "reads ~14 °C low?" and tile(live, "ect")._note_hot
+    # in the display unit: "reads ~14 °C low?" metric, "~25 °F low?" US (units can be left set by other tests)
+    note = tile(live, "ect")._note_src
+    assert note.endswith(" low?") and ("°C" in note or "°F" in note) and tile(live, "ect")._note_hot
     assert tile(live, "map")._note_src.startswith("baro ")   # in the display unit
     assert tile(live, "ltft")._note_src == "total +3 %" and not tile(live, "ltft")._note_hot
     assert tile(live, "vss")._note_src == "gear N"
