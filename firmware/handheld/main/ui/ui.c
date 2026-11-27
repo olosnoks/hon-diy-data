@@ -148,17 +148,17 @@ static void build(void)
     show_stop();
 }
 
-void ui_create(bool night)
+void ui_create(bool darker)
 {
     memset(&st, 0, sizeof(st));
     st.acked_ch = -1;
-    ui_theme_set(night);
+    ui_theme_set(darker);
     ui_units_set(hh_display_units());       /* HANDHELD.CFG units = us | metric */
     ui_map_reset();
     build();
 }
 
-bool ui_night(void) { return ui_theme_night(); }
+bool ui_darker(void) { return ui_theme_darker(); }
 
 void ui_goto(int stop)
 {
@@ -272,7 +272,7 @@ static void update_hint(void)
 {
     uint32_t held = ui_btn_held_ms(&st.btn, st.now);
     bool alarm = st.banner_level >= 2 && !st.acked;
-    const char *far = alarm ? "ACK ALARM" : ui_theme_night() ? "DAY" : "NIGHT";
+    const char *far = alarm ? "ACK ALARM" : ui_theme_darker() ? "DRACULA" : "DARKER";
     char text[64];
     lv_color_t ground = TK(sunk), ink = TK(fg);
     int fill = 0;
@@ -286,11 +286,11 @@ static void update_hint(void)
         fill = (int)(held * UI_W / UI_BTN_LONG_MS);
     } else if (st.note && st.now - st.t_note < NOTE_MS) {
         snprintf(text, sizeof(text), "%s", st.note);
-        ground = TK(fg); ink = TK(bg);
+        ground = TK(accent); ink = TK(on_accent);   /* no light surfaces: accent, as while held */
     } else if (st.flash_on) {
         snprintf(text, sizeof(text), "PRESS  dismiss");
     } else {
-        snprintf(text, sizeof(text), "PRESS next    HOLD 1s mark    HOLD 3s %s", alarm ? "ack" : ui_theme_night() ? "day" : "night");
+        snprintf(text, sizeof(text), "PRESS next    HOLD 1s mark    HOLD 3s %s", alarm ? "ack" : ui_theme_darker() ? "dracula" : "darker");
     }
     ui_set_text(w.hint_text, text);
     if (!lv_color_eq(lv_obj_get_style_bg_color(w.hint, 0), ground)) ui_fill(w.hint, ground);
@@ -399,9 +399,9 @@ static void on_button(ui_btn_event_t ev, bool back)
             st.acked_ch = st.banner_ch;
             note("ALARM ACKNOWLEDGED");
         } else {
-            ui_theme_set(!ui_theme_night());
+            ui_theme_set(!ui_theme_darker());
             build();
-            ui_port_theme_changed(ui_theme_night());
+            ui_port_theme_changed(ui_theme_darker());
             st.t_data = st.now - UI_DATA_PERIOD_MS;
         }
         break;

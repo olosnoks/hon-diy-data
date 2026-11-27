@@ -485,22 +485,32 @@ bottom that says what the button does right now.
 
 | Gauges | Sensors |
 |---|---|
-| ![Gauges](../firmware/handheld/docs/screenshots/day-1-gauges.png) | ![Sensors page 1](../firmware/handheld/docs/screenshots/day-2-sensors-1.png) |
+| ![Gauges](../firmware/handheld/docs/screenshots/dracula-1-gauges.png) | ![Sensors page 1](../firmware/handheld/docs/screenshots/dracula-2-sensors-1.png) |
 | Five big values (RPM, speed, coolant, MAP, battery) and the stall catcher | Every channel, 12 to a page (3 x 4). More channels, more pages |
 
 | GPS trip | Map |
 |---|---|
-| ![GPS trip](../firmware/handheld/docs/screenshots/day-4-gps.png) | ![Map](../firmware/handheld/docs/screenshots/day-map-downtown.png) |
+| ![GPS trip](../firmware/handheld/docs/screenshots/dracula-4-gps.png) | ![Map](../firmware/handheld/docs/screenshots/dracula-map-downtown.png) |
 | Speed, heading, position, fix and satellites, HDOP, trip time and distance, drive number | Offline road map centred on the car, the drive's trail, stall and marker pins ([below](#the-map-screen)) |
 
 | Link | |
 |---|---|
-| ![Link](../firmware/handheld/docs/screenshots/day-6-link.png) | |
+| ![Link](../firmware/handheld/docs/screenshots/dracula-6-link.png) | |
 | Link state, backend, ECU id, read rate, GPS OK/BAD, errors, SD card, log size, stall catcher, last stall | |
 
-Night theme:
+The screen uses the app's two themes: **Dracula** (the default, above) and
+**Darker** (the same colours on darker grounds, below; hold the button 3 s to
+switch). Text is light on dark in both; large values stay bold for a TN panel
+in sun, and the comment blue (#6272A4) is only ever a border, never text.
+Text on the red alarm fill is #191A21 in both themes (5.5:1 in sun). This
+is the CYD's own choice and differs from the desktop and web theme on
+purpose: there the alarm text is the theme background, #282A36 in Dracula,
+which is only 4.53:1 on the red.
+The choice is kept in the handheld's own memory across power cycles; a unit
+that was left on the old Night theme comes up in Darker (Darker also keeps
+Night's dimmer backlight), and one on Daylight comes up in Dracula.
 
-![Gauges, night](../firmware/handheld/docs/screenshots/night-1-gauges.png)
+![Gauges, Darker](../firmware/handheld/docs/screenshots/darker-1-gauges.png)
 
 The order is Gauges, the Sensors pages, GPS trip, Map, Link, and round again.
 
@@ -541,22 +551,22 @@ kPa by default, the handheld shows inHg.
 
 | Downtown, 25 km/h (1/4) | I-55, 70 mph (4/4) |
 |---|---|
-| ![Map downtown](../firmware/handheld/docs/screenshots/day-map-downtown.png) | ![Map on I-55](../firmware/handheld/docs/screenshots/day-map-i55.png) |
-| ![Map downtown, night](../firmware/handheld/docs/screenshots/night-map-downtown.png) | ![Map on I-55, night](../firmware/handheld/docs/screenshots/night-map-i55.png) |
+| ![Map downtown](../firmware/handheld/docs/screenshots/dracula-map-downtown.png) | ![Map on I-55](../firmware/handheld/docs/screenshots/dracula-map-i55.png) |
+| ![Map downtown, Darker](../firmware/handheld/docs/screenshots/darker-map-downtown.png) | ![Map on I-55, Darker](../firmware/handheld/docs/screenshots/darker-map-i55.png) |
 
-North is up and the car is in the middle. Roads are black on white (white on
-black at night), wider and heavier the bigger the road; interstates have a
-light centre line at the closer zooms. Water is blue, railways are dashed
-grey lines, a fuel station is a small pump.
+North is up and the car is in the middle. Roads are light on the dark ground
+(the theme's foreground on its background), wider and heavier the bigger the road; interstates have a
+light centre line at the closer zooms. Water is a muted blue, railways are dashed
+lines in the border blue, a fuel station is a small pump.
 
 | On the map | Means |
 |---|---|
-| Blue arrow | The car, moving, pointing where it is going |
-| Blue dot | The car, stopped (under 5 km/h) |
+| Purple arrow | The car, moving, pointing where it is going |
+| Purple dot | The car, stopped (under 5 km/h) |
 | Hollow square | No GPS fix: the last position known |
-| Blue crumbs | This drive's trail (the last 12.8 km) |
+| Purple crumbs | This drive's trail (the last 12.8 km) |
 | Red octagon | A stall caught on this drive, where it happened |
-| Blue diamond | A MARK on this drive |
+| Purple diamond | A MARK on this drive |
 | Boxed `I-55`, `US 51` | Route numbers, on the road |
 | Plain names | Street names (closest zoom), towns and cities |
 
@@ -572,7 +582,7 @@ this screen *holding* it 1 s steps back a screen.
 
 The scale bar (bottom left) is in miles, feet when short (km and m with `units = metric`).
 
-**No GPS fix.** A black band across the top says `NO GPS FIX`, the car is a
+**No GPS fix.** A purple (accent) band across the top says `NO GPS FIX`, the car is a
 hollow square, and the map stays at the last fix. After a power-up without a
 fix yet, it shows the position kept from the last drive (kept in the
 handheld's own memory when a drive ends), or Jackson if there has never been
@@ -580,7 +590,7 @@ a fix.
 
 | No fix | No map on the card |
 |---|---|
-| ![No fix](../firmware/handheld/docs/screenshots/day-map-nofix.png) | ![No map](../firmware/handheld/docs/screenshots/day-map-nomap.png) |
+| ![No fix](../firmware/handheld/docs/screenshots/dracula-map-nofix.png) | ![No map](../firmware/handheld/docs/screenshots/dracula-map-nomap.png) |
 
 **No map.** Without `MAP/` on the card the screen says so and gives the
 `map-build` command. Past the map's edge a band says `OUTSIDE THE MAP`.
@@ -614,15 +624,15 @@ is talking but cannot see the sky.
 |---|---|
 | Short (under 1 s) | Next screen |
 | Hold 1 s, then release | **MARK**: tags this moment in the log |
-| Hold 3 s | Acknowledge the alarm if one is blinking; otherwise switch Day / Night |
+| Hold 3 s | Acknowledge the alarm if one is blinking; otherwise switch Dracula / Darker |
 | Any press | Dismisses the stall-captured screen |
 
 The hint strip shows which gesture is armed as you hold: `HOLD FOR MARK`,
-then `RELEASE = MARK   KEEP HOLDING = NIGHT`.
+then `RELEASE = MARK   KEEP HOLDING = DARKER` (or `DRACULA`).
 
 | Held 0.6 s | Held 1.8 s |
 |---|---|
-| ![Hold 0.6 s](../firmware/handheld/docs/screenshots/day-hold-0.6s.png) | ![Hold 1.8 s](../firmware/handheld/docs/screenshots/day-hold-1.8s.png) |
+| ![Hold 0.6 s](../firmware/handheld/docs/screenshots/dracula-hold-0.6s.png) | ![Hold 1.8 s](../firmware/handheld/docs/screenshots/dracula-hold-1.8s.png) |
 
 The mark is placed at the moment the button went down, not when it was
 released.
@@ -642,7 +652,7 @@ above 400, a stall is RPM below 50, or no reply from the ECU for 1 second.
 
 | Stall captured | Afterwards |
 |---|---|
-| ![Stall captured](../firmware/handheld/docs/screenshots/day-stall-captured.png) | ![After](../firmware/handheld/docs/screenshots/day-stall-after.png) |
+| ![Stall captured](../firmware/handheld/docs/screenshots/dracula-stall-captured.png) | ![After](../firmware/handheld/docs/screenshots/dracula-stall-after.png) |
 
 At a stall it writes the last 30 seconds from memory to
 `CAPTURES/Cnnnnnn.HHD` at once, then carries on for 10 more. The drive file
@@ -654,11 +664,11 @@ warning or alarm replaces the top bar with a banner:
 
 | Warning | Alarm |
 |---|---|
-| ![Warning](../firmware/handheld/docs/screenshots/day-warn-gauges.png) | ![Alarm](../firmware/handheld/docs/screenshots/day-alarm-gauges.png) |
+| ![Warning](../firmware/handheld/docs/screenshots/dracula-warn-gauges.png) | ![Alarm](../firmware/handheld/docs/screenshots/dracula-alarm-gauges.png) |
 
 When the ECU stops answering:
 
-![Link lost](../firmware/handheld/docs/screenshots/day-linklost-gauges.png)
+![Link lost](../firmware/handheld/docs/screenshots/dracula-linklost-gauges.png)
 
 If Honda reads stay unanswered for `iso_after_s` seconds, the handheld tries
 standard OBD2 (ISO 9141-2) instead and logs PIDs. The link then reads

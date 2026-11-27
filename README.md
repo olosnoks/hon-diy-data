@@ -51,7 +51,7 @@ in the [user guide](docs/user-guide.md).
 
 The handheld, from its PC simulator:
 
-![Handheld gauges](firmware/handheld/docs/screenshots/day-1-gauges.png)
+![Handheld gauges](firmware/handheld/docs/screenshots/dracula-1-gauges.png)
 
 ## What is in it
 

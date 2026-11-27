@@ -37,7 +37,7 @@ static int theme_changes;
 static uint32_t tick_cb(void) { return clock_ms; }
 static int64_t stub_clock(void) { return (int64_t)clock_ms * 1000; }
 
-void ui_port_theme_changed(bool night) { (void)night; theme_changes++; }
+void ui_port_theme_changed(bool darker) { (void)darker; theme_changes++; }
 
 /* ---- the map: the worker runs in place, the "NVS" is two variables ------------- */
 static const char *map_dir = "testmap/MAP";
@@ -95,22 +95,22 @@ static void press(uint32_t ms)
     button = false; run(100);
 }
 
-static void start(bool night, hh_stub_scene_t scene)
+static void start(bool darker, hh_stub_scene_t scene)
 {
     hh_stub_set_scene(scene);
     hh_stub_set_route(HH_ROUTE_NONE, 0);
-    ui_create(night);
+    ui_create(darker);
     run(300);
 }
 
 static int map_stop(void) { return ui_sensor_pages() + 2; }
 
 /* drive a route for a while, then open the Map screen */
-static void start_map(bool night, hh_stub_scene_t scene, hh_stub_route_t route, double start_m, uint32_t drive_ms)
+static void start_map(bool darker, hh_stub_scene_t scene, hh_stub_route_t route, double start_m, uint32_t drive_ms)
 {
     hh_stub_set_scene(HH_SCENE_DRIVE);
     hh_stub_set_route(route, start_m);
-    ui_create(night);
+    ui_create(darker);
     run(drive_ms);
     hh_stub_set_scene(scene);
     ui_goto(map_stop());
@@ -201,9 +201,9 @@ static int shots(const char *dir)
 {
     int rc = 0;
     char name[64], title[24];
-    for (int night = 0; night < 2; night++) {
-        const char *th = night ? "night" : "day";
-        start(night, HH_SCENE_DRIVE);
+    for (int darker = 0; darker < 2; darker++) {
+        const char *th = darker ? "darker" : "dracula";
+        start(darker, HH_SCENE_DRIVE);
         run(4000);
         for (int stop = 0; stop < ui_stops(); stop++) {
             ui_goto(stop);
@@ -224,7 +224,7 @@ static int shots(const char *dir)
             {HH_SCENE_CONNECTING, 3, "connecting-gps"}, {HH_SCENE_CONNECTING, 5, "connecting-link"},
         };
         for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
-            start(night, HH_SCENE_DRIVE);
+            start(darker, HH_SCENE_DRIVE);
             ui_goto(states[i].stop);
             run(500);
             hh_stub_set_scene(states[i].scene);
@@ -235,7 +235,7 @@ static int shots(const char *dir)
         }
 
         /* stall: the full-screen capture, then what stays after it is dismissed */
-        start(night, HH_SCENE_DRIVE);
+        start(darker, HH_SCENE_DRIVE);
         run(500);
         hh_stub_set_scene(HH_SCENE_STALL);
         run(STALL_SHOT_MS);
@@ -251,7 +251,7 @@ static int shots(const char *dir)
 
         /* the Map screen: downtown at walking pace with a mark and a stall on the way, I-55 at
          * 70 mph, no fix (last known position), no map on the card */
-        start_map(night, HH_SCENE_DRIVE, HH_ROUTE_STATE_ST, 1500, 30000);
+        start_map(darker, HH_SCENE_DRIVE, HH_ROUTE_STATE_ST, 1500, 30000);
         press(1500);                                 /* a marker here */
         run(25000);
         hh_stub_set_scene(HH_SCENE_STALL);           /* a stall here */
@@ -263,12 +263,12 @@ static int shots(const char *dir)
         rc |= save_png(dir, name);
         check_layout(name);
 
-        start_map(night, HH_SCENE_DRIVE, HH_ROUTE_I55, 2500, 75000);
+        start_map(darker, HH_SCENE_DRIVE, HH_ROUTE_I55, 2500, 75000);
         snprintf(name, sizeof(name), "%s-map-i55", th);
         rc |= save_png(dir, name);
         check_layout(name);
 
-        start_map(night, HH_SCENE_CONNECTING, HH_ROUTE_STATE_ST, 1500, 20000);
+        start_map(darker, HH_SCENE_CONNECTING, HH_ROUTE_STATE_ST, 1500, 20000);
         run(1000);
         snprintf(name, sizeof(name), "%s-map-nofix", th);
         rc |= save_png(dir, name);
@@ -277,7 +277,7 @@ static int shots(const char *dir)
         const char *keep = map_dir;
         map_dir = "testmap/none";
         mapsvc_reopen();
-        start_map(night, HH_SCENE_DRIVE, HH_ROUTE_STATE_ST, 1500, 2000);
+        start_map(darker, HH_SCENE_DRIVE, HH_ROUTE_STATE_ST, 1500, 2000);
         snprintf(name, sizeof(name), "%s-map-nomap", th);
         rc |= save_png(dir, name);
         check_layout(name);
@@ -285,7 +285,7 @@ static int shots(const char *dir)
         mapsvc_reopen();
 
         /* the hint strip while the button is held, and after a mark */
-        start(night, HH_SCENE_DRIVE);
+        start(darker, HH_SCENE_DRIVE);
         button = true;
         run(600);
         snprintf(name, sizeof(name), "%s-hold-0.6s", th);
@@ -334,20 +334,23 @@ static double contrast(uint32_t a, uint32_t b, bool q565)
 static void test_contrast(void)
 {
     printf("contrast (WCAG 2.x), sRGB / as RGB565:\n");
-    const ui_tokens_t *themes[] = {&UI_DAYLIGHT, &UI_NIGHT};
+    const ui_tokens_t *themes[] = {&UI_DRACULA, &UI_DARKER};
     for (int t = 0; t < 2; t++) {
         ui_pair_t pairs[24];
         int n = ui_theme_pairs(themes[t], pairs, 24);
         for (int i = 0; i < n; i++) {
             double a = contrast(pairs[i].fg, pairs[i].bg, false), b = contrast(pairs[i].fg, pairs[i].bg, true);
-            printf("  %-9s %-22s %5.2f / %5.2f\n", t ? "night" : "daylight", pairs[i].name, a, b);
-            CHECK(a >= 7.0 && b >= 7.0, "%s %s is below 7:1", t ? "night" : "daylight", pairs[i].name);
+            printf("  %-8s %-24s %5.2f / %5.2f  (%.1f:1)\n", t ? "darker" : "dracula", pairs[i].name, a, b, (double)pairs[i].min);
+            CHECK(a >= pairs[i].min && b >= pairs[i].min, "%s %s is below %.1f:1", t ? "darker" : "dracula", pairs[i].name,
+                  (double)pairs[i].min);
         }
         n = ui_map_pairs(themes[t], pairs, 24);
         for (int i = 0; i < n; i++) {
             double a = contrast(pairs[i].fg, pairs[i].bg, false), b = contrast(pairs[i].fg, pairs[i].bg, true);
-            printf("  %-9s %-22s %5.2f / %5.2f  (map graphics, 3:1)\n", t ? "night" : "daylight", pairs[i].name, a, b);
-            CHECK(a >= 3.0 && b >= 3.0, "%s %s is below 3:1", t ? "night" : "daylight", pairs[i].name);
+            printf("  %-8s %-24s %5.2f / %5.2f  (graphics, %.1f:1)\n", t ? "darker" : "dracula", pairs[i].name, a, b,
+                   (double)pairs[i].min);
+            CHECK(a >= pairs[i].min && b >= pairs[i].min, "%s %s is below %.1f:1", t ? "darker" : "dracula", pairs[i].name,
+                  (double)pairs[i].min);
         }
     }
 }
@@ -460,16 +463,16 @@ static void test_flow(void)
     CHECK(hh_stub_marks() == marks + 1, "1.5 s press marks once");
     press(3300);
     CHECK(hh_stub_marks() == marks + 1, "3 s press does not mark");
-    CHECK(ui_night() && theme_changes == changes + 1, "3 s press toggles the theme when no alarm is blinking");
+    CHECK(ui_darker() && theme_changes == changes + 1, "3 s press toggles the theme when no alarm is blinking");
     press(3300);
-    CHECK(!ui_night(), "and back");
+    CHECK(!ui_darker(), "and back");
 
     hh_stub_set_scene(HH_SCENE_ALARM);
     run(300);
     press(3300);
-    CHECK(hh_stub_acks() == acks + 1 && !ui_night(), "3 s press acknowledges a blinking alarm instead");
+    CHECK(hh_stub_acks() == acks + 1 && !ui_darker(), "3 s press acknowledges a blinking alarm instead");
     press(3300);
-    CHECK(hh_stub_acks() == acks + 1 && ui_night(), "once acknowledged, 3 s is the theme again");
+    CHECK(hh_stub_acks() == acks + 1 && ui_darker(), "once acknowledged, 3 s is the theme again");
 
     /* every stop, every scene, both themes, both unit sets (US: the longer
      * °F, inHg, gal/h, mph): nothing cut off */
@@ -477,16 +480,16 @@ static void test_flow(void)
                                              HH_SCENE_LINK_LOST, HH_SCENE_CONNECTING};
     for (int units = HH_UNITS_US; units >= HH_UNITS_METRIC; units--) {
         hh_stub_set_units(units);
-        for (int night = 0; night < 2; night++)
+        for (int darker = 0; darker < 2; darker++)
             for (size_t s = 0; s < sizeof(scenes) / sizeof(scenes[0]); s++) {
-                start(night, HH_SCENE_DRIVE);
+                start(darker, HH_SCENE_DRIVE);
                 hh_stub_set_scene(scenes[s]);
                 run(300);
                 if (scenes[s] == HH_SCENE_STALL) check_layout("stall screen");
                 press(100);
                 for (int stop = 0; stop < ui_stops(); stop++) {
                     char where[64];
-                    snprintf(where, sizeof(where), "%s %s scene %d stop %d", units ? "us" : "metric", night ? "night" : "day",
+                    snprintf(where, sizeof(where), "%s %s scene %d stop %d", units ? "us" : "metric", darker ? "darker" : "dracula",
                              (int)scenes[s], stop);
                     ui_goto(stop);
                     run(1200);
@@ -580,7 +583,7 @@ static void test_map(void)
     CHECK(!mi.banner && !mi.message, "no banner, no message with a fix and a map");
     CHECK(mi.n_labels >= 3 && has_label(&mi, "US 51"), "labels (%d): %s, %s, %s ...",
           mi.n_labels, mi.labels[0], mi.labels[1], mi.labels[2]);
-    int ink = body_pixels(UI_DAYLIGHT.fg), water = body_pixels(UI_DAYLIGHT.water);
+    int ink = body_pixels(UI_DRACULA.fg), water = body_pixels(UI_DRACULA.water);
     CHECK(ink > 4000, "streets drawn in fg (%d px)", ink);
     printf("  downtown: %d labels, %d px of road ink, %d px of water, worker %u us\n", mi.n_labels, ink, water,
            (unsigned)mi.render_us);
@@ -604,7 +607,7 @@ static void test_map(void)
     run(15000);                                      /* drive on: the car no longer covers it */
     ui_map_info(&mi);
     CHECK(mi.n_pins == 2, "a stall drops a pin (%d)", mi.n_pins);
-    CHECK(body_pixels(UI_DAYLIGHT.alarm) > 40, "the stall pin is drawn (an octagon in the alarm colour)");
+    CHECK(body_pixels(UI_DRACULA.alarm) > 40, "the stall pin is drawn (an octagon in the alarm colour)");
 
     /* the second button: zoom steps, then back to AUTO; a hold steps back a screen */
     for (int i = 0; i < 5; i++) {
@@ -616,15 +619,15 @@ static void test_map(void)
     button_back = true; run(1300); button_back = false; run(200);
     CHECK(!strcmp(title_text(), "GPS TRIP"), "holding the second button steps back (%s)", title_text());
 
-    /* the theme: the same picture in Night colours */
+    /* the theme: the same picture in Darker colours */
     ui_goto(map_stop());
     run(1200);
     press(3300);
     run(1500);
     ui_map_info(&mi);
-    CHECK(ui_night() && mi.status == MAPSVC_OK && body_pixels(UI_NIGHT.fg) > 4000 &&
-          body_pixels(UI_NIGHT.bg) > UI_W * UI_BODY_H / 2 && body_pixels(UI_NIGHT.water) > 1000,
-          "Night: white roads on black, Night water");
+    CHECK(ui_darker() && mi.status == MAPSVC_OK && body_pixels(UI_DARKER.fg) > 4000 &&
+          body_pixels(UI_DARKER.bg) > UI_W * UI_BODY_H / 2 && body_pixels(UI_DARKER.water) > 1000,
+          "Darker: fg roads on the Darker ground, water");
     press(3300);
 
     /* I-55 at 70 mph: the widest level */

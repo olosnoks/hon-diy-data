@@ -1,47 +1,53 @@
 #include "ui_theme.h"
 
-/* HANDOFF.md section 2, unchanged. on_warn / on_alarm are the text colours the
- * handoff lists against each fill. */
-const ui_tokens_t UI_DAYLIGHT = {
-    .bg = 0xFFFFFF, .panel = 0xFFFFFF, .sunk = 0xE9ECEF,
-    .fg = 0x000000, .fg2 = 0x1F2428,
-    .rule = 0x000000, .rule2 = 0x5A6570,
-    .accent = 0x0A3FA8, .on_accent = 0xFFFFFF,
-    .warn = 0xFFD000, .on_warn = 0x000000,
-    .alarm = 0xB00020, .on_alarm = 0xFFFFFF,
-    .ok = 0x00572D, .unver = 0x7A3300,
-    .water = 0x5B8FC7,
+/* web/src/ui/theme.ts, unchanged where it has the token. rule and rule2 are
+ * both Dracula's comment blue #6272A4 (borders, dividers, bar outlines, map
+ * railways: never text); its "line" #44475A is too faint on a TN panel in
+ * sun. water is the Map screen's own: a muted blue between comment and cyan,
+ * 3:1 against bg with the fg roads still 3:1 on it. on_alarm is the CYD's
+ * own, on purpose: #191A21 (Darker's bg) in both themes, 5.5:1 on the red
+ * fill for a TN panel in sun, where the desktop/web theme's bg #282A36 is
+ * only 4.53:1. */
+const ui_tokens_t UI_DRACULA = {
+    .bg = 0x282A36, .panel = 0x21222C, .sunk = 0x343746,
+    .fg = 0xF8F8F2, .fg2 = 0xC5C8D6,
+    .rule = 0x6272A4, .rule2 = 0x6272A4,
+    .accent = 0xBD93F9, .on_accent = 0x282A36,
+    .warn = 0xF1FA8C, .on_warn = 0x282A36,
+    .alarm = 0xFF5555, .on_alarm = 0x191A21,
+    .ok = 0x50FA7B, .unver = 0xFFB86C,
+    .water = 0x55809F,
 };
 
-const ui_tokens_t UI_NIGHT = {
-    .bg = 0x000000, .panel = 0x0B0E11, .sunk = 0x1A1F25,
-    .fg = 0xFFFFFF, .fg2 = 0xD6DCE2,
-    .rule = 0x8B96A1, .rule2 = 0x8B96A1,
-    .accent = 0x6CB6FF, .on_accent = 0x000000,
-    .warn = 0xFFC400, .on_warn = 0x000000,
-    .alarm = 0xFF7A66, .on_alarm = 0x000000,
-    .ok = 0x4ADE80, .unver = 0xFFB454,
-    .water = 0x2F6496,
+const ui_tokens_t UI_DARKER = {
+    .bg = 0x191A21, .panel = 0x121318, .sunk = 0x21222C,
+    .fg = 0xF8F8F2, .fg2 = 0xC5C8D6,
+    .rule = 0x6272A4, .rule2 = 0x6272A4,
+    .accent = 0xBD93F9, .on_accent = 0x191A21,
+    .warn = 0xF1FA8C, .on_warn = 0x191A21,
+    .alarm = 0xFF5555, .on_alarm = 0x191A21,
+    .ok = 0x50FA7B, .unver = 0xFFB86C,
+    .water = 0x55809F,
 };
 
-static bool night;
+static bool darker;
 
-void ui_theme_set(bool n) { night = n; }
-bool ui_theme_night(void) { return night; }
-const ui_tokens_t *ui_tokens(void) { return night ? &UI_NIGHT : &UI_DAYLIGHT; }
+void ui_theme_set(bool d) { darker = d; }
+bool ui_theme_darker(void) { return darker; }
+const ui_tokens_t *ui_tokens(void) { return darker ? &UI_DARKER : &UI_DRACULA; }
 
 int ui_theme_pairs(const ui_tokens_t *t, ui_pair_t *out, int max)
 {
     const ui_pair_t pairs[] = {
-        {"fg on bg", t->fg, t->bg},           {"fg on panel", t->fg, t->panel},
-        {"fg on sunk", t->fg, t->sunk},       {"fg2 on bg", t->fg2, t->bg},
-        {"fg2 on panel", t->fg2, t->panel},   {"fg2 on sunk", t->fg2, t->sunk},
-        {"on_accent on accent", t->on_accent, t->accent},
-        {"on_warn on warn", t->on_warn, t->warn},
-        {"on_alarm on alarm", t->on_alarm, t->alarm},
-        {"bg on fg (inverted)", t->bg, t->fg},
-        {"unver on panel", t->unver, t->panel}, {"unver on sunk", t->unver, t->sunk},
-        {"ok on bg", t->ok, t->bg},           {"alarm on bg", t->alarm, t->bg},
+        {"fg on bg", t->fg, t->bg, 7},           {"fg on panel", t->fg, t->panel, 7},
+        {"fg on sunk", t->fg, t->sunk, 7},       {"fg2 on bg", t->fg2, t->bg, 7},
+        {"fg2 on panel", t->fg2, t->panel, 7},   {"fg2 on sunk", t->fg2, t->sunk, 7},
+        {"on_accent on accent", t->on_accent, t->accent, 4.5f},
+        {"on_warn on warn", t->on_warn, t->warn, 7},
+        {"on_alarm on alarm", t->on_alarm, t->alarm, 5.5f},
+        {"panel on ok (marker)", t->panel, t->ok, 7}, {"panel on unver (marker)", t->panel, t->unver, 7},
+        {"unver on panel", t->unver, t->panel, 4.5f}, {"unver on sunk", t->unver, t->sunk, 4.5f},
+        {"ok on bg", t->ok, t->bg, 4.5f},        {"alarm on bg", t->alarm, t->bg, 4.5f},
     };
     int n = (int)(sizeof(pairs) / sizeof(pairs[0]));
     if (n > max) n = max;
@@ -52,9 +58,10 @@ int ui_theme_pairs(const ui_tokens_t *t, ui_pair_t *out, int max)
 int ui_map_pairs(const ui_tokens_t *t, ui_pair_t *out, int max)
 {
     const ui_pair_t pairs[] = {
-        {"water on bg", t->water, t->bg},     {"road (fg) on water", t->fg, t->water},
-        {"road (fg) on bg", t->fg, t->bg},    {"rail (rule2) on bg", t->rule2, t->bg},
-        {"trail (accent) on bg", t->accent, t->bg}, {"stall pin (alarm) on bg", t->alarm, t->bg},
+        {"water on bg", t->water, t->bg, 3},     {"road (fg) on water", t->fg, t->water, 3},
+        {"road (fg) on bg", t->fg, t->bg, 3},    {"rail (rule2) on bg", t->rule2, t->bg, 3},
+        {"trail (accent) on bg", t->accent, t->bg, 3}, {"stall pin (alarm) on bg", t->alarm, t->bg, 3},
+        {"border (rule) on bg", t->rule, t->bg, 3}, {"border (rule) on panel", t->rule, t->panel, 3},
     };
     int n = (int)(sizeof(pairs) / sizeof(pairs[0]));
     if (n > max) n = max;

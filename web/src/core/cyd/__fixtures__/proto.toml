@@ -1,0 +1,794 @@
+# hondalog address map
+#
+# This is a BEST GUESS for a stock P2P. The addresses and formulas come from
+# kerpz/ArduinoHondaOBD (hobd_uni2), which was tested on a P2T (OBD2) and a
+# chipped P30 (OBD1) - not on a P2P. Every entry is marked "unverified" until
+# you have checked it against the real car. Use Raw tools > Memory scanner to
+# find what really lives where, then edit this file and reconnect.
+#
+# The app reads ~/.config/hondalog/addressmap.toml (copied from the shipped
+# default on first run). Bump "version" when you change it: the version is
+# written into every log header.
+#
+# Channel fields:
+#   name     column name in the CSV (letters, digits, underscore)
+#   label    text on the dashboard
+#   addr     RAM address, 0x00-0xFF
+#   length   bytes to read (1-4)
+#   formula  Python-style expression. x = the bytes as one unsigned
+#            big-endian number, b[0], b[1].. = the single bytes.
+#            Helpers: bit(x, n)  signed(x, bits)  poly(x, c0, c1, ...)
+#                     abs min max round
+#   units    free text
+#   min/max  gauge and plot range
+#   decimals digits after the point
+#   kind     "value" (default) or "flag" (0/1 lamp)
+#   gauge    show a big number on the dashboard
+#   plot     plotted by default
+#   status   "unverified", "verified" or "suspect" (checked and it failed)
+#   rate     poll rate class: "fast", "medium" or "slow". How often the
+#            channel is read (see rate_*_hz under [protocol]). Left out, the
+#            name decides (rpm map tps inj ign are fast, o2 stft ltft vss
+#            medium, anything else slow).
+#   endian   "big" (default) or "little": byte order of x for 2-4 byte channels
+#   source   where the address and formula came from
+#   notes    free text
+#
+# [channel.evidence] is written by the verification tool when you confirm a
+# channel: date, method, result, summary, log, map_version, map_hash, reference.
+#
+# [channel.variants.NAME] overrides addr, length, formula, endian, units,
+# min, max, decimals, rate, label, source, notes for another ECU, or drops the
+# channel there with absent = true. Verified marks never carry over to
+# another ECU: each variant has its own status and evidence.
+#
+# Further down: [constants], [[math]] channels and [[alarm]] rules.
+
+schema = 2
+version = "p2p-guess-2 (kerpz P2T map)"
+ecu = "P2P (confirmed on a 2000 Civic EX, 2026-11-25)"
+ecu_variant = "P2P"                     # which of the [variants] below to load
+
+# The plain channel entries describe the first variant listed here.
+[variants.P2P]
+description = "2000 Civic EX, D16Y8, OBD2B. Confirmed 2026-11-25: Honda reads answer at 10400 baud, only after the wake frame (baud = 10400 under [protocol])."
+
+[variants.P2T]
+description = "kerpz's OBD2 test ECU. The addresses in this file are his."
+protocol = { baud = 9600 }              # kerpz reads his ECU at 9600
+
+[variants.P28]
+description = "Chipped OBD1 P28. Needs the OBD1 datalog link, not this K-line protocol."
+
+# Where the ECU ID bytes are thought to live (kerpz: 20 05 76 0A 5B).
+[ecu_id]
+addr = 0x76
+length = 10
+
+# Framing overrides. Defaults are in hondalog/protocol.py (class Framing).
+# Uncomment to change. init_sequence = "" sends no wake-up bytes.
+[protocol]
+init_sequence = "68 6a f5 af bf b3 b2 c1 db b3 e9"
+init_delay_s = 0.35
+# The stock P2P answers Honda reads at 10400 baud, and only after the wake
+# frame below (init_sequence, sent by default). It does not answer at 9600.
+baud = 10400
+# cmd_read = 0x20
+# reply_header = 0x00        # -1 accepts any first byte
+# reply_timeout_s = 0.2
+# init_sequence = "68 6a f5 af bf b3 b2 c1 db b3 e9"
+# init_delay_s = 0.3
+# max_read_len = 16          # largest block the ECU answers (hondalog-firstcontact probes it)
+# Read rates the scheduler aims for, in reads per second per rate class:
+# rate_fast_hz = 20
+# rate_medium_hz = 5
+# rate_slow_hz = 1
+# Link timing. reply_timeout_s and inter_request_delay_s above are the ceiling
+# and the floor; the link adapts between them from what it measures.
+# adaptive_timing = true
+# min_reply_timeout_s = 0.02
+# inter_byte_timeout_s = 0.05
+# inter_request_delay_s = 0.002
+# max_inter_request_delay_s = 0.05
+# retries = 1                # extra attempts per read before it counts as failed
+
+[[channel]]
+name = "rpm"
+label = "RPM"
+addr = 0x00
+length = 2
+formula = "x / 4"                       # OBD1 ECUs: 1875000 / (x + 1)
+units = "rpm"
+min = 0
+max = 7200
+decimals = 0
+gauge = true
+plot = true
+status = "verified"
+rate = "fast"
+source = "kerpz hobd_uni2 (P2T)"
+
+[channel.variants.P28]            # OBD1 stores the period, not the speed (kerpz)
+formula = "1875000 / (x + 1)"
+source = "kerpz hobd_uni2 (OBD1 branch)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 0C"
+[[channel]]
+name = "vss"
+label = "Speed"
+addr = 0x02
+length = 1
+formula = "x"
+units = "km/h"
+min = 0
+max = 200
+decimals = 0
+gauge = true
+status = "verified"
+rate = "medium"
+source = "kerpz hobd_uni2 (P2T)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 0D"
+[[channel]]
+name = "ect"
+label = "Coolant"
+addr = 0x10
+length = 1
+formula = "poly(x, 155.04149, -3.0414878, 0.03952185, -0.00029383913, 0.0000010792568, -0.0000000015618437)"
+units = "°C"
+min = -20
+max = 120
+decimals = 0
+gauge = true
+status = "verified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 05"
+[[channel]]
+name = "iat"
+label = "Intake air"
+addr = 0x11
+length = 1
+formula = "poly(x, 155.04149, -3.0414878, 0.03952185, -0.00029383913, 0.0000010792568, -0.0000000015618437)"
+units = "°C"
+min = -20
+max = 80
+decimals = 0
+gauge = true
+status = "verified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 0F"
+[[channel]]
+name = "map"
+label = "MAP"
+addr = 0x12
+length = 1
+formula = "x * 0.716 - 5"               # about 101 at key-on/WOT, 25-40 at idle
+units = "kPa"
+min = 0
+max = 110
+decimals = 0
+gauge = true
+plot = true
+status = "verified"
+rate = "fast"
+source = "kerpz hobd_uni2 (P2T)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 0B"
+[[channel]]
+name = "baro"
+label = "Baro"
+addr = 0x13
+length = 1
+formula = "x * 0.716 - 5"
+units = "kPa"
+min = 60
+max = 110
+decimals = 0
+status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+[[channel]]
+name = "tps"
+label = "Throttle"
+addr = 0x14
+length = 1
+formula = "x / 2.55"
+units = "%"
+min = 0
+max = 100
+decimals = 0
+gauge = true
+plot = true
+status = "verified"
+rate = "fast"
+source = "the raw byte is the OBD2 PID 11 byte on the P2P"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "raw byte equals the PID 11 byte: 7.8 % at idle both ways"
+reference = "PID 11"
+[[channel]]
+name = "o2"
+label = "O2"
+addr = 0x15
+length = 1
+formula = "x / 51.3"
+units = "V"
+min = 0
+max = 1.2
+decimals = 2
+gauge = true
+plot = true
+status = "unverified"
+rate = "medium"
+source = "kerpz hobd_uni2 (P2T)"
+
+[[channel]]
+name = "batt"
+label = "Battery"
+addr = 0x17
+length = 1
+formula = "x / 10.45"
+units = "V"
+min = 8
+max = 16
+decimals = 1
+gauge = true
+plot = true
+status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+[[channel]]
+name = "alt_fr"
+label = "Alternator load"
+addr = 0x18
+length = 1
+formula = "x / 2.55"
+units = "%"
+min = 0
+max = 100
+decimals = 0
+status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+[[channel]]
+name = "eld"
+label = "Electrical load"
+addr = 0x19
+length = 1
+formula = "77.06 - x / 2.5371"
+units = "A"
+min = 0
+max = 80
+decimals = 1
+status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+[[channel]]
+name = "stft"
+label = "Short trim"
+addr = 0x20
+length = 1
+formula = "(x / 128 - 1) * 100"
+units = "%"
+min = -30
+max = 30
+decimals = 1
+gauge = true
+status = "verified"
+rate = "medium"
+source = "kerpz hobd_uni2 (P2T)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 06"
+[[channel]]
+name = "ltft"
+label = "Long trim"
+addr = 0x22                             # kerpz uses 0x21 in one place and 0x22 in another
+length = 1
+formula = "(x / 128 - 1) * 100"
+units = "%"
+min = -30
+max = 30
+decimals = 1
+gauge = true
+status = "verified"
+rate = "medium"
+source = "kerpz hobd_uni2 (P2T)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "crosscheck:iso"
+result = "pass"
+summary = "Honda read vs OBD2 PID at warm idle on the 2000 Civic EX P2P (tools/crosscheck_car.py)"
+reference = "PID 07"
+[[channel]]
+name = "inj"
+label = "Injector"
+addr = 0x24
+length = 2
+formula = "x / 250"
+units = "ms"
+min = 0
+max = 16
+decimals = 2
+gauge = true
+status = "unverified"
+rate = "fast"
+source = "kerpz hobd_uni2 (P2T)"
+
+[[channel]]
+name = "ign"
+label = "Ignition"
+addr = 0x26
+length = 1
+formula = "(x - 24) / 4"
+units = "° BTDC"
+min = -10
+max = 50
+decimals = 1
+gauge = true
+status = "unverified"
+rate = "fast"
+source = "kerpz hobd_uni2 (P2T)"
+
+[[channel]]
+name = "ign_limit"
+label = "Ignition limit"
+addr = 0x27
+length = 1
+formula = "(x - 24) / 4"
+units = "°"
+min = -10
+max = 50
+decimals = 1
+status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+[[channel]]
+name = "iacv"
+label = "Idle valve"
+addr = 0x28
+length = 1
+formula = "x / 2.55"
+units = "%"
+min = 0
+max = 100
+decimals = 0
+status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+[[channel]]
+name = "knock"
+label = "Knock"
+addr = 0x3C
+length = 1
+formula = "x / 51"
+units = "V"
+min = 0
+max = 5
+decimals = 2
+status = "unverified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+# ---- status flags -----------------------------------------------------------
+
+[[channel]]
+name = "ac_sw"
+label = "A/C"
+addr = 0x08
+length = 1
+formula = "bit(x, 1)"
+kind = "flag"
+status = "verified"
+rate = "slow"
+source = "P30 (fedorenkoalex) + S2000 (mr-sneezy) bit numbering; confirmed on the 2000 Civic EX P2P; kerpz used bit 2 (the PSP switch)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 1 of 0x08 followed the A/C button twice"
+reference = "A/C button"
+[[channel]]
+name = "vtec"
+label = "VTEC"
+addr = 0x0A
+length = 1
+formula = "bit(x, 2)"
+kind = "flag"
+status = "unverified"
+rate = "slow"
+source = "VTEC solenoid output: P30 (fedorenkoalex) + S2000 (mr-sneezy); kerpz used bit 3. Not yet seen switching on the P2P"
+
+[[channel]]
+name = "mil"
+label = "MIL"
+addr = 0x0B
+length = 1
+formula = "bit(x, 5)"
+kind = "flag"
+status = "verified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 5 of 0x0B on at key on (bulb check), off running"
+reference = "key-on bulb check"
+[[channel]]
+name = "closed_loop"
+label = "Closed loop"
+addr = 0x0F
+length = 1
+formula = "bit(x, 0)"
+kind = "flag"
+status = "verified"
+rate = "slow"
+source = "kerpz hobd_uni2 (P2T)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 0 of 0x0F off when revved to 1600-2400 rpm, on again at idle"
+reference = "rev test"
+
+[[channel]]
+name = "fuel_pump"
+label = "Fuel pump"
+addr = 0x0B
+length = 1
+formula = "bit(x, 0)"
+kind = "flag"
+status = "verified"
+rate = "slow"
+source = "PGM-FI main relay output: P30 (fedorenkoalex) + S2000 (mr-sneezy)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 0 of 0x0B on at key on (pump prime) and while running"
+reference = "key-on prime"
+
+[[channel]]
+name = "fan"
+label = "Fan cmd (ECM)"
+addr = 0x0C
+length = 1
+formula = "bit(x, 1)"
+kind = "flag"
+status = "unverified"
+rate = "slow"
+source = "P30 (fedorenkoalex) only; the ECU's own fan command, not the 83 C thermoswitch path"
+
+[[channel]]
+name = "ac_clutch"
+label = "A/C clutch"
+addr = 0x0B
+length = 1
+formula = "bit(x, 1)"
+kind = "flag"
+status = "verified"
+rate = "slow"
+source = "A/C compressor clutch relay output: P30 (fedorenkoalex) + S2000 (mr-sneezy)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 1 of 0x0B came on after the A/C request with idle-up to ~1050 rpm, off with it"
+reference = "A/C button"
+
+[[channel]]
+name = "brake"
+label = "Brake"
+addr = 0x08
+length = 1
+formula = "bit(x, 3)"
+kind = "flag"
+status = "unverified"
+rate = "slow"
+source = "brake pedal switch: P30 (fedorenkoalex) + S2000 (mr-sneezy)"
+
+[[channel]]
+name = "starter"
+label = "Starter"
+addr = 0x08
+length = 1
+formula = "bit(x, 0)"
+kind = "flag"
+status = "verified"
+rate = "slow"
+source = "starter signal: P30 (fedorenkoalex) + S2000 (mr-sneezy)"
+
+[channel.evidence]
+date = "2026-11-25T19:45"
+method = "manual"
+result = "pass"
+summary = "bit 0 of 0x08 set only while cranking"
+reference = "key cycle"
+
+# ---- OBD2-only channels -----------------------------------------------------
+# Standard Mode 01 PIDs that have no Honda RAM address here. They are read only
+# in OBD2-only live mode (the ECU ignores Honda reads but answers ISO 9141-2)
+# and stay empty in Honda mode. Fields: name, pid, label, units, min, max,
+# decimals, kind, gauge (own tile), plot, rate, source, notes. Decoding is
+# SAE J1979's (hondalog/obd2.py), not a formula.
+
+[[obd2]]
+name = "o2_post"
+pid = 0x15
+label = "O2 post"
+units = "V"
+min = 0
+max = 1.2
+decimals = 2
+gauge = true
+plot = true
+rate = "medium"
+notes = "Downstream (post-catalyst) O2 sensor, bank 1 sensor 2: A / 200 volts"
+
+[[obd2]]
+name = "calc_load"
+pid = 0x04
+label = "Calc load"
+units = "%"
+min = 0
+max = 100
+decimals = 0
+rate = "medium"
+notes = "PID 04 calculated load value. Feeds the load math channel; no tile of its own"
+
+# ---- constants --------------------------------------------------------------
+# Named numbers for the expressions below. Check them against your engine.
+
+[constants]
+cylinders = 4
+displacement_l = 1.590                  # D16Y8
+inj_flow_cc_min = 240                   # stock D16Y8 injector at 3 bar (not measured here)
+fuel_density_g_cc = 0.745               # petrol
+ve_assumed = 0.85                       # volumetric efficiency guess for afr_est
+
+# ---- math channels ----------------------------------------------------------
+# Worked out from other channels at poll rate, and again on replay.
+#
+#   name     column name, like a channel
+#   expr     [rpm] or rpm = a channel, [rpm-1] = its previous sample, constants
+#            by name. Operators: + - * / // % **  < <= > >= == !=  && || !
+#            (also and/or/not)  a ? b : c  (also b if a else c)  & | ^ << >> ~
+#            Over time: avg(x, ms) slope(x, ms) minw(x, ms) maxw(x, ms)
+#                       stdev(x, ms) smooth(x, n) median(x, n) ema(x, ms)
+#                       prev(x, n) delta(x) rate(x) integ(x) held(cond, ms)
+#            Plain:     abs min max round int floor ceil sqrt exp ln log10 pow
+#                       sign clamp(x, lo, hi) between(x, lo, hi) bit signed
+#                       poly table(x, x0, y0, x1, y1, ...) thermistor
+#            Other:     valid(x) coalesce(a, b) time()
+#   label units min max decimals gauge plot kind description enabled
+#
+# A math channel may use another math channel. Loops are refused.
+# It is only as good as its inputs: all of these are built on unverified addresses.
+
+[[math]]
+name = "inj_duty"
+label = "Injector duty"
+expr = "[inj] * [rpm] / 1200"           # one squirt per cylinder every two turns
+units = "%"
+min = 0
+max = 100
+decimals = 1
+description = "Share of the time the injector is open. Above about 85% it is out of fuel."
+
+[[math]]
+name = "fuel_flow"
+label = "Fuel flow"
+expr = "[inj_duty] / 100 * inj_flow_cc_min * cylinders * 60 / 1000"
+units = "L/h"
+min = 0
+max = 60
+decimals = 2
+description = "Estimate from injector size and duty. Ignores injector dead time."
+
+[[math]]
+name = "total_trim"
+label = "Total trim"
+expr = "[stft] + [ltft]"
+units = "%"
+min = -40
+max = 40
+decimals = 1
+description = "Short plus long fuel trim: how far the ECU is correcting the base fuel."
+
+[[math]]
+name = "rpm_rate"
+label = "RPM rate"
+expr = "slope([rpm], 500)"
+units = "rpm/s"
+min = -5000
+max = 5000
+decimals = 0
+description = "How fast engine speed is changing, fitted over the last half second."
+
+[[math]]
+name = "load"
+label = "Load"
+expr = "coalesce([calc_load], [map] / [baro] * 100)"
+units = "%"
+min = 0
+max = 100
+decimals = 0
+description = "OBD2 PID 04 calculated load when the ECU sends it, otherwise manifold pressure as a share of barometric pressure."
+
+[[math]]
+name = "afr_est"
+label = "AFR estimate"
+expr = "clamp(([map] * displacement_l / cylinders * ve_assumed / (0.287 * ([iat] + 273.15))) / ([inj] / 60000 * inj_flow_cc_min * fuel_density_g_cc), 5, 30)"
+units = "AFR"
+min = 8
+max = 22
+decimals = 1
+description = "Air mass (speed-density with an assumed VE) over fuel mass. A rough guide only: it is not a wideband."
+
+[[math]]
+name = "rpm_smooth"
+label = "RPM (smoothed)"
+expr = "smooth([rpm], 5)"
+units = "rpm"
+min = 0
+max = 7200
+decimals = 0
+description = "Mean of the last 5 RPM readings."
+
+[[math]]
+name = "map_avg"
+label = "MAP (0.5 s mean)"
+expr = "avg([map], 500)"
+units = "kPa"
+min = 0
+max = 110
+decimals = 0
+
+[[math]]
+name = "batt_min_5s"
+label = "Battery low (5 s)"
+expr = "minw([batt], 5000)"
+units = "V"
+min = 8
+max = 16
+decimals = 1
+description = "Lowest battery reading in the last 5 seconds. Catches short sags."
+
+# ---- alarms -----------------------------------------------------------------
+# Checked on every sample, on measured and math channels alike.
+#
+#   name        letters, digits, underscore
+#   channel     the channel that low/high/rate limits look at (colours its tile)
+#   low / high  trip below / above this value
+#   rate_low / rate_high   trip when the value changes faster than this per
+#               second (fitted over rate_window_ms, default 500)
+#   when        an expression that trips the alarm, for combinations
+#   clear_when  an expression that re-arms a `when` alarm (default: `when` false)
+#   gate        the rule only runs while this expression is true
+#   hold_s      must stay tripped this long before the alarm is raised
+#   clear_hold_s  must stay clear this long before it clears
+#   hysteresis  low/high: must come back inside the limit by this much to clear
+#   severity    "warn" or "critical"
+#   priority    higher shows first (default 50 warn, 100 critical)
+#   latching    true = stays up until acknowledged
+#   actions     any of "tile", "banner", "beep", "marker", "capture"
+#   message     text; {value} {value:.1f} {label} {units} {high} {low} {rate}
+#               and any channel name in braces are filled in
+#   label enabled
+#
+# The limits below are sensible starting points, not Honda figures.
+
+[[alarm]]
+name = "ect_high"
+label = "Coolant hot"
+channel = "ect"
+high = 105
+hold_s = 2
+hysteresis = 3
+severity = "critical"
+latching = true
+actions = ["tile", "banner", "beep", "marker"]
+message = "Coolant {value:.0f} °C"
+
+[[alarm]]
+name = "batt_low"
+label = "Battery low"
+channel = "batt"
+low = 12.0
+hold_s = 3
+hysteresis = 0.3
+gate = "[rpm] > 400"                    # engine running: the alternator should hold it up
+severity = "warn"
+actions = ["tile", "banner", "marker"]
+message = "Battery {value:.1f} V with the engine running"
+
+[[alarm]]
+name = "batt_high"
+label = "Overcharging"
+channel = "batt"
+high = 15.2
+hold_s = 2
+hysteresis = 0.2
+severity = "warn"
+actions = ["tile", "banner", "marker"]
+message = "Battery {value:.1f} V"
+
+[[alarm]]
+name = "over_rev"
+label = "Over-rev"
+channel = "rpm"
+high = 6800
+hysteresis = 300
+severity = "warn"
+actions = ["tile", "banner", "beep"]
+message = "{value:.0f} rpm"
+
+[[alarm]]
+name = "idle_collapse"
+label = "Idle collapsing"
+channel = "rpm"
+rate_low = -400                         # rpm per second
+rate_window_ms = 400
+gate = "[rpm] < 600"                    # already below a normal idle and still falling
+severity = "warn"
+actions = ["tile", "marker"]
+message = "RPM {value:.0f} falling {rate:.0f} rpm/s"
+
+[[alarm]]
+name = "lean_under_load"
+label = "Lean under load"
+when = "[o2] < 0.2 && [tps] > 60 && [rpm] > 3000"
+hold_s = 0.5
+clear_hold_s = 1
+severity = "critical"
+actions = ["banner", "beep", "marker"]
+message = "O2 {o2:.2f} V at {tps:.0f}% throttle, {rpm:.0f} rpm"

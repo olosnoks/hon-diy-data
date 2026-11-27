@@ -362,7 +362,7 @@ when a computer on the USB-C socket toggles DTR/RTS **[unverified that this
 board has the circuit]**.
 
 One-button use: short press = next page, long press = action on that page
-(mark, night mode).
+(mark, theme).
 
 **A second button is possible on GPIO17** only in the `--gps-p1` build (in the normal build GPIO17 is the GPS PPS input), as long as the
 GPS's RX stays unconnected. Momentary switch from P3 pin 1 to GND, internal
@@ -468,14 +468,14 @@ battery voltage and RX at 3.3 V, then steps 11 and 12 on UART2.
 - That the accessory socket in this car is switched with the key.
 - SD behaviour at power loss. The format rules above reduce the risk; step
   14 measures it.
-- **Flash writes with the display running.** NVS writes (the Day/Night
+- **Flash writes with the display running.** NVS writes (the Dracula/Darker
   choice; the Map screen's last position, at the end of a drive and at most
   every 15 minutes on a long one) disable the flash cache, and with it
   PSRAM, for a few milliseconds. The LCD interrupt is IRAM-safe
   (`CONFIG_LCD_RGB_ISR_IRAM_SAFE`) and keeps running; ESP-IDF notes that
   reading a PSRAM frame buffer from it while the cache is off crashes, and
   in the 180-degree mode `rot180_fill_cb` reads the PSRAM frame buffer.
-  Toggle Day/Night 20 times in each orientation: if it resets ("Cache
+  Toggle Dracula/Darker 20 times in each orientation: if it resets ("Cache
   disabled but cached memory region accessed") or the picture jumps,
   set `CONFIG_SPIRAM_XIP_FROM_PSRAM=y` in `sdkconfig.defaults`, which keeps
   PSRAM readable during flash writes.

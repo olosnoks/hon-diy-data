@@ -1,6 +1,7 @@
-/* Design tokens from docs/design/HANDOFF.md, ported to the 480x272 handheld.
- * Daylight (black on white) is the default; Night is white on black. Only the
- * tokens differ between themes: layout, shapes and weights are the same.
+/* Design tokens: the hondalog app's two themes (web/src/ui/theme.ts), ported
+ * to the 480x272 handheld. Dracula is the default; Darker is the same palette
+ * on darker grounds (the old Night slot: the 3 s hold, NVS "night" = 1). Only
+ * the tokens differ between themes: layout, shapes and weights are the same.
  */
 #ifndef UI_THEME_H
 #define UI_THEME_H
@@ -20,17 +21,20 @@ typedef struct {
     uint32_t water;              /* the Map screen's lakes and rivers: non-text, 3:1 against bg and under fg */
 } ui_tokens_t;
 
-extern const ui_tokens_t UI_DAYLIGHT, UI_NIGHT;
+extern const ui_tokens_t UI_DRACULA, UI_DARKER;
 
-/* Every (text, ground) pair the UI draws, for the contrast test. */
-typedef struct { const char *name; uint32_t fg, bg; } ui_pair_t;
+/* Every (text, ground) pair the UI draws, for the contrast test, with the
+ * ratio it must reach: 7:1 for fg / fg2 text, 4.5:1 for text in or on a
+ * status colour (Dracula's red and purple are mid-tone; that text is 20 px
+ * ExtraBold or larger), 3:1 for the map's graphics. */
+typedef struct { const char *name; uint32_t fg, bg; float min; } ui_pair_t;
 int ui_theme_pairs(const ui_tokens_t *t, ui_pair_t *out, int max);
 /* The Map screen's graphics (not text), which need 3:1 (WCAG 1.4.11): water
  * against the ground and the roads drawn over it, railways, the trail. */
 int ui_map_pairs(const ui_tokens_t *t, ui_pair_t *out, int max);
 
-void ui_theme_set(bool night);
-bool ui_theme_night(void);
+void ui_theme_set(bool darker);   /* false = Dracula, true = Darker */
+bool ui_theme_darker(void);
 const ui_tokens_t *ui_tokens(void);
 #define TK(field) lv_color_hex(ui_tokens()->field)
 
