@@ -156,6 +156,28 @@ class LinkSource(be.PollerSource):
     def is_cyd(self) -> bool:
         return cyd.is_cyd_port(self.port or "")
 
+    @property
+    def source_kind(self) -> str:
+        """Which source reads the ECU now: "kkl" (the laptop's cable), "cyd" (the
+        handheld, on its own K-line cable), "sim", or "" (not connected)."""
+        from .autoconnect import source_kind
+        return source_kind(self.port) if self.poller is not None else ""
+
+    def _cyd_headline(self, state: str) -> str:
+        """The ECU chip's words while the CYD has no ECU data for us."""
+        from ..handheld import serial_proto as P
+        p = self.poller
+        if state == ad.LOST:
+            return "CYD port lost"
+        link = getattr(p, "ecu_link", None)
+        if link == P.LINK_ERROR:
+            return "CYD: no K-line cable"
+        if link == P.LINK_OFF:
+            return "CYD: no reply from the ECU"
+        if state == ad.SILENT:
+            return "CYD: no data"
+        return ""
+
     def take_notice(self) -> str:
         """A message for the status line, once: the handheld's map is not this one, ..."""
         if self._push_result:
@@ -393,6 +415,13 @@ class LinkSource(be.PollerSource):
             st.simulated = True
         if self.is_cyd and st.state == ad.CONNECTING:
             st.detail = "waiting for the handheld"
+        if self.is_cyd and st.state != ad.OK and self.poller is not None:
+            # the CYD reads the ECU and says it has nothing: no K-line cable on it, the
+            # ECU not answering, or the CYD itself gone. No value may stay on screen.
+            st.headline = self._cyd_headline(st.state)
+            if self.bus is not None:
+                for source in ("ECU", "MATH"):
+                    self.bus.expire(source)
         if st.state == ad.OK:
             st.queue = len(self.live.frames)
             self.live.frames.clear()        # nobody drains them here: the bus is the UI's queue

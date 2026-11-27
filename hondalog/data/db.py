@@ -243,13 +243,39 @@ def _writer_alive(path: Path, drive_id: int, pid: int | None, heartbeat: float |
     if pid == os.getpid():
         with _active_lock:
             return (str(path.resolve()), drive_id) in _active
+    if not _pid_exists(pid):
+        return False
+    return heartbeat is not None and now - heartbeat < HEARTBEAT_STALE_S
+
+
+def _pid_exists(pid: int) -> bool:
+    """Is there a process with this id? Never signals it: on Windows
+    os.kill(pid, 0) is TerminateProcess, so ask the OS for a handle instead."""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        k32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        handle = k32.OpenProcess(0x1000, False, pid)            # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5                 # access denied: it exists, not ours
+        try:
+            code = wintypes.DWORD()
+            if not k32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259                            # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except OSError:
         pass                                    # it exists but is not ours
-    return heartbeat is not None and now - heartbeat < HEARTBEAT_STALE_S
+    return True
 
 
 def recover(conn: sqlite3.Connection, now: float | None = None) -> list[int]:

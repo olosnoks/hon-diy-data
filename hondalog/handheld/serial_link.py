@@ -379,6 +379,8 @@ class CydPoller(threading.Thread):
         self._next_beat = 0.0
         self._rate_mark = (0.0, 0)
         self._ecu_up: bool | None = None
+        #: the handheld's own ECU link (serial_proto LINK_*): LINK_ERROR = its K-line cable is not found
+        self.ecu_link = P.LINK_CONNECTING
         self._opener: _Opener | None = None
         self._t_open = 0.0
         self._last_t = 0.0
@@ -581,12 +583,15 @@ class CydPoller(threading.Thread):
         self.clock_sync = ClockSync()
         self._last_rx = self._last_good = self._t_open
         self._ecu_up = None
+        self.ecu_link = P.LINK_CONNECTING
 
     def _port_lost(self, exc: Exception) -> None:
         self.errors += 1
         self.last_error = f"port: {exc}"
         self.state = PORT_LOST
         self.hz = 0.0
+        self._ecu_up = None
+        self._unknown()                     # nothing from before the loss is delivered as if it were new
         if self.port is not None:
             self.port.close()
 
@@ -806,6 +811,7 @@ class CydPoller(threading.Thread):
         self._fresh.clear()
 
     def _link(self, up: bool, state: int, now: float) -> None:
+        self.ecu_link = state
         if up:
             if self._ecu_up is not True:
                 self._ecu_up = True

@@ -146,6 +146,9 @@ class Shell(QMainWindow):
         T.set(str(self.settings.value("theme", _theme.DEFAULT)))       # "daylight"/"night" map to dracula/darker
         U.load(self.settings)               # display units; nothing behind the UI changes
         session.auto_record = self.settings.value("record/auto", "true") == "true"
+        #: picks the ECU source by itself (``autoconnect.AutoConnect``): only when
+        #: ``start_auto()`` is called (the app does at start-up; tests do not)
+        self.auto = None
         session.start()
 
         central = QWidget()
@@ -426,7 +429,7 @@ class Shell(QMainWindow):
             if getattr(s.ecu, "handheld_map_differs", lambda: False)():
                 menu.addAction("Send my map to the handheld (for relay)",
                                lambda: self.say(s.ecu.push_handheld_map()))
-            menu.addAction(f"Disconnect {s.port}", s.disconnect)
+            menu.addAction(f"Disconnect {s.port}", self.disconnect)
         else:
             last = str(self.settings.value("port/last", ""))
             for device, label in s.ports():
@@ -588,11 +591,64 @@ class Shell(QMainWindow):
         self.settings.setValue("record/auto", "true" if on else "false")
 
     def connect_port(self, port: str) -> None:
+        """A port picked by hand: the automatic pick leaves it alone from now on."""
         if not port:
             return
+        if self.auto is not None:
+            self.auto.pause()
+        self._connect_now(port)
+
+    def _connect_now(self, port: str) -> None:
         self.settings.setValue("port/last", port)
+        if getattr(self.session.ecu, "poller", None) is not None:
+            self.session.disconnect()       # one source at a time: the old link closes first
         self.session.connect(port)
         self.say(f"Connecting to {port}")
+
+    def disconnect(self) -> None:
+        """Disconnect by hand: the automatic pick does not connect again by itself."""
+        if self.auto is not None:
+            self.auto.pause()
+        self.session.disconnect()
+
+    # ---- the automatic pick of the ECU source ----
+
+    def start_auto(self, preferred: str = "", scanner=None) -> None:
+        """Connect by itself, now and whenever a cable comes or goes: the KKL
+        cable (``preferred`` first), else the CYD as ``cyd:``, else nothing.
+        Never a simulator."""
+        from . import autoconnect as ac
+        if self.auto is not None:
+            self.auto.stop()
+        self.auto = ac.AutoConnect(self.session, connect=self._auto_connect, disconnect=self.session.disconnect,
+                                   preferred=preferred, scanner=scanner or ac.scan)
+        found = self.auto.scan_now()
+        message = self.auto.step(found, time.monotonic())
+        if not message and not self.session.connected:
+            message = "No KKL cable and no CYD found: plug one in (it is picked up by itself)"
+        self.say(message)
+        self.auto.start()
+
+    def _auto_connect(self, port: str) -> None:
+        self.settings.setValue("port/last", port)
+        self.session.connect(port)
+
+    def connect_through_cyd(self) -> str:
+        """Setup > Cable's "Connect through the CYD": the CYD reads the ECU on its
+        own K-line cable. Whatever was connected closes first."""
+        from . import autoconnect as ac
+        found = self.auto.scan_now() if self.auto is not None else ac.scan()
+        cyds = [f for f in found if f.is_cyd]
+        if not cyds:
+            return "No CYD found (CH340 1a86:7523): plug its USB-C cable in"
+        self.connect_port(ac.CYD_PREFIX + cyds[0].device)
+        return f"Connecting through the CYD on {cyds[0].device}"
+
+    def resume_auto(self) -> str:
+        if self.auto is None:
+            self.start_auto()
+            return "Cable: picked by itself (the KKL cable first, else through the CYD)"
+        return self.auto.resume()
 
     def edit_map(self) -> None:
         from .. import addressmap
@@ -646,6 +702,10 @@ class Shell(QMainWindow):
         t0 = time.perf_counter()
         s = self.session
         now = s.bus.now()
+        if self.auto is not None:
+            note = self.auto.tick()
+            if note:
+                self.say(note)
         for event in s.pump(now):
             if event.kind == "alarm":
                 self.beep(2)
@@ -741,6 +801,8 @@ class Shell(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.timer.stop()
+        if self.auto is not None:
+            self.auto.stop()
         self.map.close_tiles()
         shutdown = getattr(self.handheld, "shutdown", None)
         if shutdown is not None:

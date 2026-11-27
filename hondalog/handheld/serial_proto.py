@@ -40,6 +40,7 @@ VARIANT_DEFAULT, VARIANT_GPS_P1 = 0, 1
 VARIANTS = {VARIANT_DEFAULT: "default", VARIANT_GPS_P1: "gps-p1"}
 CAP_RX, CAP_FILES, CAP_PUT, CAP_LOG, CAP_MAPUP, CAP_HL = 1, 2, 4, 8, 0x10, 0x20      # CAP_HL: the HL text session
 CAP_RELAY = 0x40                        # RELAY_* frames are understood (HH_SER_CAP_RELAY)
+HF_OWN_CABLE = 0x20                     # HELLO flag: its own K-line cable is open (it reads the ECU, ignores RELAY)
 F_DRIVE, F_CAPTURE, F_MAP, F_CFG = 1, 2, 3, 4
 FILE_KINDS = {F_DRIVE: "drive", F_CAPTURE: "capture", F_MAP: "map", F_CFG: "cfg"}
 OK, IGNORED, E_ARG, E_IO, E_CRC, E_STATE, E_REFUSED, E_BUSY, E_UNSUPPORTED, E_OFFSET = 0, 1, -1, -2, -3, -4, -5, -6, -7, -8
@@ -131,6 +132,11 @@ class Hello:
     def clock_from_pps(self) -> bool:
         """The handheld's wall clock (unix_us) is held to the GPS pulse: good to tens of microseconds."""
         return bool(self.flags & 16)
+
+    @property
+    def own_cable(self) -> bool:
+        """Its own K-line cable is open: it polls the ECU itself and takes no relay (capability 64 cleared)."""
+        return bool(self.flags & HF_OWN_CABLE)
 
     @property
     def text(self) -> str:

@@ -35,6 +35,8 @@ LINK_EVERY_S = 1.0
 QUEUE_MAX = 1024
 
 TOO_OLD = "handheld: firmware too old for relay"
+#: HELLO flag 32: the handheld's own K-line cable is open, so it reads the ECU itself and takes no relay
+OWN_CABLE = "handheld: the CYD reads the ECU on its own cable"
 TX_ONLY = "handheld: TX-only (GPS on P1), no relay"
 MAP_DIFFERS = "handheld map differs: hondalog-handheld push-map"
 
@@ -80,7 +82,7 @@ class Relay:
         if self.force:
             return ""
         if not h.caps & P.CAP_RELAY:
-            return TOO_OLD
+            return OWN_CABLE if h.flags & P.HF_OWN_CABLE else TOO_OLD
         if h.map_hash != self.amap.version_hash:
             return MAP_DIFFERS
         return ""

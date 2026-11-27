@@ -35,6 +35,7 @@ class SourceStatus:
     queue: int = 0              # samples waiting somewhere (profile overlay)
     simulated: bool = False
     link: str = ""              # "OBD2": standard ISO 9141-2 PIDs, not Honda reads
+    headline: str = ""          # the chip's words when there is no data ("CYD: no K-line cable")
 
 
 @runtime_checkable

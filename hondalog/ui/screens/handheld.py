@@ -1137,6 +1137,7 @@ class HandheldScreen(QWidget):
         name = self.port_name()
         if name and self.session.port and name.endswith(self.session.port.replace("cyd:", "")) and self.session.connected:
             self.say("The live connection on F1 has this port open: disconnect it there first.")
+            return                          # one link to the CYD at a time
         self.settings.setValue("handheld/port", name)
         self.connect_btn.setEnabled(False)
         self.worker.connect_port(name)

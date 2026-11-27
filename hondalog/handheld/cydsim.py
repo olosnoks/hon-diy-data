@@ -116,10 +116,15 @@ class CydSim(HlMixin):
                  gps: bool = True, baud: int = 921600, device: str = "HH-SIM001", boot_no: int = 1,
                  map_hash: str | None = None, record: bool = True, dtcs: tuple[int, ...] = (),
                  unix_time: float | None = None, damage: float = 0.0, seed: int = 1,
-                 logs: bool = False, sd_kbps: float | None = None):
+                 logs: bool = False, sd_kbps: float | None = None, own_cable: bool = True):
         if variant not in ("default", "p1"):
             raise ValueError("variant is 'default' or 'p1'")
         self.variant = variant
+        #: its own USB K-line cable is open (the firmware's default): it reads the ECU itself, its HELLO
+        #: clears capability 64 (relay) and sets flag 32, and RELAY frames are ignored. False: the cable
+        #: is not found (LINK state 4), and relay is offered. May be flipped while it runs.
+        self.own_cable = own_cable
+        self.relay_ignored = 0
         self.tx_only = variant == "p1"
         self.amap = amap or addressmap.load_default()
         self.sd = Path(sd) if sd else None
@@ -265,12 +270,14 @@ class CydSim(HlMixin):
         return data
 
     def hello(self) -> P.Hello:
-        caps = P.CAP_LOG if self.tx_only else P.CAP_RX | P.CAP_LOG | P.CAP_HL | P.CAP_RELAY | (P.CAP_FILES | P.CAP_PUT | P.CAP_MAPUP if self.sd else 0)
+        caps = P.CAP_LOG if self.tx_only else P.CAP_RX | P.CAP_LOG | P.CAP_HL | (0 if self.own_cable else P.CAP_RELAY) | (P.CAP_FILES | P.CAP_PUT | P.CAP_MAPUP if self.sd else 0)
         unix = self.unix_us(self.now)
-        state = P.LINK_OK if self._up else P.LINK_OFF if self._down_since is not None else P.LINK_CONNECTING
+        state = self._link_state() if self._up or self._down_since is not None or not self.own_cable \
+            else P.LINK_CONNECTING
         return P.Hello(P.REV, P.VARIANT_GPS_P1 if self.tx_only else P.VARIANT_DEFAULT, caps, FW, self.device,
                        self.map_hash, self.map_sha, self.ecu_id if self.reads else b"", state, 0, 0,
-                       self.n_ch, (2 if unix else 0) | (4 if unix and self.gps else 0) | (8 if self.sd else 0),
+                       self.n_ch, (2 if unix else 0) | (4 if unix and self.gps else 0) | (8 if self.sd else 0)
+                       | (P.HF_OWN_CABLE if self.own_cable else 0),
                        self.boot_no, self.baud, _us(self.now), unix, int(P.HELLO_S * 1000), P.MAX_PAYLOAD)
 
     def host_attached(self) -> bool:
@@ -285,7 +292,7 @@ class CydSim(HlMixin):
         self._send(P.SF_STATS, P.pack_stats(
             time_source=source, time_err_us=1_000_000 if source == P.TS_NMEA else 0,
             t_us=_us(self.now), unix_us=self.unix_us(self.now), reads=self.reads, errors=self.errors,
-            hz_c=int(self.hz * 100), link_state=P.LINK_OK if self._up else P.LINK_OFF, flags=flags,
+            hz_c=int(self.hz * 100), link_state=self._link_state(), flags=flags,
             drive_no=self._drive.file_no if self._drive else 0,
             log_bytes=self._drive.fh.tell() if self._drive else 0, free_mb=14000 if self.sd else 0,
             markers=self.markers, stall_count=self.stalls, nmea_good=int(self.now) * 2 if self.gps else 0,
@@ -297,9 +304,13 @@ class CydSim(HlMixin):
         if self._drive is not None:
             self._drive.event(_us(t), code, src, aux, value)
 
+    def _link_state(self) -> int:
+        if not self.own_cable:
+            return P.LINK_ERROR             # "K-line cable not found"
+        return P.LINK_OK if self._up else P.LINK_OFF
+
     def _link(self, t: float) -> None:
-        state = P.LINK_OK if self._up else P.LINK_OFF
-        self._send(P.SF_LINK, P.LINK.pack(_us(t), state, 1 if self._up else 0, 0, 0))
+        self._send(P.SF_LINK, P.LINK.pack(_us(t), self._link_state(), 1 if self._up else 0, 0, 0))
 
     # ---- the engine ----
 
@@ -318,6 +329,15 @@ class CydSim(HlMixin):
     def _exchange(self) -> None:
         """One read request, or one failed probe, ending at ``self._t``."""
         self.model.step()
+        if not self.own_cable:
+            # no K-line cable on the handheld: no reads, LINK state 4 repeated (time moves on for the laptop)
+            t = self._t
+            self._t += 0.25
+            if self._up or self._down_since is None:
+                self._up, self._down_since, self.hz, self._last_tick = False, t, 0.0, None
+                self._event(t, F.EV_LINK_DOWN, 0, 0, 0)
+            self._link(t)
+            return
         if not self.model.powered:
             t = self._t
             self._t += 0.25
@@ -429,7 +449,11 @@ class CydSim(HlMixin):
         return kind == P.F_DRIVE and self._drive is not None and self._drive.file_no == no
 
     def _relay(self, ftype: int, p: bytes) -> None:
-        """A RELAY_* frame: checked as hh_relay.c checks it and kept (the sim's own ECU model goes on)."""
+        """A RELAY_* frame: checked as hh_relay.c checks it and kept (the sim's own ECU model goes on).
+        Ignored (counted) while its own K-line cable is open, as the firmware does."""
+        if self.own_cable:
+            self.relay_ignored += 1
+            return
         if ftype in (P.SR_RELAY_READ, P.SR_RELAY_ISO) and len(p) >= 12:
             head = (P.RELAY_READ if ftype == P.SR_RELAY_READ else P.RELAY_ISO).unpack(p[:12])
             n = head[2]
@@ -743,7 +767,8 @@ def _cfg_defaults() -> str:
 def sim_from_port(name: str, **kwargs: Any) -> CydSim:
     """``cyd:sim`` -> the default (two-way) variant; ``cyd:sim:p1`` -> tx-only.
     More, colon separated: ``stall@8`` (the engine dies after 8 s), ``power@8``
-    (the ECU loses power), ``nogps``."""
+    (the ECU loses power), ``nogps``, ``nocable`` (no K-line cable on the
+    handheld: LINK state 4, relay offered)."""
     parts = [p for p in name.split(":")[2:] if p]
     opts: dict[str, Any] = {}
     for part in parts:
@@ -755,6 +780,8 @@ def sim_from_port(name: str, **kwargs: Any) -> CydSim:
             opts["stall_mode"] = "rpm" if word == "stall" else "power"
         elif word == "nogps":
             opts["gps"] = False
+        elif word == "nocable":
+            opts["own_cable"] = False
         elif word != "default":
             raise ValueError(f"{name}: unknown simulator option {word!r}")
     opts.update(kwargs)

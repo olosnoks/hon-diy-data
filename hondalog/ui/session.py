@@ -55,7 +55,9 @@ def cyd_state(ecu, demo: bool = False) -> CydState:
             hello = getattr(poller, "hello", None)
             if hello is None:
                 return CydState("connecting")
-            return CydState("kline", *_sd(getattr(poller, "device", None)),
+            from ..handheld import serial_proto as P
+            no_cable = getattr(poller, "ecu_link", None) == P.LINK_ERROR
+            return CydState("nocable" if no_cable else "kline", *_sd(getattr(poller, "device", None)),
                             map_ok=not getattr(poller, "map_mismatch", False),
                             detail=f"{hello.device} fw {hello.fw}")
         live = getattr(ecu, "live", None)

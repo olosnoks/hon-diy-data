@@ -180,7 +180,7 @@ def _handheld(session):
     return getattr(getattr(ecu, "live", None), "handheld", None)
 
 
-LINK_WORD = {"usb": "USB", "relay": "RELAY", "kline": "K-LINE", "demo": "DEMO",
+LINK_WORD = {"usb": "USB", "relay": "RELAY", "kline": "K-LINE", "nocable": "NO CABLE", "demo": "DEMO",
              "connecting": "…", "lost": "LOST"}
 
 
@@ -224,7 +224,9 @@ def cyd_facts(session) -> dict:
         note, hot = f"{tag} differs: push it from Setup", True
     else:
         note, hot = getattr(cyd, "detail", "") if cyd is not None else "", False
-    out["link"] = (LINK_WORD.get(link_state, link_state.upper()), note, hot)
+    if link_state == "nocable":
+        note, hot = "K-line cable not found on the CYD", True
+    out["link"] =(LINK_WORD.get(link_state, link_state.upper()), note, hot)
     if "stall_count" in stats:
         out["stalls"] = (int(stats["stall_count"]), "")
     elif link_state == "demo":

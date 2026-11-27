@@ -278,7 +278,8 @@ def test_callbacks_already_on_the_poller_are_kept(amap):
 # ---- the simulator takes relay frames ----
 
 def test_cydsim_says_relay_and_takes_the_frames(amap, tmp_path):
-    live = LiveSession(amap, out_dir=tmp_path, handheld="cyd:sim")
+    # no K-line cable on the handheld (LINK state 4): it offers relay (capability 64)
+    live = LiveSession(amap, out_dir=tmp_path, handheld="cyd:sim:nocable")
     live.connect("sim:")
     try:
         hh = live.handheld
@@ -287,5 +288,23 @@ def test_cydsim_says_relay_and_takes_the_frames(amap, tmp_path):
         sim = hh.port.sim
         assert wait(lambda: {t for t, _ in sim.relayed} >= {P.SR_RELAY_READ, P.SR_RELAY_TICK, P.SR_RELAY_LINK})
         assert sim.relay_bad == 0
+    finally:
+        live.close()
+
+
+def test_cydsim_with_its_own_cable_takes_no_relay_and_says_why(amap, tmp_path):
+    """Its own K-line cable open (the firmware's default): HELLO clears capability 64 and
+    sets flag 32; the laptop does not relay and says the CYD reads the ECU on its own cable."""
+    live = LiveSession(amap, out_dir=tmp_path, handheld="cyd:sim")
+    live.connect("sim:")
+    try:
+        hh = live.handheld
+        assert wait(lambda: hh.hello is not None)
+        assert not hh.hello.caps & P.CAP_RELAY and hh.hello.flags & P.HF_OWN_CABLE and hh.hello.own_cable
+        assert live.relay.status == R.OWN_CABLE == "handheld: the CYD reads the ECU on its own cable"
+        assert "the CYD reads the ECU on its own cable" in live.handheld_text()
+        assert not live.relay.active
+        time.sleep(0.5)
+        assert hh.port.sim.relayed == []
     finally:
         live.close()

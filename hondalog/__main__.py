@@ -12,8 +12,15 @@ from . import __version__
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="hondalog", description="Honda K-line data logger")
-    ap.add_argument("--port", help="serial port, e.g. /dev/hondalog, /tmp/hondalog-sim or sim:")
+    ap.add_argument("--port", help="serial port, e.g. /dev/hondalog, COM21, auto, cyd: (the handheld reads "
+                                   "the ECU), /tmp/hondalog-sim or sim:. A plain cable name with --connect is "
+                                   "the KKL cable to prefer: without it the CYD is used (see --auto)")
     ap.add_argument("--connect", action="store_true", help="connect on start")
+    ap.add_argument("--auto", choices=("on", "off"), default="on",
+                    help="pick the ECU source by itself, at start-up and on replug: the KKL cable "
+                         "(FTDI 0403:6001), else the CYD (CH340 1a86:7523) as cyd:, else nothing; "
+                         "a KKL cable that appears wins over the CYD. Never a simulator. Used without "
+                         "--port, and with --port <cable> --connect or --port auto (default on)")
     ap.add_argument("--open", metavar="DRIVE", help="open a drive or capture by name (see hondalog-log "
                                                     "list), a log file (.csv .msl .mlg) or a black box "
                                                     "capture (.bbx) in the replay screen")
@@ -74,13 +81,20 @@ def main(argv=None) -> int:
     screen = app.primaryScreen().availableGeometry()
     win.resize(min(1366, screen.width()), min(768, screen.height()))
     win.show()
+    from .ui.autoconnect import is_explicit
+    port = args.port or ""
     if args.demo:
         for src in (session.ecu, session.blackbox):
             src.prefill(session.bus)
-    elif args.port and args.connect:
-        win.connect_port(args.port)
-    elif args.port:
-        win.settings.setValue("port/last", args.port)
+    elif port and port != "auto" and (is_explicit(port) or args.auto == "off"):
+        if args.connect:                # exactly this port (a simulator only ever this way)
+            win.connect_port(port)
+        else:
+            win.settings.setValue("port/last", port)
+    elif args.auto == "on" and (not port or port == "auto" or args.connect):
+        win.start_auto(preferred="" if port == "auto" else port)
+    elif port:
+        win.settings.setValue("port/last", port)
     if args.open:
         win.open_in_replay(args.open)
     code = app.exec()

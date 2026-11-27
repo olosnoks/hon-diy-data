@@ -164,6 +164,18 @@ class ChannelBus:
         for state in self.channels(source):
             state.timeout = seconds
 
+    def expire(self, source: str) -> int:
+        """Every channel of ``source`` is stale now (the link said there is no
+        data): the screens show "---", not the last value. Returns how many."""
+        n = 0
+        with self._lock:
+            for state in self._chans.values():
+                if state.spec.source == source and state.t != -math.inf:
+                    state.t = -math.inf
+                    state.gen += 1
+                    n += 1
+        return n
+
     # -- publishing (any thread) --
 
     def publish(self, values, t: float | None = None, wire: float | None = None,

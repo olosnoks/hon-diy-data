@@ -38,6 +38,10 @@ def source_chip(name: str, st: ad.SourceStatus, key: str = "") -> tuple:
         if st.link == "OBD2":               # standard PIDs, not Honda reads
             return (key, "ok", "", f"{name}{sim} OBD2", monos)
         return (key, "ok", "", f"{name}{sim}", monos)
+    if st.headline and st.state in (ad.SILENT, ad.LOST):
+        # no ECU data, and why (the CYD's own K-line: no cable, the ECU not answering)
+        return (key, "x", "bad", st.headline,
+                (f"{st.silent_s:.1f} s",) if st.state == ad.SILENT and st.silent_s else ())
     if st.state == ad.CONNECTING:
         return (key, "half", "caution", f"{name}{sim} {st.detail or 'connecting'}", ())
     if st.state == ad.SILENT:
@@ -74,13 +78,14 @@ def cyd_chip(st) -> tuple:
         return ("cyd", "half", "caution", "CYD connecting", ())
     if link == "lost":
         return ("cyd", "x", "bad", "CYD port lost", ())
-    words = {"usb": "USB", "relay": "RELAY", "kline": "K-LINE", "demo": "SIM"}
+    words = {"usb": "USB", "relay": "RELAY", "kline": "K-LINE", "nocable": "NO CABLE", "demo": "SIM"}
     sd = {"rec": f"SD REC #{st.drive_no}" if st.drive_no else "SD REC", "ok": "SD idle",
           "none": "NO SD"}.get(st.sd, "")
     map_ = {True: "map ok", False: "MAP DIFFERS", None: ""}[st.map_ok]
-    bad = st.sd == "none" or st.map_ok is False
+    bad = st.sd == "none" or st.map_ok is False or link == "nocable"
     monos = tuple(x for x in (words.get(link, link.upper()), sd, map_) if x)
-    text = ("CYD map mismatch" if st.map_ok is False
+    text = ("CYD: no K-line cable" if link == "nocable"
+            else "CYD map mismatch" if st.map_ok is False
             else "CYD no SD card" if st.sd == "none" else "CYD black box")
     return ("cyd", "x" if bad else "ok", "caution" if bad else "", text, monos)
 

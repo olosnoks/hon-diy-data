@@ -135,6 +135,11 @@ class CablePage(QWidget):
         frame, box = _box("ECU cable (K-line)")
         self.state = label("", mono=True)
         box.addWidget(self.state)
+        # which source reads the ECU: the KKL cable on the laptop, or the CYD on its own K-line cable
+        self.source = label("", mono=True, wrap=True)
+        box.addWidget(self.source)
+        self.auto_pick = QCheckBox("Pick the cable by itself: the KKL cable first, else through the CYD")
+        box.addWidget(self.auto_pick)
         self.ports = QListWidget()
         self.ports.setFont(T.font(14, 600, mono=True))
         self.ports.setMaximumHeight(170)
@@ -144,15 +149,18 @@ class CablePage(QWidget):
         self.connect_btn = Button("Connect", kind="primary", height=40)
         self.disconnect_btn = Button("Disconnect", height=40)
         self.first_btn = Button("Run first contact…", height=40)
-        for b in (self.rescan_btn, self.connect_btn, self.disconnect_btn, self.first_btn):
+        self.cyd_btn = Button("Connect through the CYD", height=40)
+        for b in (self.rescan_btn, self.connect_btn, self.cyd_btn, self.disconnect_btn, self.first_btn):
             row.addWidget(b)
         row.addStretch(1)
         box.addLayout(row)
         self.auto_record = QCheckBox("Record on connect")
         self.auto_record.setChecked(bool(getattr(session, "auto_record", True)))
         box.addWidget(self.auto_record)
-        box.addWidget(label("The CYD black box has its own cable and its own page (CYD black box). The poke test "
-                            "(F7 Bytes) borrows this cable and gives it back.", dim=True, wrap=True))
+        box.addWidget(label("With the KKL cable on the laptop the CYD black box rides along on its own USB cable "
+                            "(GPS, relay). With the KKL cable in the CYD, the CYD reads the ECU and the laptop only "
+                            "listens: never both on the K-line. The poke test (F7 Bytes) needs the KKL cable on "
+                            "the laptop; it borrows the cable and gives it back.", dim=True, wrap=True))
         lay.addWidget(frame)
         tiles, tbox = _box("Map tiles (F6 GPS map)")
         self.tiles_online = QCheckBox("Download map tiles (off: only what is cached)")
@@ -168,6 +176,8 @@ class CablePage(QWidget):
         self.rescan_btn.clicked.connect(self.rescan)
         self.connect_btn.clicked.connect(self.connect_selected)
         self.disconnect_btn.clicked.connect(self.disconnect)
+        self.cyd_btn.clicked.connect(self.connect_cyd)
+        self.auto_pick.toggled.connect(self.set_auto_pick)
         self.first_btn.clicked.connect(lambda: getattr(self.shell, "first_contact", lambda: None)())
         self.auto_record.toggled.connect(self.set_auto_record)
         self.tiles_online.toggled.connect(self.set_tiles_online)
@@ -214,8 +224,72 @@ class CablePage(QWidget):
         self.sync()
 
     def disconnect(self) -> None:
-        self.session.disconnect()
+        hook = getattr(self.shell, "disconnect", None)
+        if callable(hook) and hasattr(self.shell, "auto"):
+            hook()                          # the shell's: the automatic pick does not reconnect
+        else:
+            self.session.disconnect()
         self.sync()
+
+    def connect_cyd(self) -> None:
+        """The CYD reads the ECU on its own K-line cable (``cyd:<its port>``)."""
+        hook = getattr(self.shell, "connect_through_cyd", None)
+        if callable(hook):
+            self.message.emit(hook())
+        else:
+            from ...handheld import serial_link
+            found = [name for name, _ in serial_link.list_ports()]
+            if not found:
+                self.message.emit("No CYD found (CH340 1a86:7523): plug its USB-C cable in")
+            else:
+                self.session.disconnect()
+                self.settings.setValue("port/last", found[0])
+                self.session.connect(found[0])
+                self.message.emit(f"Connecting through the CYD on {found[0]}")
+        self.sync()
+
+    def set_auto_pick(self, on: bool) -> None:
+        if self._syncing:
+            return
+        auto = getattr(self.shell, "auto", None)
+        if on:
+            hook = getattr(self.shell, "resume_auto", None)
+            if callable(hook):
+                self.message.emit(hook())
+        elif auto is not None:
+            auto.pause()
+            self.message.emit("Cable: only what you pick")
+        self.sync()
+
+    def source_text(self) -> str:
+        """Which source reads the ECU, for the page: the KKL cable, through the CYD, or not connected."""
+        s = self.session
+        ecu = getattr(s, "ecu", None)
+        kind = getattr(ecu, "source_kind", None)
+        if kind is None:                    # a source without one (the demo): from the port's name
+            from ..autoconnect import source_kind
+            kind = source_kind(s.port) if s.connected else ""
+        from ..autoconnect import device_of
+        st = getattr(s, "ecu_status", None)
+        if kind == "kkl":
+            text = f"ECU source: KKL cable on {s.port}"
+            companion = getattr(getattr(ecu, "live", None), "handheld", None)
+            if companion is not None:
+                relay = getattr(getattr(ecu, "live", None), "relay", None)
+                text += " · the CYD alongside" + (" (relay)" if getattr(relay, "active", False) else "")
+        elif kind == "cyd":
+            text = f"ECU source: through the CYD on {device_of(s.port) or 'its USB-C port'}"
+            headline = getattr(st, "headline", "") if st is not None else ""
+            if headline:
+                text += f" · {headline}"
+        elif kind == "sim":
+            text = f"ECU source: simulator {s.port} (picked by hand)"
+        else:
+            text = "ECU source: not connected"
+        auto = getattr(self.shell, "auto", None)
+        if auto is not None and auto.active:
+            text += "  [picked by itself]"
+        return text
 
     def set_auto_record(self, on: bool) -> None:
         self.session.auto_record = on
@@ -228,15 +302,26 @@ class CablePage(QWidget):
         else:
             self.settings.setValue("map/online", "true" if on else "false")
 
+    _syncing = False
+
     def sync(self) -> None:
         s = self.session
-        shown = (s.connected, s.port)
+        auto = getattr(self.shell, "auto", None)
+        source = self.source_text()
+        shown = (s.connected, s.port, source, auto is not None and auto.active)
         if shown == self._shown:
             return
         self._shown = shown
         self.state.setText(f"Connected: {s.port}" if s.connected else "Not connected")
+        self.source.setText(source)
         self.connect_btn.setEnabled(not s.connected)
         self.disconnect_btn.setEnabled(bool(s.connected))
+        self.cyd_btn.setEnabled(not getattr(s, "demo", False) and getattr(getattr(s, "ecu", None), "source_kind",
+                                                                          "") != "cyd")
+        self._syncing = True
+        self.auto_pick.setChecked(auto is not None and auto.active)
+        self.auto_pick.setEnabled(not getattr(s, "demo", False) and hasattr(self.shell, "resume_auto"))
+        self._syncing = False
 
 
 class FilesPage(QWidget):
