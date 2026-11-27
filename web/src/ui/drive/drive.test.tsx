@@ -92,8 +92,10 @@ describe('DriveScreen', () => {
     for (const n of DRIVE_SLOTS) expect(screen.getByTestId(`big-${n}`)).toBeTruthy();
     expect(screen.getByTestId('bigvalue-vss').textContent).toBe('0');
     expect(screen.getByTestId('bigvalue-batt').textContent).toMatch(/^1[34]\.\d$/);
-    expect(screen.getByText('RPM VS IDLE TARGET')).toBeTruthy();
-    expect(screen.getByText('LAUNCH MARGIN')).toBeTruthy();
+    expect(screen.getByText('RPM vs idle target')).toBeTruthy();
+    expect(screen.getByText('Launch margin')).toBeTruthy();
+    // rpm − idle target, signed
+    expect(screen.getByTestId('launch-margin-readout').textContent).toMatch(/^[+−±]\d+ rpm$/);
     expect(screen.getByTestId('launch-low').textContent).toBe('no launch yet');
     expect(screen.getByText('ARMED')).toBeTruthy();
     expect(screen.getByText('12.5 / 20 s')).toBeTruthy();
@@ -107,7 +109,7 @@ describe('DriveScreen', () => {
   it('follows a launch and shows its low', () => {
     render(<DriveScreen />);
     act(() => { for (let t = 15; t <= 24; t += 0.1) feed(t); });
-    expect(screen.getByTestId('launch-low').textContent).toMatch(/^last launch low 5\d\d \(\+1\d\d\)$/);
+    expect(screen.getByTestId('launch-low').textContent).toMatch(/^last launch low 5\d\d rpm$/);
   });
 
   it('keeps tracking while F2 is not shown', () => {

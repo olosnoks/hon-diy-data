@@ -12,7 +12,7 @@ import { capabilities, getFileStore, getTransportPicker } from '../platform';
 import { WebSerialTransport } from '../platform/webserial';
 import { registerBytesDeps } from '../ui/bytes/deps';
 import type { MemLink } from '../ui/bytes/model/scanner';
-import { migrateLocalNotes } from '../ui/events/notes';
+import { harshKindAt, migrateLocalNotes } from '../ui/events/notes';
 import { drivesChanged } from '../ui/replay/source';
 import { registerSetupDeps, type ConnectionControl } from '../ui/setup/deps';
 import { alarmSourceFromEngine } from '../ui/setup/AlarmsTab';
@@ -160,7 +160,9 @@ export async function startApp(): Promise<AppController> {
   started = app;
   await app.init();
   // Event notes kept on the device before they went into hondalog.db: moved once.
-  if (app.store) await migrateLocalNotes(app.store).catch((e: unknown) => { app.lastError = `notes: ${String(e)}`; });
+  const store = app.store;
+  if (store) await migrateLocalNotes(store, globalThis.localStorage,
+    async (drive, t) => harshKindAt(await store.loadDrive(drive), t)).catch((e: unknown) => { app.lastError = `notes: ${String(e)}`; });
   registerDeps(app);
   if (typeof window !== 'undefined') {
     flushOnHide(app);

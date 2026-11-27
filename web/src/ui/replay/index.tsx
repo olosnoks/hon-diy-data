@@ -2,8 +2,9 @@
  * F4 Replay: a recording played back as if live, everything on one cursor
  * (port of hondalog/ui/screens/replay.py, design canvas "F4 Replay").
  *
- *   transport   play/pause (P), 0.5× / 1× / 4×, ← → step 0.1 s (Shift: 1 s),
- *               [ ] previous / next event, Home / End, a scrubber with event ticks
+ *   transport   play/pause (P), 0.5× / 1× / 4× (keys 1 / 2 / 4), ← → step 0.1 s (Shift: 1 s),
+ *               [ ] previous / next event (and buttons), Home / End, a scrubber with event ticks,
+ *               Live (L): the lanes follow the live session, the last 40 s
  *   map         the GPS track coloured by a channel, the position, event pins
  *   lanes       rpm + idle target, speed, throttle, MAP, lateral g; any channel
  *               added by clicking it in the sensor list; cursors A / B (Shift+click,
@@ -35,8 +36,11 @@ import { openInPower, useSession } from '../../core/session';
 import { ReplayMap } from './ReplayMap';
 import { useDriveSource } from './source';
 import { eventsOf, type DriveEvent } from '../events/detect';
+import { LIVE_WINDOW_S, liveDrive } from './live';
 
 export const SPEEDS = [0.5, 1, 4] as const;
+/** Speed keys, as the desktop's: 1 = 0.5×, 2 = 1×, 4 = 4×. */
+export const SPEED_KEYS: Record<string, number> = { '1': 0.5, '2': 1, '4': 4 };
 export const DEFAULT_WINDOW_S = 60;
 export const CALC = ['power', 'torque', 'gear', 'accel_g', 'lat_g', 'grade', 'fuel_lph', 'rpm_err'] as const;
 
@@ -76,6 +80,7 @@ export default function ReplayScreen() {
   const [picker, setPicker] = useState<null | 'open' | 'compare'>(null);
   const [colourBy, setColourBy] = useState('vss');
   const [note, setNote] = useState('');
+  const [live, setLive] = useState(false);
   const handled = useRef(0);
   const openedFrom = useRef<unknown>(null);
 
@@ -89,6 +94,7 @@ export default function ReplayScreen() {
         o.model.setWindow(v - 20, v + 10);
       }
       setOpened(o);
+      setLive(false);
       setPlaying(false);
       setNote('');
       setStatus('');
@@ -98,6 +104,25 @@ export default function ReplayScreen() {
     }
   }, [source]);
 
+  // Live (L): rebuild from the session's history twice a second, cursor at now
+  useEffect(() => {
+    if (!live) return;
+    const build = () => {
+      const d = liveDrive(useSession.getState().history);
+      if (!Object.keys(d.series).length) { setOpened(null); setStatus('Live: no data yet. Connect the cable or the simulator (F8 Setup), or open a drive (O).'); return; }
+      const drive = withDerived(d);
+      const model = new ReplayModel(drive, { origin: 0 });
+      model.setWindow(-LIVE_WINDOW_S, 0);
+      model.setCursor(0);
+      setOpened({ drive, model, events: [] });
+      setStatus('');
+    };
+    build();
+    const id = setInterval(build, 500);
+    return () => clearInterval(id);
+  }, [live]);
+  const goLive = useCallback(() => { setPlaying(false); setLive(true); }, []);
+
   // a request from Events (Open in Replay), else the drive open last, else the newest
   useEffect(() => {
     if (request && request.seq !== handled.current) {
@@ -105,6 +130,7 @@ export default function ReplayScreen() {
       void load(request.drive, request.t);
       return;
     }
+    if (live) return;
     // a drive from another source (the demo drives before the store opened) does not count
     if (opened && openedFrom.current === source) return;
     const last = useSession.getState().replayDrive;
@@ -190,10 +216,14 @@ export default function ReplayScreen() {
   // ---- keys
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (picker || isTyping(e.target) || e.altKey || e.metaKey || !model) return;
+      if (picker || isTyping(e.target) || e.altKey || e.metaKey) return;
       const k = e.key;
+      if ((k === 'l' || k === 'L') && !e.ctrlKey) { goLive(); e.preventDefault(); return; }
+      if ((k === 'o' || k === 'O') && !e.ctrlKey) { setPicker('open'); e.preventDefault(); return; }
+      if (!model) return;
       let used = true;
-      if ((k === 'ArrowLeft' || k === 'ArrowRight') && e.ctrlKey) act((m) => m.pan(k === 'ArrowLeft' ? -0.25 : 0.25));
+      if (k in SPEED_KEYS && !e.ctrlKey) setSpeed(SPEED_KEYS[k]!);
+      else if ((k === 'ArrowLeft' || k === 'ArrowRight') && e.ctrlKey) act((m) => m.pan(k === 'ArrowLeft' ? -0.25 : 0.25));
       else if (e.ctrlKey) used = false;
       else if (k === 'ArrowLeft' || k === 'ArrowRight') setCursor(model.cursorA + (k === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 1 : 0.1));
       else if (k === 'Home') setCursor(model.span[0]);
@@ -216,7 +246,7 @@ export default function ReplayScreen() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [picker, model, act, setCursor, stepEvent, togglePlay, setOverlay, cycleAlign]);
+  }, [picker, model, act, setCursor, stepEvent, togglePlay, setOverlay, cycleAlign, goLive]);
 
   const pickerEl = picker && (
     <DrivePicker source={source} theme={t} title={picker === 'open' ? 'Open a drive' : 'Lay a second drive over this one'}
@@ -229,7 +259,10 @@ export default function ReplayScreen() {
     return (
       <div style={{ position: 'relative', flexGrow: 1, background: t.bg, color: t.fg, fontFamily: FONTS.sans, padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
         <div style={{ fontSize: 15, fontWeight: 600, color: t.fg2 }}>{status}</div>
-        <button type="button" onClick={() => setPicker('open')} style={btnStyle(t, true)}>Open a drive (O)</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" onClick={() => setPicker('open')} style={btnStyle(t, true)}>Open a drive (O)</button>
+          {!live && <button type="button" onClick={goLive} style={btnStyle(t)}>Live (L)</button>}
+        </div>
         {pickerEl}
       </div>
     );
@@ -294,9 +327,12 @@ export default function ReplayScreen() {
           })}
           <div style={{ position: 'absolute', left: `${frac(tA) * 100}%`, top: 0, bottom: 0, width: 3, background: t.livePoint }} />
         </div>
-        <span style={{ fontSize: 12, fontWeight: 600, color: t.fg2, whiteSpace: 'nowrap' }}>◀ ▶ step 0.1 s · [ ] prev/next event</span>
+        {!compact && <span style={{ fontSize: 12, fontWeight: 600, color: t.fg2, whiteSpace: 'nowrap' }}>◀ ▶ step 0.1 s</span>}
+        <button type="button" aria-label="Previous event" title="Previous event ([)" disabled={live} onClick={() => stepEvent(-1)} style={btnStyle(t)}>‹ Event</button>
+        <button type="button" aria-label="Next event" title="Next event (])" disabled={live} onClick={() => stepEvent(1)} style={btnStyle(t)}>Event ›</button>
+        <button type="button" aria-pressed={live} onClick={goLive} style={btnStyle(t, live)}>Live (L)</button>
         <button type="button" onClick={() => setPicker('open')} style={btnStyle(t)}>Open (O)</button>
-        <button type="button" onClick={() => (model.overlayName ? void setOverlay(null) : setPicker('compare'))} style={btnStyle(t)}>
+        <button type="button" disabled={live} onClick={() => (model.overlayName ? void setOverlay(null) : setPicker('compare'))} style={btnStyle(t)}>
           {model.overlayName ? 'Remove compare' : 'Compare (C)'}
         </button>
       </div>
@@ -304,7 +340,7 @@ export default function ReplayScreen() {
       {/* what is open, the second drive */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '3px 10px', fontSize: 12.5, fontWeight: 600, color: t.fg2, minHeight: 22 }}>
         <span data-testid="drive-name" style={{ fontFamily: FONTS.mono, color: t.fg, fontWeight: 700 }}>{drive.info.name}</span>
-        <span>{length(drive.info.durationS)}</span>
+        <span>{live ? `last ${LIVE_WINDOW_S} s · O opens a drive` : length(drive.info.durationS)}</span>
         {model.overlayName && (
           <>
             <span style={{ width: 10, height: 10, background: t.rule, display: 'inline-block' }} />

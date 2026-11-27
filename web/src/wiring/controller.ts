@@ -28,6 +28,7 @@ import type { FileStore } from '../core/store/filestore';
 import { refName, type StoreOptions } from '../core/store/writer';
 import type { ChannelSpec, ChannelState, EcuRead, LinkState, LinkStats, MathSpec, PortInfo, Transport, TransportPicker } from '../core/types';
 import { drivesChanged, setDriveSource } from '../ui/replay/source';
+import { DEMO_DRIVE, withDemoDrive } from '../ui/replay/demodrive';
 import { MapStore, type LoadedMap } from './maps';
 import { obd2Fallback, type Obd2FallbackHooks } from './obd2fallback';
 import { LivePipeline } from './pipeline';
@@ -77,6 +78,15 @@ export function holdDbLock(name = 'hondalog.db'): Promise<boolean> {
   });
 }
 
+/** "STALL 23:03:07" and the cause, worded as the desktop's (session.py, chrome.py StallBanner). */
+export function stallBanner(drive: string, e: { reason: string; message: string; t: number }, epochUnix: number) {
+  const wall = new Date((epochUnix + e.t) * 1000);
+  const hms = [wall.getHours(), wall.getMinutes(), wall.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+  const cause = ({ rpm: 'RPM dropped to 0.', link: 'ECU went silent.' } as Record<string, string>)[e.reason]
+    ?? (e.message ? e.message.charAt(0).toUpperCase() + e.message.slice(1).replace(/\.$/, '') + '.' : 'Capture saved.');
+  return { title: `STALL ${hms}`, cause: `${cause} Saved ${drive}`, drive, t: e.t };
+}
+
 const ECU_DETAIL: Partial<Record<LinkState, string>> = { connecting: 'connecting', error: 'no reply' };
 
 export class AppController {
@@ -113,6 +123,8 @@ export class AppController {
   private everUp = false;
   private companionPaused = false;
   private livePauses = 0;
+  /** Wall time (unix s) of drive time 0 of the recording, for the stall banner's clock. */
+  private recEpoch = 0;
 
   constructor(readonly opts: ControllerOptions) {
     this.maps = new MapStore(opts.files);
@@ -218,6 +230,7 @@ export class AppController {
       onPid: (t, pid, raw) => this.onPid(t, pid, raw),
     });
     this.poller = poller;
+    this.useDemoDrive(sim);
     if (this.livePauses > 0) poller.pause();      // reconnected during a poke test
     void poller.start().catch((e: unknown) => { this.lastError = `poller: ${String(e)}`; });
     if (this.opts.companion !== false && !sim) void this.startCompanion();
@@ -234,7 +247,18 @@ export class AppController {
     this.transport = null;
     this.source = null;
     useSession.getState().setEcu({ state: 'stopped', rateHz: 0, simulated: false, obd2: false, detail: '' });
+    this.useDemoDrive(false);
     this.markStale();
+  }
+
+  /** The simulator comes with a recorded demo drive (GPS track, a 3rd-gear WOT
+   *  pull) so Replay, Power and GPS have something to show offline. */
+  private useDemoDrive(on: boolean): void {
+    if (!this.store) return;
+    setDriveSource(on ? withDemoDrive(this.store) : this.store);
+    const s = useSession.getState();
+    if (on && !s.replayDrive) useSession.setState({ replayDrive: DEMO_DRIVE });
+    if (!on && s.replayDrive === DEMO_DRIVE) useSession.setState({ replayDrive: null });
   }
 
   // ------------------------------------------------------------ the poke test
@@ -413,11 +437,15 @@ export class AppController {
       useSession.getState().stopRecording();
       return;
     }
+    this.recEpoch = epochUnix;
     recorder.onCapture = (e) => {
-      const st = useSession.getState().stall;
-      useSession.getState().setStall({ count: st.count + 1, lastFile: refName(e.ref), lastT: e.t, state: 'triggered' });
+      const s = useSession.getState();
+      const name = refName(e.ref);
+      s.setStall({ count: s.stall.count + 1, lastFile: name, lastT: e.t, state: 'triggered' });
+      s.showStallBanner(stallBanner(name, e, this.recEpoch));
       drivesChanged();
     };
+    useSession.getState().say(`Recording to ${recorder.ref?.drive ?? 'hondalog.db'}`);
     this.refreshDrive(true);
     drivesChanged();
   }
@@ -427,6 +455,7 @@ export class AppController {
     if (!live?.recording) return;
     await live.stopRecording();
     useSession.getState().setStall({ state: 'off', bufferS: 0, postLeftS: 0 });
+    useSession.getState().say('Recording stopped');
     drivesChanged();
   }
 
@@ -459,6 +488,16 @@ export class AppController {
       this.refreshDrive();
     }
     if (this.companion) s.setCyd(this.cydStatus());
+    s.setLinkInfo(this.linkInfo());
+  }
+
+  /** The bottom strip's link summary (desktop main_window.py _link_info). */
+  linkInfo(): string {
+    const map = this.map;
+    if (!map) return '';
+    const port = this.transport ? (this.transport.kind === 'sim' ? 'simulator' : this.transport.label) : 'no port';
+    const unverified = map.channels.filter((c) => !map.isVerified(c.name)).length;
+    return `${port} · map ${map.version.split(' ')[0]} · ${map.channels.length} ch · ${unverified} unverified`;
   }
 
   // ------------------------------------------------------------ the CYD

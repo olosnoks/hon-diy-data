@@ -58,8 +58,11 @@ describe('status chips', () => {
   it('ECU', () => {
     const s = useSession.getState();
     expect(ecuChip(s.ecu, DRACULA).text).toBe('ECU off');
-    expect(ecuChip({ ...s.ecu, state: 'ok', rateHz: 12.1 }, DRACULA)).toMatchObject({ text: 'ECU 12.1 Hz', color: DRACULA.ok });
-    expect(ecuChip({ ...s.ecu, state: 'error', detail: 'port lost' }, DRACULA)).toMatchObject({ text: 'ECU port lost', color: DRACULA.alarm });
+    expect(ecuChip({ ...s.ecu, state: 'ok', rateHz: 12.1 }, DRACULA)).toMatchObject({ text: 'ECU', figures: ['12.1 Hz'], color: DRACULA.ok });
+    // "N err" once the poller counted errors
+    expect(ecuChip({ ...s.ecu, state: 'ok', rateHz: 12.1, errors: 3 }, DRACULA).figures).toEqual(['12.1 Hz', '3 err']);
+    // silent / lost: the alarm-filled chip
+    expect(ecuChip({ ...s.ecu, state: 'error', detail: 'port lost' }, DRACULA)).toMatchObject({ text: 'ECU port lost', bad: true });
   });
   it('stall and CYD', () => {
     const s = useSession.getState();

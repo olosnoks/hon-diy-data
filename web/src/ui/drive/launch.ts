@@ -6,12 +6,21 @@
  * the window is the launch low.
  *
  * Thresholds from docs/analysis/2026-11-26/drive-idle-control.md: every
- * near-stall went below 600 rpm; 400 rpm is taken as the stall line (an
- * assumption made there, kept here and said so on screen).
+ * near-stall went below 600 rpm.
+ *
+ * The bar shows rpm − idle target (both apps, PARITY-DECISIONS row 1): a
+ * −300…+700 rpm scale, red below −150, yellow from −150 to the target.
  */
 
-export const STALL_LINE = 400;
-export const DANGER = 600;
+export const LAUNCH_LO = -300;
+export const LAUNCH_HI = 700;
+export const LAUNCH_RED = -150;
+
+/** +124, −12, ±0 with a true minus sign (desktop tiles.py signed_rpm). */
+export function signedRpm(v: number): string {
+  const text = Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  return (v <= -0.5 ? '−' : v >= 0.5 ? '+' : '±') + text;
+}
 
 export interface LaunchState {
   active: boolean;

@@ -97,8 +97,14 @@ describe('AppController on the simulator', () => {
     const d = await app.store!.loadDrive(drives[0]!.name);
     expect(d.series.rpm!.t.length).toBeGreaterThan(5);
     expect(d.events.some((e) => e.text.includes('test mark'))).toBe(true);
+    // the simulator brings the recorded demo drive; the bottom strip has the link summary
+    const listed = (await useDriveSource.getState().source.listDrives()).map((x) => x.name);
+    expect(listed).toContain('demo_drive');
+    expect(listed).not.toContain('demo_drive_missing');
+    expect(useSession.getState().linkInfo).toMatch(/^simulator · map \S+ · \d+ ch · \d+ unverified$/);
     await app.disconnect();
     expect(useSession.getState().ecu.state).toBe('stopped');
+    expect((await useDriveSource.getState().source.listDrives()).map((x) => x.name)).not.toContain('demo_drive');
   }, 30000);
 });
 

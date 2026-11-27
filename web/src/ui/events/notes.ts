@@ -10,7 +10,8 @@
  */
 import { create } from 'zustand';
 import { eventKey } from '../../core/store/eventnotes';
-import type { DriveStore, EventNote } from '../../core/types';
+import type { DriveStore, EventNote, LoadedDrive } from '../../core/types';
+import { valueAt } from '../../core/analysis/cursors';
 
 /** Where notes lived before they moved into the database (and still do for the demo drives). */
 export const LOCAL_KEY = 'hondalog.events.notes';
@@ -52,6 +53,24 @@ function writeLocal(s: Saved): void {
 
 const inDb = (s: NotesSource | null): s is Required<NotesSource> => !!s?.loadEventNotes && !!s.saveEventNote;
 
+/**
+ * The web once filed hard accelerations, hard braking and hard corners under
+ * one kind, 'harsh'; the desktop's kinds are harsh_accel / harsh_brake (and
+ * corner). Notes kept under 'harsh' are found again by the events now there.
+ */
+export const OLD_HARSH = 'harsh';
+const HARSH_NOW = new Set(['harsh_accel', 'harsh_brake', 'corner']);
+const oldLocalId = (e: NoteTarget) => `${e.drive}@${OLD_HARSH}@${e.t.toFixed(2)}`;
+
+/** Which kind an old 'harsh' note at t is now: by the sign of the speed change around t. */
+export function harshKindAt(drive: LoadedDrive, t: number): 'harsh_accel' | 'harsh_brake' | null {
+  const vss = drive.series.vss;
+  if (!vss || !vss.t.length) return null;
+  const dv = valueAt(vss, t + 0.75) - valueAt(vss, t - 0.75);
+  if (!Number.isFinite(dv) || dv === 0) return null;
+  return dv > 0 ? 'harsh_accel' : 'harsh_brake';
+}
+
 export const useEventNotes = create<NotesState>()((set, get) => ({
   verdicts: {},
   notes: {},
@@ -59,7 +78,17 @@ export const useEventNotes = create<NotesState>()((set, get) => ({
   error: '',
   async load(source, events) {
     if (!inDb(source)) {
-      set({ ...readLocal(), source });
+      const saved = readLocal();
+      let moved = false;
+      for (const e of events) {
+        if (!HARSH_NOW.has(e.kind)) continue;
+        const old = oldLocalId(e);
+        for (const m of [saved.verdicts, saved.notes]) {
+          if (m[old] !== undefined) { if (m[e.id] === undefined) m[e.id] = m[old]!; delete m[old]; moved = true; }
+        }
+      }
+      if (moved) writeLocal(saved);
+      set({ ...saved, source });
       return;
     }
     const verdicts: Record<string, string> = {};
@@ -69,7 +98,19 @@ export const useEventNotes = create<NotesState>()((set, get) => ({
       try { stored.set(d, await source.loadEventNotes(d)); } catch { stored.set(d, {}); }
     }
     for (const e of events) {
-      const row = stored.get(e.drive)?.[eventKey(e.kind, e.t)];
+      const rows = stored.get(e.drive);
+      let row = rows?.[eventKey(e.kind, e.t)];
+      const oldKey = eventKey(OLD_HARSH, e.t);
+      if (!row && HARSH_NOW.has(e.kind) && rows?.[oldKey]) {
+        // a note filed under the old 'harsh' kind: move it to this event's kind
+        row = rows[oldKey]!;
+        delete rows[oldKey];
+        const change = { note: row.note, verdict: row.verdict };
+        try {
+          await source.saveEventNote(e.drive, eventKey(e.kind, e.t), { ...change, kind: e.kind, t: e.t });
+          await source.saveEventNote(e.drive, oldKey, { note: '', verdict: '' });
+        } catch { /* stays under the old key; shown anyway */ }
+      }
       if (!row) continue;
       if (row.verdict) verdicts[e.id] = row.verdict;
       if (row.note) notes[e.id] = row.note;
@@ -115,9 +156,13 @@ function parseOldId(id: string): { drive: string; kind: string; t: number } | nu
  * Move the notes and verdicts kept on the device (before they went into the
  * database) into the drive store, once: every entry whose drive is in the
  * store is written there and removed from the device; entries for drives the
- * store does not have stay where they are. Returns how many moved.
+ * store does not have stay where they are. Notes of the old kind 'harsh' are
+ * filed as harsh_accel / harsh_brake by `harshKind` (the sign of the speed
+ * change, harshKindAt); without it, or when it cannot tell, they stay on the
+ * device. Returns how many moved.
  */
-export async function migrateLocalNotes(store: Required<NotesSource>, storage: Storage | undefined = globalThis.localStorage): Promise<number> {
+export async function migrateLocalNotes(store: Required<NotesSource>, storage: Storage | undefined = globalThis.localStorage,
+  harshKind?: (drive: string, t: number) => Promise<string | null>): Promise<number> {
   let raw: string | null = null;
   try { raw = storage?.getItem(LOCAL_KEY) ?? null; } catch { raw = null; }
   if (!raw || !storage) return 0;
@@ -137,7 +182,10 @@ export async function migrateLocalNotes(store: Required<NotesSource>, storage: S
     if (saved.verdicts[id]) change.verdict = saved.verdicts[id];
     try {
       if (!at) throw new Error('unknown id');
-      await store.saveEventNote(at.drive, eventKey(at.kind, at.t), { ...change, kind: at.kind, t: at.t });
+      // old 'harsh' notes go to harsh_accel / harsh_brake by the sign of the speed change
+      const kind = at.kind === OLD_HARSH ? await harshKind?.(at.drive, at.t) : at.kind;
+      if (!kind) throw new Error('cannot tell accel from brake');
+      await store.saveEventNote(at.drive, eventKey(kind, at.t), { ...change, kind, t: at.t });
       moved++;
     } catch {
       if (saved.notes[id]) left.notes[id] = saved.notes[id]!;

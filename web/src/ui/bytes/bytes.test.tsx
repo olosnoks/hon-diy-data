@@ -121,6 +121,11 @@ describe('F7 Bytes screen', () => {
   it('shows the verification scripts and the poke test steps', () => {
     setup();
     fireEvent.click(screen.getByRole('tab', { name: 'Verify' }));
+    // the desktop's guided wizard opens first
+    expect(screen.getByText('Map a channel · guided', { selector: 'h3' })).toBeTruthy();
+    expect(screen.getByTestId('wizard-title').textContent).toBe('Pick the channel to prove');
+    expect(screen.getAllByRole('option').map((o) => o.textContent)[0]).toMatch(/^rpm \(rpm\)/);
+    fireEvent.click(screen.getByRole('button', { name: 'Scripts' }));
     fireEvent.click(screen.getByText('Throttle sweep (engine off)'));
     expect(screen.getByRole('button', { name: 'Start' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));

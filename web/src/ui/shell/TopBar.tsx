@@ -1,9 +1,10 @@
 /**
  * The top bar (design canvas, every artboard): HONDALOG wordmark, the F1-F8
  * keys (tappable on touch), then the always-on status: ECU link and read
- * rate, REC, stall catcher, CYD black box, and a MARK button (Space).
+ * rate, REC, stall catcher, CYD black box, the theme toggle (◐ F9) and a
+ * MARK button (Space).
  */
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { SCREENS, useSession, type CydStatus, type EcuStatus, type StallStatus } from '../../core/session';
 import type { Theme } from '../theme';
 import { FONTS } from '../theme';
@@ -16,6 +17,14 @@ export const NARROW_BELOW = 1300;
 
 export const TOPBAR_H = 40;
 
+/**
+ * How much of the status is left out to make the bar fit (desktop TopBar._fit:
+ * the figures go first, the REC clock last of them, then whole items from the
+ * right): 1 short stall text, 2 no ECU rate / errors, 3 no REC clock, 4 no CYD
+ * chip, 5 no stall text.
+ */
+export const FIT_LEVELS = 5;
+
 type Lamp = 'square' | 'dot' | 'ring' | 'hollow';
 
 function LampIcon({ shape, color }: { shape: Lamp; color: string }) {
@@ -26,17 +35,23 @@ function LampIcon({ shape, color }: { shape: Lamp; color: string }) {
   return <span aria-hidden style={{ ...base, border: `1px solid ${color}` }} />;
 }
 
-export function ecuChip(ecu: EcuStatus, t: Theme): { text: string; color: string; shape: Lamp } {
+/** A status chip: lamp + text (+ mono figures). `bad` = filled with the alarm colour (desktop chrome.py "bad"). */
+export interface Chip { text: string; color: string; shape: Lamp; figures?: string[]; bad?: boolean }
+
+export function ecuChip(ecu: EcuStatus, t: Theme): Chip {
   const sim = ecu.simulated ? ' SIM' : '';
+  // "N err" once the poller has counted errors (desktop source_chip)
+  const err = ecu.errors > 0 ? [`${ecu.errors} err`] : [];
   switch (ecu.state) {
     case 'ok':
-      return { text: `ECU${sim}${ecu.obd2 ? ' OBD2' : ''} ${rate(ecu.rateHz)}`, color: t.ok, shape: 'square' };
+      return { text: `ECU${sim}${ecu.obd2 ? ' OBD2' : ''}`, figures: [rate(ecu.rateHz), ...err], color: t.ok, shape: 'square' };
     case 'iso_only':
-      return { text: `ECU${sim} OBD2 only`, color: t.warn, shape: 'square' };
+      return { text: `ECU${sim} OBD2 only`, figures: err, color: t.warn, shape: 'square' };
     case 'connecting':
       return { text: `ECU${sim} ${ecu.detail || 'connecting'}`, color: t.warn, shape: 'square' };
     case 'error':
-      return { text: `ECU ${ecu.detail || 'no reply'}`, color: t.alarm, shape: 'square' };
+      // silent / port lost: the alarm-filled chip
+      return { text: `ECU ${ecu.detail || 'no reply'}`, figures: err, color: t.onAlarm, shape: 'square', bad: true };
     default:
       return { text: 'ECU off', color: t.comment, shape: 'hollow' };
   }
@@ -52,7 +67,7 @@ export function stallText(st: StallStatus, short = false): { text: string; hot: 
   }
 }
 
-export function cydChip(cyd: CydStatus, t: Theme): { text: string; color: string; shape: Lamp; title: string } {
+export function cydChip(cyd: CydStatus, t: Theme): Chip & { title: string } {
   const bits = [
     cyd.mode !== 'off' ? `link ${cyd.mode}` : '',
     cyd.sdLogging ? 'SD log on' : '',
@@ -65,7 +80,7 @@ export function cydChip(cyd: CydStatus, t: Theme): { text: string; color: string
   }
   if (cyd.state === 'connecting') return { text: 'CYD connecting', color: t.warn, shape: 'square', title };
   if (cyd.state === 'silent' || cyd.state === 'lost')
-    return { text: cyd.state === 'lost' ? 'CYD port lost' : 'CYD silent', color: t.alarm, shape: 'square', title };
+    return { text: cyd.state === 'lost' ? 'CYD port lost' : 'CYD silent', color: t.onAlarm, shape: 'square', title, bad: true };
   return { text: 'CYD off', color: t.comment, shape: 'hollow', title };
 }
 
@@ -84,6 +99,33 @@ const chipBtn: CSSProperties = {
   padding: 0, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', height: '100%',
 };
 
+/** The chip's body; a bad chip is filled with the alarm colour, 6 px past either end (desktop draw_chip). */
+function ChipBody({ c, t }: { c: Chip; t: Theme }) {
+  return (
+    <span data-bad={c.bad ? 'true' : undefined}
+      style={{ display: 'flex', alignItems: 'center', gap: 6, color: c.bad ? t.onAlarm : t.fg, fontWeight: c.bad ? 800 : 600,
+        ...(c.bad ? { background: t.alarm, padding: '3px 6px' } : {}) }}>
+      <LampIcon shape={c.shape} color={c.color} />
+      {c.text}
+      {c.figures?.map((f) => <span key={f} style={{ fontFamily: FONTS.mono, fontWeight: 700 }}>{' '}{f}</span>)}
+    </span>
+  );
+}
+
+/** ◐ F9: the theme toggle, a tap target for the head unit (desktop BarButton "half"). */
+function ThemeButton({ t, narrow }: { t: Theme; narrow: boolean }) {
+  const name = t.name === 'dracula' ? 'Dracula' : 'Darker';
+  return (
+    <button type="button" data-testid="theme-toggle" aria-label={`Theme: ${name}. F9 switches Dracula / Darker`}
+      title={`Theme: ${name}. F9 switches Dracula / Darker`} onClick={() => useSession.getState().toggleTheme()}
+      style={{ display: 'flex', alignItems: 'center', gap: 6, border: 0, borderLeft: `2px solid ${t.rule}`, background: t.bg, color: t.fg,
+        padding: narrow ? '0 7px' : '0 10px', cursor: 'pointer', flexShrink: 0, minWidth: 44, justifyContent: 'center' }}>
+      <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>◐</span>
+      <span style={{ fontFamily: FONTS.mono, fontSize: 11, fontWeight: 700, border: `1.5px solid ${t.fg}`, padding: '0 4px' }}>F9</span>
+    </button>
+  );
+}
+
 export function TopBar() {
   const t = useTheme();
   const screen = useSession((s) => s.screen);
@@ -94,11 +136,22 @@ export function TopBar() {
   const rec = useSession((s) => s.recording);
   const marks = useSession((s) => s.marks.length);
   const now = useSecondTick(rec.active);
-  const narrow = useStageSize().width < NARROW_BELOW;
+  const stageW = useStageSize().width;
+  const narrow = stageW < NARROW_BELOW;
+  // fit: start from everything whenever what is shown changes, then drop until it fits
+  const statusRef = useRef<HTMLDivElement>(null);
+  const fitKey = `${ecu.state}|${ecu.errors > 0}|${ecu.detail ?? ''}|${stall.state}|${cyd.state}|${cyd.mapMatch}|${rec.active}|${Math.round(stageW)}`;
+  const [fitState, setFitState] = useState({ key: fitKey, level: 0 });
+  const fit = fitState.key === fitKey ? fitState.level : 0;
+  useLayoutEffect(() => {
+    const el = statusRef.current;
+    if (el && fit < FIT_LEVELS && el.scrollWidth > el.clientWidth + 1) setFitState({ key: fitKey, level: fit + 1 });
+  });
 
-  const e = ecuChip(ecu, t);
+  const e0 = ecuChip(ecu, t);
+  const e = fit >= 2 ? { ...e0, figures: [] } : e0;
   const c = cydChip(cyd, t);
-  const st = stallText(stall, narrow);
+  const st = stallText(stall, narrow || fit >= 1);
   const elapsed = rec.active && rec.startedUnixMs !== null ? (now - rec.startedUnixMs) / 1000 : 0;
 
   return (
@@ -134,10 +187,9 @@ export function TopBar() {
         })}
       </nav>
       <div style={{ flexGrow: 1 }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: narrow ? 9 : 14, padding: narrow ? '0 8px' : '0 14px', borderLeft: `2px solid ${t.rule}`, minWidth: 0, overflow: 'hidden' }}>
+      <div ref={statusRef} data-fit={fit} style={{ display: 'flex', alignItems: 'center', gap: narrow ? 9 : 14, padding: narrow ? '0 8px' : '0 14px', borderLeft: `2px solid ${t.rule}`, minWidth: 0, overflow: 'hidden' }}>
         <button type="button" title="Connection (F8 Setup)" onClick={() => setScreen('setup')} style={chipBtn} data-testid="status-ecu">
-          <LampIcon shape={e.shape} color={e.color} />
-          {e.text}
+          <ChipBody c={e} t={t} />
         </button>
         <button
           type="button"
@@ -148,10 +200,10 @@ export function TopBar() {
         >
           <LampIcon shape={rec.active ? 'dot' : 'ring'} color={rec.active ? t.alarm : t.comment} />
           {rec.active ? (
-            <>REC <span style={{ fontFamily: FONTS.mono, fontWeight: 700 }}>{mmss(elapsed)}</span></>
+            fit >= 3 ? 'REC' : <>REC <span style={{ fontFamily: FONTS.mono, fontWeight: 700 }}>{mmss(elapsed)}</span></>
           ) : 'REC off'}
         </button>
-        <span
+        {fit < 5 && <span
           data-testid="status-stall"
           style={{
             fontSize: 12.5, fontWeight: st.hot ? 800 : 600, whiteSpace: 'nowrap',
@@ -159,12 +211,14 @@ export function TopBar() {
           }}
         >
           {st.text}
-        </span>
-        <button type="button" title={c.title} onClick={() => setScreen('setup')} style={chipBtn} data-testid="status-cyd">
-          <LampIcon shape={c.shape} color={c.color} />
-          {c.text}
-        </button>
+        </span>}
+        {fit < 4 && (
+          <button type="button" title={c.title} onClick={() => setScreen('setup')} style={chipBtn} data-testid="status-cyd">
+            <ChipBody c={c} t={t} />
+          </button>
+        )}
       </div>
+      <ThemeButton t={t} narrow={narrow} />
       <button
         type="button"
         title={`Mark this moment (Space) · ${marks} mark${marks === 1 ? '' : 's'}`}
@@ -175,7 +229,8 @@ export function TopBar() {
         }}
       >
         MARK
-        <span style={{ fontFamily: FONTS.mono, fontSize: 11, fontWeight: 700, border: `1.5px solid ${t.onAccent}`, padding: '0 4px' }}>Space</span>
+        {/* the head unit's narrow bar has no room for the key (it is a touch screen) */}
+        {!narrow && <span style={{ fontFamily: FONTS.mono, fontSize: 11, fontWeight: 700, border: `1.5px solid ${t.onAccent}`, padding: '0 4px' }}>Space</span>}
       </button>
     </header>
   );

@@ -6,7 +6,7 @@ import { DEMO_SPECS, demoFrame } from '../shell/demo';
 import { handleKey } from '../shell/keys';
 import { idleFrac } from './IdleBar';
 import LiveScreen from './index';
-import { GROUPS, tilesFor } from './layout';
+import { GROUPS, SWITCHES, tilesFor, unplacedChannels } from './layout';
 import { unmappedAddrs } from './RawDrawer';
 
 function feed(t = 5, omit: string[] = [], stale: string[] = []) {
@@ -28,10 +28,24 @@ describe('F1 Live layout', () => {
     expect(GROUPS.map((g) => g.title)).toEqual(['ENGINE', 'IDLE CONTROL', 'FUEL', 'IGNITION', 'ELECTRICAL', 'CYD · BLACK BOX']);
   });
 
-  it('appends unlisted channels of a group', () => {
-    const extra: ChannelSpec = { ...DEMO_SPECS[0]!, name: 'knock', label: 'Knock', group: 'ignition' };
-    const ch = { knock: { spec: extra, value: 0, t: 0, min: 0, max: 0, fresh: true, alarm: 0 as const } };
-    expect(tilesFor(GROUPS[3]!, ch).map((d) => d.name)).toEqual(['ign', 'vtec', 'vtec_psw', 'rpm_idx_3c', 'knock']);
+  it('uses the desktop group table: map channels only, second choices, unplaced to the drawer', () => {
+    const st = (name: string, group = '') => ({ spec: { ...DEMO_SPECS[0]!, name, label: name, group } as ChannelSpec, value: 0, t: 0, min: 0, max: 0, fresh: true, alarm: 0 as const });
+    const ch = Object.fromEntries(['ign', 'knock', 'load', 'o2_post', 'o2_2', 'extra'].map((n) => [n, st(n, 'ignition')]));
+    expect(GROUPS.map((g) => g.tiles.map((d) => d.name))).toEqual([
+      ['rpm', 'map', 'tps', 'load_ecu', 'load', 'ect', 'iat'],
+      ['idle_target', 'iac_cmd', 'iacv', 'iac_learn', 'ign_limit', 'vss'],
+      ['stft', 'ltft', 'o2', 'o2_2', 'o2_post', 'inj', 'purge_duty', 'fuel_status'],
+      ['ign', 'vtec', 'vtec_psw', 'knock'],
+      ['batt', 'alt_fr', 'eld'],
+      ['gps_speed', 'gear', 'trip', 'cyd_sd', 'cyd_link', 'cyd_stalls'],
+    ]);
+    expect(tilesFor(GROUPS[3]!, ch).map((d) => d.name)).toEqual(['ign', 'knock']);
+    expect(tilesFor(GROUPS[0]!, ch).map((d) => d.name)).toEqual(['load']);          // load_ecu is not in the map
+    expect(tilesFor(GROUPS[2]!, ch).map((d) => d.name)).toEqual(['o2_2']);          // o2_post only without o2_2
+    expect(tilesFor(GROUPS[5]!, ch)).toHaveLength(6);                                // the CYD's worked-out tiles always
+    expect(tilesFor(GROUPS[0]!, {}).map((d) => d.name)).toEqual(['rpm', 'map', 'tps', 'load_ecu', 'ect', 'iat']);
+    expect(unplacedChannels(ch)).toEqual(['extra']);
+    expect(SWITCHES.map((x) => x.name)).toEqual(['starter', 'brake', 'psp', 'ac_sw', 'ac_clutch', 'fan', 'fuel_pump', 'closed_loop', 'o2_heater', 'mil']);
   });
 
   it('idle bar maps 500-1200 rpm', () => {
@@ -69,11 +83,16 @@ describe('LiveScreen', () => {
     expect(screen.getByText('yellow = stall zone')).toBeTruthy();
   });
 
-  it('stale is hatched with ---, a missing channel says so', () => {
+  it('stale is hatched with ---, a channel the map lacks is not shown', () => {
     feed(5, ['iat'], ['map']);
     render(<LiveScreen />);
     expect(screen.getByTestId('value-map').textContent).toBe('---');
     expect(screen.getByTestId('tile-map').getAttribute('data-stale')).toBe('true');
+    expect(screen.queryByTestId('tile-iat')).toBeNull();
+  });
+
+  it('before any map, the table shows as placeholders', () => {
+    render(<LiveScreen />);
     expect(within(screen.getByTestId('tile-iat')).getByText('not in address map')).toBeTruthy();
   });
 

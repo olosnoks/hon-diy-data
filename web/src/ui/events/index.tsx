@@ -3,7 +3,8 @@
  * harsh driving and marks across the day's drives (design canvas "F3 Events").
  * Filter chips; the selected event gets its verdict, a "why" from the signals
  * around it and a small timeline; Open in Replay (Enter), Show on GPS map,
- * a note and the owner's own verdict. ↑ / ↓ move through the list.
+ * a note and the owner's own verdict. ↑ / ↓ move through the list; ◀ ▶
+ * (PgUp / PgDn) and the dropdown pick the day.
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { LoadedDrive } from '../../core/types';
@@ -93,12 +94,25 @@ export default function EventsScreen() {
     return c;
   }, [events]);
 
-  // keys: ↑ ↓ through the list, Enter opens in Replay
+  // days are newest first: the previous day is the next one in the list
+  const dayIndex = dayKey ? days.indexOf(dayKey) : -1;
+  const stepDay = (direction: number) => {
+    const i = dayIndex - direction;
+    if (dayIndex >= 0 && i >= 0 && i < days.length) { setDayKey(days[i]!); setSelId(null); }
+  };
+  const dayBtn = (on: boolean) => ({
+    width: 34, minHeight: 30, fontSize: 12, cursor: on ? 'pointer' : 'default', fontFamily: FONTS.sans,
+    background: t.bg, color: on ? t.fg : t.comment, border: `2px solid ${on ? t.rule : t.line}`, padding: 0,
+  });
+
+  // keys: ↑ ↓ through the list, Enter opens in Replay, PgUp / PgDn the previous / next day
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) return;
-      if (e.altKey || e.ctrlKey || e.metaKey || !shown.length) return;
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key === 'PageUp' || e.key === 'PageDown') { stepDay(e.key === 'PageUp' ? -1 : 1); e.preventDefault(); return; }
+      if (!shown.length) return;
       const i = sel ? shown.indexOf(sel) : -1;
       if (e.key === 'ArrowDown') { setSelId(shown[Math.min(shown.length - 1, i + 1)]!.id); e.preventDefault(); }
       else if (e.key === 'ArrowUp') { setSelId(shown[Math.max(0, i - 1)]!.id); e.preventDefault(); }
@@ -106,7 +120,8 @@ export default function EventsScreen() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [shown, sel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown, sel, days, dayKey]);
 
   const totalS = (data?.drives ?? []).reduce((s, d) => s + d.info.durationS, 0);
   const chip = (on: boolean) => ({
@@ -125,12 +140,14 @@ export default function EventsScreen() {
     <div style={{ flexGrow: 1, minHeight: 0, display: 'flex', background: t.bg, color: t.fg, fontFamily: FONTS.sans }}>
       <section style={{ width: 'clamp(320px, 41%, 560px)', flexShrink: 0, borderRight: `2px solid ${t.rule}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px 0', fontSize: 12.5, fontWeight: 600, color: t.fg2 }}>
-          {days.length > 1 ? (
-            <select aria-label="Day" value={dayKey ?? ''} onChange={(e) => { setDayKey(e.target.value); setSelId(null); }}
-              style={{ background: t.bg, color: t.fg, border: `1px solid ${t.rule}`, fontFamily: FONTS.sans, fontSize: 12.5, fontWeight: 600 }}>
-              {days.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
-          ) : <span>{dayKey}</span>}
+          <button type="button" aria-label="Previous day" title="Previous day (PgUp)" disabled={dayIndex < 0 || dayIndex >= days.length - 1}
+            onClick={() => stepDay(-1)} style={dayBtn(dayIndex >= 0 && dayIndex < days.length - 1)}>◀</button>
+          <button type="button" aria-label="Next day" title="Next day (PgDn)" disabled={dayIndex <= 0}
+            onClick={() => stepDay(1)} style={dayBtn(dayIndex > 0)}>▶</button>
+          <select aria-label="Day" value={dayKey ?? ''} disabled={!days.length} onChange={(e) => { setDayKey(e.target.value); setSelId(null); }}
+            style={{ background: t.bg, color: t.fg, border: `1px solid ${t.rule}`, fontFamily: FONTS.sans, fontSize: 12.5, fontWeight: 600, minHeight: 30 }}>
+            {days.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
           <span data-testid="summary">· {data?.drives.length ?? 0} drive{data?.drives.length === 1 ? '' : 's'} · {Math.round(totalS / 60)} min</span>
         </div>
         <div role="group" aria-label="Filter" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '10px 12px', borderBottom: `1px solid ${t.rule}` }}>

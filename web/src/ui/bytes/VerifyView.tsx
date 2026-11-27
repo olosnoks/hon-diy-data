@@ -1,9 +1,11 @@
-/** Verify: the guided verification scripts (mapping/verify.py) run on the
- *  live sweeps: phases with instructions and minimum times, typed
- *  references, live verdicts, then confirm / reject per channel. */
+/** Verify: "Map a channel · guided" (the desktop's wizard, MapWizardCard),
+ *  and the verification scripts (mapping/verify.py) run on the live sweeps:
+ *  phases with instructions and minimum times, typed references, live
+ *  verdicts, then confirm / reject per channel. */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Check, mono, Note, StatusMark, TextInput, useTheme } from './controls';
+import { MapWizardCard } from './MapWizardCard';
 import type { ParsedMap } from './model/mapdoc';
 import type { MemoryScanner } from './model/scanner';
 import {
@@ -21,7 +23,31 @@ function VerdictMark({ status }: { status: Verdict }) {
   return <span style={{ ...style, border: `2px solid ${t.comment}`, color: t.fg2 }}>SKIP</span>;
 }
 
-export function VerifyView(props: { scanner: MemoryScanner; map: ParsedMap | null; mapText: string; setMapText: (t: string) => void; clock: () => number }) {
+type VerifyProps = { scanner: MemoryScanner; map: ParsedMap | null; mapText: string; setMapText: (t: string) => void; clock: () => number };
+export const VERIFY_MODES = [['guided', 'Map a channel · guided'], ['scripts', 'Scripts']] as const;
+
+export function VerifyView(props: VerifyProps) {
+  const t = useTheme();
+  const [mode, setMode] = useState<'guided' | 'scripts'>('guided');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%', minHeight: 0 }}>
+      <div role="group" aria-label="Verify mode" style={{ display: 'flex', flexShrink: 0 }}>
+        {VERIFY_MODES.map(([k, label]) => (
+          <button key={k} type="button" aria-pressed={mode === k} onClick={() => setMode(k)}
+            style={{ background: mode === k ? t.accent : 'transparent', color: mode === k ? t.onAccent : t.fg, border: `2px solid ${mode === k ? t.accent : t.line}`,
+              padding: '5px 12px', fontWeight: 700, fontSize: 13, cursor: 'pointer', borderRadius: 0, marginRight: -2 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div style={{ flex: '1 1 0', minHeight: 0 }}>
+        {mode === 'guided' ? <MapWizardCard {...props} /> : <ScriptsView {...props} />}
+      </div>
+    </div>
+  );
+}
+
+function ScriptsView(props: VerifyProps) {
   const t = useTheme();
   const { scanner, map } = props;
   const [scriptId, setScriptId] = useState('koeo');

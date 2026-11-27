@@ -17,11 +17,11 @@ beforeEach(() => {
 });
 
 describe('session store', () => {
-  it('starts on F1 Live, Dracula, metric, nothing connected', () => {
+  it('starts on F1 Live, Dracula, US units, nothing connected', () => {
     const s = useSession.getState();
     expect(s.screen).toBe('live');
     expect(s.theme).toBe('dracula');
-    expect(s.units).toBe('metric');
+    expect(s.units).toBe('imperial');
     expect(s.ecu.state).toBe('stopped');
     expect(s.cyd.state).toBe('off');
     expect(s.recording.active).toBe(false);

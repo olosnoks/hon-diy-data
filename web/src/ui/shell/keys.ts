@@ -1,8 +1,9 @@
 /**
  * The global keyboard map (main_window.py handle_key, design canvas):
  * F1-F8 screens, F9 theme Dracula <-> Darker, Space mark, Esc closes the open
- * panel (or acknowledges alarms). Ctrl+R start / stop recording. Enter on
- * F1 / F2 opens the stall the catcher caught last in F4 Replay.
+ * panel (or dismisses the stall banner and acknowledges alarms). Ctrl+R start /
+ * stop recording. Enter opens the stall banner's stall in F4 Replay (on F1 / F2
+ * without a banner: the stall the catcher caught last).
  */
 import { useEffect } from 'react';
 import { SCREENS, openInReplay, useSession } from '../../core/session';
@@ -48,6 +49,11 @@ export function handleKey(e: KeyLike): boolean {
   if (typing) return false; // the text field gets everything else
   if (e.key === ' ' || e.key === 'Spacebar') {
     if (!e.repeat) s.mark();
+    return true;
+  }
+  if (e.key === 'Enter' && s.stallBanner) {
+    // the stall banner is up: Enter opens that stall in Replay (desktop: any screen)
+    s.openStallBanner();
     return true;
   }
   if (e.key === 'Enter' && (s.screen === 'live' || s.screen === 'drive') && s.stall.lastFile) {

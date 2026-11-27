@@ -8,7 +8,7 @@
  * edited map text, and only the user's click applies it.
  */
 
-import { changedBits, findValue, rankAgainstChannel, rankShape } from './correlate';
+import { bitFormula, changedBits, findValue, rankAgainstChannel, rankShape } from './correlate';
 import { decodeWith, markChannel, type Evidence, type ParsedMap } from './mapdoc';
 import { SweepRecording, type Mark } from './sweeps';
 
@@ -209,6 +209,15 @@ export function judge(channel: string, results: CheckResult[]): ChannelVerdict {
 
 // ---- the session -----------------------------------------------------------------
 
+/** Where a channel might live instead, and the map fields that would point it there. */
+export interface Suggestion {
+  addr: number;
+  /** 0..1, higher fits better */
+  score: number;
+  label: string;
+  fields: { addr: number; length?: 1 | 2; endian?: 'big' | 'little'; formula?: string };
+}
+
 export interface SessionReport {
   script: string; title: string; started: string; durationS: number; mapVersion: string; mapHash: string; variant: string;
   verdicts: Record<string, ChannelVerdict>; references: Record<string, number>; referenceSources: Record<string, string>;
@@ -332,32 +341,46 @@ export class VerificationSession {
 
   /** Other places this channel might live, from the recorded sweeps (labels, best first). */
   suggest(channel: string, top = 5): string[] {
+    return this.suggestMatches(channel, top).map((m) => m.label);
+  }
+
+  /** The same, with what to write into the map for each (the guided wizard's candidates). */
+  suggestMatches(channel: string, top = 5): Suggestion[] {
     if (!this.recording.length) return [];
     const ch = this.map.channels.find((c) => c.name === channel);
     const order: Record<string, number> = { rise: 0, near_reference: 1, flag: 2, near_channel: 3 };
     const checks = this.script.checks.filter((c) => c.channel === channel && c.kind in order).sort((a, b) => order[a.kind]! - order[b.kind]!);
     const hex = (a: number) => `0x${a.toString(16).toUpperCase().padStart(2, '0')}`;
+    const at = (c: { addr: number; width: 1 | 2; endian: 'big' | 'little' }) => ({ addr: c.addr, length: c.width, endian: c.endian });
     for (const check of checks) {
       const mark = this.recording.marks.find((m) => m.label === check.phase);
       if (!mark) continue;
       const t1 = mark.t1 ?? this.now();
       const win = this.recording.window(mark.t0, t1);
-      let found: string[] = [];
+      let found: Suggestion[] = [];
       if (check.kind === 'rise') {
         found = rankShape(win, (check.params.direction as 'rise' | 'fall') ?? 'rise', mark.t0, t1, { top })
-          .map((m) => `${hex(m.candidate.addr)}${m.candidate.width === 2 ? ' u16' + (m.candidate.endian === 'big' ? 'be' : 'le') : ''} (score ${m.score.toFixed(2)})`);
+          .map((m) => ({
+            addr: m.candidate.addr, score: m.score, fields: at(m.candidate),
+            label: `${hex(m.candidate.addr)}${m.candidate.width === 2 ? ' u16' + (m.candidate.endian === 'big' ? 'be' : 'le') : ''} (score ${m.score.toFixed(2)})`,
+          }));
       } else if (check.kind === 'near_reference') {
         const ref = this.references[String(check.params.ref)];
         if (ref !== undefined) {
           const tol = Math.max(has(check, 'tol') ? P(check, 'tol') : 0, (has(check, 'rel_tol') ? P(check, 'rel_tol') : 0) * Math.abs(ref));
-          found = findValue(win, ref, ch?.formula ?? 'x', tol, 0, [1, 2], top).map((m) => `${hex(m.candidate.addr)} reads ${g(m.decoded)}`);
+          found = findValue(win, ref, ch?.formula ?? 'x', tol, 0, [1, 2], top)
+            .map((m) => ({ addr: m.candidate.addr, score: 1 / (1 + Math.abs(m.error)), fields: at(m.candidate), label: `${hex(m.candidate.addr)} reads ${g(m.decoded)}` }));
         }
       } else if (check.kind === 'flag') {
         const on = checks.find((c) => c.kind === 'flag' && c.params.value === 1);
-        if (on) found = changedBits(this.recording, on.phase).slice(0, top).map((b) => `${hex(b.addr)} bit ${b.bit}`);
+        if (on) {
+          found = changedBits(this.recording, on.phase).slice(0, top)
+            .map((b) => ({ addr: b.addr, score: b.purity, fields: { addr: b.addr, formula: bitFormula(b) }, label: `${hex(b.addr)} bit ${b.bit}` }));
+        }
       } else {
         try {
-          found = rankAgainstChannel(win, this.map, String(check.params.other), { top }).map((m) => `${hex(m.candidate.addr)} (score ${m.score.toFixed(2)})`);
+          found = rankAgainstChannel(win, this.map, String(check.params.other), { top })
+            .map((m) => ({ addr: m.candidate.addr, score: m.score, fields: at(m.candidate), label: `${hex(m.candidate.addr)} (score ${m.score.toFixed(2)})` }));
         } catch { /* the other channel is not in the map */ }
       }
       if (found.length) return found;

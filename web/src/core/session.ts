@@ -116,6 +116,19 @@ export interface DriveMoment { drive: string; t: number; seq: number }
 /** A span of a drive ("Open in Power"). */
 export interface DriveSpan { drive: string; t0: number; t1: number; seq: number }
 
+/** The global stall banner under the top bar (desktop chrome.py StallBanner):
+ *  "STALL 23:03:07" and the cause; Enter opens it in Replay, Esc dismisses it. */
+export interface StallBanner {
+  title: string;
+  cause: string;
+  /** The capture (drive name) and its trigger time, for Open in Replay. */
+  drive: string;
+  t: number;
+}
+
+/** A passing message in the bottom strip ("Marker 3 dropped"). */
+export interface StripMessage { text: string; untilMs: number }
+
 export const HISTORY_N = 120;
 export const HISTORY_DT = 0.5;
 
@@ -150,6 +163,13 @@ export interface SessionData {
   powerFocus: DriveSpan | null;
   /** The drive open in Replay (Events and Power start from it). */
   replayDrive: string | null;
+  // ---- the frame (top bar banner, bottom strip) ----
+  /** A caught stall waiting to be opened or dismissed. */
+  stallBanner: StallBanner | null;
+  /** A passing message for the bottom strip. */
+  message: StripMessage | null;
+  /** The link summary the bottom strip shows ("simulator · map p2p-guess7 · 41 ch · 12 unverified"). */
+  linkInfo: string;
 }
 
 export interface SessionActions {
@@ -180,6 +200,13 @@ export interface SessionActions {
   /** Esc: close the open panel, otherwise acknowledge alarms. */
   escape(): void;
   setDemo(on: boolean): void;
+  /** A passing message in the bottom strip, for `seconds` (default 6). */
+  say(text: string, seconds?: number): void;
+  showStallBanner(banner: StallBanner): void;
+  dismissStallBanner(): void;
+  /** Enter on the banner: dismiss it and open the stall in Replay. */
+  openStallBanner(): void;
+  setLinkInfo(text: string): void;
 }
 
 export type Session = SessionData & SessionActions;
@@ -214,7 +241,7 @@ export function initialSession(): SessionData {
   return {
     screen: 'live',
     theme: 'dracula',
-    units: 'metric',
+    units: 'imperial',
     panel: null,
     ecu: { state: 'stopped', rateHz: 0, errors: 0, simulated: false, obd2: false },
     cyd: { state: 'off', mode: 'off', sdLogging: false, mapMatch: null },
@@ -230,6 +257,9 @@ export function initialSession(): SessionData {
     gpsFocus: null,
     powerFocus: null,
     replayDrive: null,
+    stallBanner: null,
+    message: null,
+    linkInfo: '',
   };
 }
 
@@ -280,13 +310,27 @@ export const useSession = create<Session>()((set, get) => ({
   mark: (text) => {
     const marks = [...get().marks, text ? { unixMs: Date.now(), text } : { unixMs: Date.now() }];
     set({ marks });
+    // the desktop's words (session.py mark)
+    get().say(get().recording.active ? `Marker ${marks.length} dropped` : 'Not recording: marker ignored');
     return marks.length;
   },
   escape: () => {
-    if (get().panel !== null) set({ panel: null });
-    else get().acknowledgeAlarms();
+    if (get().panel !== null) { set({ panel: null }); return; }
+    // as the desktop: Esc dismisses the stall banner and acknowledges the alarms
+    if (get().stallBanner) set({ stallBanner: null });
+    get().acknowledgeAlarms();
   },
   setDemo: (demo) => set({ demo }),
+  say: (text, seconds = 6) => set({ message: { text, untilMs: Date.now() + seconds * 1000 } }),
+  showStallBanner: (stallBanner) => set({ stallBanner }),
+  dismissStallBanner: () => set({ stallBanner: null }),
+  openStallBanner: () => {
+    const b = get().stallBanner;
+    if (!b) return;
+    set({ stallBanner: null });
+    openInReplay(b.drive, b.t);
+  },
+  setLinkInfo: (linkInfo) => { if (linkInfo !== get().linkInfo) set({ linkInfo }); },
 }));
 
 // Theme, units and the last screen survive a reload.

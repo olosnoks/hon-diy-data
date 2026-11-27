@@ -1,9 +1,13 @@
 /**
  * F1 Live layout (design canvas "F1 Live: grouped by system"): six groups,
- * the tiles in each, their one-line notes, and the switches strip. Channels
- * are matched by name; a channel the map does not have shows as "not in
- * address map". Channels whose spec.group names a group but are not listed
- * here are appended to that group, so a new map entry shows up on its own.
+ * the tiles in each, their one-line notes, and the switches strip.
+ *
+ * The channel set per group is the desktop's group table (screens/sensors.py
+ * PANELS, SWITCHES, FALLBACK; PARITY-DECISIONS row 20): channels are matched
+ * by name, a channel the map does not have is not shown (until a map is
+ * known, the table's first choices show as "not in address map"), a second
+ * choice shows only when the first is not in the map, and a channel the
+ * table does not name goes to the Raw drawer.
  */
 import type { SessionData } from '../../core/session';
 import { formatBound } from '../shell/format';
@@ -57,8 +61,9 @@ export const GROUPS: GroupDef[] = [
       { name: 'rpm', note: (s) => `min ${bound(s, 'rpm', 'min')} · max ${bound(s, 'rpm', 'max')}` },
       { name: 'map', note: (s) => { const b = v(s, 'baro'); return b === null ? '' : `baro ${Math.round(b)}`; } },
       { name: 'tps', label: 'Throttle', note: 'opening, closed = 0' },
+      { name: 'load_ecu', label: 'Load', note: 'ECU calc' },
       { name: 'load', label: 'Load', note: 'ECU calc' },
-      { name: 'ect', label: 'Coolant', note: 'reads ~14 °C low?', noteWarn: true },
+      { name: 'ect', label: 'Coolant', note: (s) => (s.units === 'imperial' ? 'reads ~25 °F low?' : 'reads ~14 °C low?'), noteWarn: true },
       { name: 'iat', label: 'Intake air' },
     ],
   },
@@ -69,7 +74,7 @@ export const GROUPS: GroupDef[] = [
       { name: 'iac_cmd', label: 'IAC command', note: 'moves first' },
       { name: 'iacv', label: 'Idle valve', note: (s) => ((v(s, 'iacv') ?? 99) < 10 ? 'near floor' : ''), noteWarn: true },
       { name: 'iac_learn', label: 'IAC learn', note: (s) => ((v(s, 'ect') ?? 99) < 80 ? 'frozen: coolant low' : '') },
-      { name: 'rpm_map_idx', label: 'RPM×MAP idx' },
+      { name: 'ign_limit', label: 'RPM×MAP idx' },
       { name: 'vss', label: 'Speed', note: (s) => { const g = v(s, 'gear'); return g === null ? '' : `gear ${GEAR_WORD[Math.round(g)] ?? g}`; } },
     ],
   },
@@ -89,9 +94,11 @@ export const GROUPS: GroupDef[] = [
         noteWarn: (s) => Math.abs((v(s, 'stft') ?? 0) + (v(s, 'ltft') ?? 0)) >= 15,
       },
       { name: 'o2', label: 'O2 front', note: 'switching 0.1–0.9' },
+      { name: 'o2_2', label: 'O2 rear', note: 'post-cat' },
       { name: 'o2_post', label: 'O2 rear', note: 'post-cat' },
       { name: 'inj', label: 'Injector' },
-      { name: 'purge', label: 'Purge duty?' },
+      { name: 'purge_duty', label: 'Purge duty?' },
+      { name: 'fuel_status', label: 'Fuel status' },
     ],
   },
   {
@@ -100,7 +107,7 @@ export const GROUPS: GroupDef[] = [
       { name: 'ign', label: 'Timing', note: 'BTDC' },
       { name: 'vtec', label: 'VTEC', note: (s) => ((s.channels.vtec?.max ?? 0) >= 0.5 ? `seen at ${bound(s, 'rpm', 'max')}` : 'not seen this drive') },
       { name: 'vtec_psw', label: 'VTEC press. sw' },
-      { name: 'rpm_idx_3c', label: 'RPM idx 0x3C' },
+      { name: 'knock', label: 'RPM idx 0x3C' },
     ],
   },
   {
@@ -152,6 +159,7 @@ export const SWITCHES: { name: string; label: string }[] = [
   { name: 'psp', label: 'Steering load' },
   { name: 'ac_sw', label: 'A/C switch' },
   { name: 'ac_clutch', label: 'A/C clutch' },
+  { name: 'fan', label: 'Fan' },
   { name: 'fuel_pump', label: 'Fuel pump' },
   { name: 'closed_loop', label: 'Closed loop' },
   { name: 'o2_heater', label: 'O2 heater?' },
@@ -160,18 +168,31 @@ export const SWITCHES: { name: string; label: string }[] = [
 
 export const MAX_TILES = 9;
 
-/** The group's tiles plus unlisted channels whose spec.group is this group. */
+/** Second choices: shown only when the first is not in the map (desktop FALLBACK). */
+export const FALLBACK: Record<string, string> = { load: 'load_ecu', o2_post: 'o2_2' };
+/** Read into another tile's note, never a tile of their own (desktop CONSUMED). */
+export const CONSUMED = ['gps_lat', 'gps_lon', 'gps_heading', 'gps_sats', 'gps_fix'];
+
+/** The group's tiles: the table's channels the map has (the CYD group's worked-out tiles always). */
 export function tilesFor(group: GroupDef, channels: Ctx['channels']): TileDef[] {
-  const listed = new Set(group.tiles.map((t) => t.name));
-  const extra = Object.values(channels)
-    .filter((st) => 'group' in st.spec && st.spec.group === group.id && !listed.has(st.spec.name))
-    .map((st) => ({ name: st.spec.name }));
-  return [...group.tiles, ...extra].slice(0, MAX_TILES);
+  const known = Object.keys(channels).length > 0;
+  return group.tiles.filter((d) => {
+    if (group.id === 'cyd' || d.display) return true;
+    const first = FALLBACK[d.name];
+    if (!known) return !first;                  // no map yet: the first choices, as placeholders
+    if (first && channels[first]) return false;
+    return !!channels[d.name];
+  }).slice(0, MAX_TILES);
 }
 
-export function extraSwitches(channels: Ctx['channels']): { name: string; label: string }[] {
-  const listed = new Set(SWITCHES.map((s) => s.name));
-  return Object.values(channels)
-    .filter((st) => 'group' in st.spec && st.spec.group === 'switches' && !listed.has(st.spec.name))
-    .map((st) => ({ name: st.spec.name, label: st.spec.label }));
+const PLACED = new Set([...GROUPS.flatMap((g) => g.tiles.map((d) => d.name)), ...SWITCHES.map((x) => x.name), ...CONSUMED]);
+
+/** Channels the group table does not place (they go to the Raw drawer), by name. */
+export function unplacedChannels(channels: Ctx['channels']): string[] {
+  return Object.keys(channels).filter((n) => !PLACED.has(n)).sort();
+}
+
+/** No extra switches: the strip is the table's (others go to the Raw drawer). */
+export function extraSwitches(_channels: Ctx['channels']): { name: string; label: string }[] {
+  return [];
 }

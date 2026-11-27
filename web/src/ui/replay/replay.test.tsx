@@ -188,4 +188,51 @@ describe('F4 Replay', () => {
     expect(secs(clockText())).toBeCloseTo(secs(clock(A0)) + 47.1, 0);
     expect(useSession.getState().screen).toBe('replay');
   });
+
+  it('speed keys 1 / 2 / 4 as the desktop (0.5× / 1× / 4×)', async () => {
+    await open();
+    const pressed = () => within(screen.getByRole('group', { name: 'Speed' })).getAllByRole('button').find((b) => b.getAttribute('aria-pressed') === 'true')!.textContent;
+    expect(pressed()).toBe('1×');
+    await key('4');
+    expect(pressed()).toBe('4×');
+    await key('1');
+    expect(pressed()).toBe('0.5×');
+    await key('2');
+    expect(pressed()).toBe('1×');
+  });
+
+  it('‹ Event / Event › step through the events like [ ]', async () => {
+    await open();
+    const t0 = secs(clockText());
+    fireEvent.click(screen.getByRole('button', { name: 'Next event' }));
+    const t1 = secs(clockText());
+    expect(t1).toBeGreaterThan(t0);
+    fireEvent.click(screen.getByRole('button', { name: 'Next event' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Previous event' }));
+    near(secs(clockText()), t1);
+  });
+
+  it('L follows the live session (the last 40 s), opening a drive leaves it', async () => {
+    await open();
+    const spec = { name: 'rpm', label: 'RPM', units: 'rpm', min: 0, max: 8000, decimals: 0, addr: 0, length: 2, formula: 'x', status: 'verified', kind: 'value', group: 'engine' };
+    act(() => {
+      for (let i = 0; i < 30; i++) {
+        useSession.getState().updateChannels([{ spec: spec as never, value: 800 + i, t: 100 + i * 0.5, min: 800, max: 830, fresh: true, alarm: 0 }]);
+      }
+    });
+    await key('l');
+    await waitFor(() => expect(screen.getByTestId('drive-name').textContent).toBe('live'));
+    expect(screen.getByText('last 40 s · O opens a drive')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Live (L)' }).getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByRole('button', { name: 'Next event' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { openInReplay('drive_2026_11_26_2224', 47.1); });
+    await screen.findByText('drive_2026_11_26_2224', { selector: '[data-testid="drive-name"]' });
+    expect(screen.getByRole('button', { name: 'Live (L)' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('L with no live data says so', async () => {
+    await open();
+    await key('l');
+    expect(await screen.findByText(/Live: no data yet/)).toBeTruthy();
+  });
 });

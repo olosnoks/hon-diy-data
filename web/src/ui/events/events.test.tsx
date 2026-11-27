@@ -2,8 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import EventsScreen from './index';
-import { useEventNotes } from './notes';
-import { FixtureStore } from '../replay/fixture';
+import { harshKindAt, LOCAL_KEY, migrateLocalNotes, useEventNotes } from './notes';
+import { eventsOf, harshWords } from './detect';
+import { FixtureStore, fixtureDrives } from '../replay/fixture';
+import { demoDrive } from '../replay/demodrive';
+import type { EventNote, LoadedDrive } from '../../core/types';
+import { eventKey } from '../../core/store/eventnotes';
 import { setDriveSource } from '../replay/source';
 import { resetSession, useSession } from '../../core/session';
 
@@ -162,5 +166,70 @@ describe('F3 Events', () => {
     setDriveSource({ listDrives: async () => [], loadDrive: async () => { throw new Error('none'); } });
     render(<EventsScreen />);
     expect(await screen.findAllByText('No drives recorded yet.')).not.toHaveLength(0);
+  });
+
+  it('harsh events read as the desktop words them', () => {
+    expect(harshWords('harsh_brake', 0.38, 55.2, 21.4)).toMatchObject({ title: 'Harsh brake · 0.38 g', text: '0.38 g · 55→21 km/h' });
+    expect(harshWords('harsh_accel', 0.31, 4, 38).why).toBe('Acceleration of 0.31 g (3.0 m/s², from vss over 1.5 s) between 4 and 38 km/h.');
+    const brakes = eventsOf(fixtureDrives()[0]!).filter((e) => e.kind === 'harsh_brake');
+    expect(brakes.length).toBeGreaterThan(0);
+    for (const e of brakes) expect(e.text).toMatch(/^\d\.\d\d g · \d+→\d+ km\/h$/);
+  });
+
+  it('◀ ▶ and the dropdown pick the day (PgUp / PgDn too)', async () => {
+    const older: LoadedDrive = { ...demoDrive(), info: { ...demoDrive().info, name: 'drive_2026_11_25_2300', startedUnix: new Date(2026, 10, 25, 23, 0, 0).getTime() / 1000 } };
+    const store = new FixtureStore();
+    setDriveSource({
+      listDrives: async () => [...await store.listDrives(), older.info],
+      loadDrive: async (n: string) => (n === older.info.name ? older : store.loadDrive(n)),
+    });
+    await open();
+    const daySel = screen.getByRole('combobox', { name: 'Day' }) as HTMLSelectElement;
+    expect(daySel.value).toBe('2026-11-26');
+    expect((screen.getByRole('button', { name: 'Next day' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Previous day' }));
+    await screen.findByText(/1 drive · \d+ min/);
+    expect(daySel.value).toBe('2026-11-25');
+    expect((screen.getByRole('button', { name: 'Previous day' }) as HTMLButtonElement).disabled).toBe(true);
+    act(() => { fireEvent.keyDown(window, { key: 'PageDown' }); });
+    await screen.findByText(/2 drives · \d+ min/);
+    expect(daySel.value).toBe('2026-11-26');
+  });
+
+  it("old 'harsh' notes come back under harsh_accel / harsh_brake (device and database)", async () => {
+    const d = fixtureDrives()[0]!;
+    const brake = eventsOf(d).find((e) => e.kind === 'harsh_brake')!;
+    expect(harshKindAt(d, brake.t)).toBe('harsh_brake');
+    // on the device (the demo drives): the old id moves to the new one
+    localStorage.setItem(LOCAL_KEY, JSON.stringify({ verdicts: {}, notes: { [`${d.info.name}@harsh@${brake.t.toFixed(2)}`]: 'late on the brakes' } }));
+    await useEventNotes.getState().load(null, [brake]);
+    expect(useEventNotes.getState().notes[brake.id]).toBe('late on the brakes');
+    expect(JSON.parse(localStorage.getItem(LOCAL_KEY)!).notes).toEqual({ [brake.id]: 'late on the brakes' });
+    // in the database under the old key: found, rewritten under the new kind, the old row cleared
+    const rows: Record<string, EventNote> = { [`harsh@${brake.t.toFixed(1)}`]: { note: 'db note', verdict: 'driver', kind: 'harsh', t: brake.t } };
+    const writes: [string, Record<string, unknown>][] = [];
+    const src = {
+      loadEventNotes: async () => ({ ...rows }),
+      saveEventNote: async (_d: string, key: string, change: Record<string, unknown>) => { writes.push([key, change]); },
+    };
+    await useEventNotes.getState().load(src, [brake]);
+    expect(useEventNotes.getState().verdicts[brake.id]).toBe('driver');
+    expect(writes.map(([k]) => k)).toEqual([`harsh_brake@${brake.t.toFixed(1)}`, `harsh@${brake.t.toFixed(1)}`]);
+    expect(writes[1]![1]).toEqual({ note: '', verdict: '' });
+  });
+
+  it("start-up migration files old 'harsh' notes by the sign of the speed change", async () => {
+    const d = fixtureDrives()[0]!;
+    const brake = eventsOf(d).find((e) => e.kind === 'harsh_brake')!;
+    localStorage.setItem(LOCAL_KEY, JSON.stringify({ verdicts: { [`${d.info.name}@harsh@${brake.t.toFixed(2)}`]: 'driver' }, notes: {} }));
+    const saved: [string, string, Record<string, unknown>][] = [];
+    const store = { loadEventNotes: async () => ({}), saveEventNote: async (dr: string, k: string, c: Record<string, unknown>) => { saved.push([dr, k, c]); } };
+    expect(await migrateLocalNotes(store, localStorage, async (_dr, t) => harshKindAt(d, t))).toBe(1);
+    expect(saved[0]![1]).toBe(eventKey('harsh_brake', Number(brake.t.toFixed(2))));
+    expect(saved[0]![2]).toMatchObject({ verdict: 'driver', kind: 'harsh_brake' });
+    // without a way to tell, it stays on the device
+    localStorage.setItem(LOCAL_KEY, JSON.stringify({ verdicts: { 'x@harsh@1.00': 'driver' }, notes: {} }));
+    expect(await migrateLocalNotes(store, localStorage)).toBe(0);
+    expect(localStorage.getItem(LOCAL_KEY)).toContain('x@harsh@1.00');
   });
 });

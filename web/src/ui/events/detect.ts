@@ -99,6 +99,17 @@ function nearStallWhy(drive: LoadedDrive, t: number, minRpm: number, fall: numbe
   ].filter(Boolean).join(' ');
 }
 
+/** Harsh accel / brake in the desktop's words (analysis/events.py harsh): "0.38 g · 55→21 km/h". */
+export function harshWords(kind: 'harsh_accel' | 'harsh_brake', peakG: number, k0: number, k1: number): { title: string; text: string; why: string } {
+  const g2 = Number.isFinite(peakG) ? peakG.toFixed(2) : '?';
+  const k = (x: number) => (Number.isFinite(x) ? x.toFixed(0) : '?');
+  return {
+    title: `${kind === 'harsh_brake' ? 'Harsh brake' : 'Harsh accel'} · ${g2} g`,
+    text: `${g2} g · ${k(k0)}→${k(k1)} km/h`,
+    why: `${kind === 'harsh_brake' ? 'Deceleration' : 'Acceleration'} of ${g2} g (${Number.isFinite(peakG) ? (peakG * 9.80665).toFixed(1) : '?'} m/s², from vss over 1.5 s) between ${k(k0)} and ${k(k1)} km/h.`,
+  };
+}
+
 function fromCore(drive: LoadedDrive, e: AnalysisEvent): Omit<DriveEvent, 'id' | 'drive' | 'unix'> {
   const d = e.data;
   const s = drive.series;
@@ -135,7 +146,7 @@ function fromCore(drive: LoadedDrive, e: AnalysisEvent): Omit<DriveEvent, 'id' |
     case 'harsh_accel':
     case 'harsh_brake': {
       const g = d.peakG ?? NaN;
-      return { ...base, kind: e.kind, value: g, title: `${e.kind === 'harsh_brake' ? 'Harsh brake' : 'Harsh accel'} · ${num(Math.abs(g), 2)} g`, text: e.verdict };
+      return { ...base, kind: e.kind, value: g, ...harshWords(e.kind, Math.abs(g), v('vss', e.t), v('vss', e.t1)) };
     }
     case 'mark':
       return { ...base, kind: 'mark', value: NaN, title: e.label || 'Mark', text: e.verdict, why: '' };
@@ -226,7 +237,7 @@ export function autoVerdict(e: DriveEvent, all: DriveEvent[]): string {
     case 'dropout': return e.text.includes('engine ran') ? 'link only, engine ran' : 'link lost, check the engine';
     case 'key_off': return 'normal key-off';
     case 'vtec': return 'normal';
-    case 'harsh_accel': return Number(/from (\d+) km\/h/.exec(e.text)?.[1] ?? 99) < 10 ? 'hard launch' : 'hard pull';
+    case 'harsh_accel': return Number(/· (\d+)→/.exec(e.text)?.[1] ?? 99) < 10 ? 'hard launch' : 'hard pull';
     case 'harsh_brake': return 'hard stop';
     case 'corner': return 'hard corner';
     case 'knock': return 'knock retard';

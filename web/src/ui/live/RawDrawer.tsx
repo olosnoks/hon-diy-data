@@ -1,12 +1,15 @@
 /**
  * The raw bytes drawer on F1: every polled address the address map does not
- * decode, as hex and decimal. Opens from "Raw bytes (n) ▸", Esc closes.
+ * decode, as hex and decimal, and every channel the Live group table does not
+ * place (desktop sensors.py). Opens from "Raw bytes (n) ▸", Esc closes.
  * The full tools (verify, sweep, poke) are on F7 Bytes.
  */
 import { useShallow } from 'zustand/react/shallow';
 import { useSession, type SessionData } from '../../core/session';
 import { FONTS } from '../theme';
+import { formatValue, unitsOf } from '../shell/format';
 import { useTheme } from '../shell/useTheme';
+import { unplacedChannels } from './layout';
 
 export const RAW_PANEL = 'raw';
 
@@ -29,6 +32,9 @@ export function RawDrawer() {
   const addrs = useSession(useShallow(unmappedAddrs));
   const raw = useSession((s) => s.raw);
   const close = useSession((s) => s.closePanel);
+  const others = useSession(useShallow((s) => unplacedChannels(s.channels)));
+  const channels = useSession((s) => s.channels);
+  const units = useSession((s) => s.units);
   return (
     <aside
       role="dialog"
@@ -46,6 +52,20 @@ export function RawDrawer() {
           Esc ✕
         </button>
       </div>
+      {others.length > 0 && (
+        <div data-testid="raw-channels" style={{ padding: '6px 10px', borderBottom: `1px solid ${t.rule}`, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', columnGap: 12, rowGap: 2, maxHeight: '40%', overflow: 'auto', flexShrink: 0 }}>
+          <div style={{ gridColumn: '1 / -1', fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', color: t.accent }}>OTHER CHANNELS</div>
+          {others.map((n) => {
+            const st = channels[n]!;
+            return (
+              <div key={n} style={{ display: 'flex', justifyContent: 'space-between', gap: 6, fontSize: 12, borderBottom: `1px solid ${t.sunk}` }}>
+                <span style={{ color: t.fg2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{st.spec.label || n}</span>
+                <span style={{ fontFamily: FONTS.mono, fontWeight: 700, whiteSpace: 'nowrap' }}>{formatValue(st, units)} {unitsOf(st.spec, units)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div style={{ overflow: 'auto', padding: '8px 10px', display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6, alignContent: 'start' }}>
         {addrs.length === 0 && <div style={{ gridColumn: '1 / -1', color: t.fg2, fontSize: 13 }}>No unmapped bytes polled yet.</div>}
         {addrs.map((a) => {

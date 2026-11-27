@@ -67,7 +67,7 @@ export function ruleText(a: MapAlarm): string {
 }
 
 const SHAPES: [string, string][] = [
-  ['●', 'filled circle: link up, data flowing'], ['□', 'hollow square: off or not connected'], ['◐', 'half circle: working on it'],
+  ['■', 'filled square: link up, data flowing'], ['□', 'hollow square: off or not connected'], ['◐', 'half circle: working on it'],
   ['○', 'ring: stall catcher armed'], ['▲', 'triangle + yellow band: warning limit'], ['⯃', 'octagon + filled tile: alarm limit'],
   ['┆', 'dashed box: address is a guess'],
 ];
