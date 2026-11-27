@@ -492,6 +492,21 @@ export class AppController {
     }
     if (this.companion) s.setCyd(this.cydStatus());
     s.setLinkInfo(this.linkInfo());
+    this.cydWatchdog();
+  }
+
+  private nextCydTry = 0;
+  private cydStarting = false;
+
+  /** Every 3 s: no CYD linked (or its port lost), and one this browser was given is plugged in -> link it. */
+  private cydWatchdog(): void {
+    if (this.opts.companion === false || this.companionPaused || this.cydStarting || this.transport?.kind === 'sim') return;
+    const now = this.clock.now();
+    if (now < this.nextCydTry) return;
+    this.nextCydTry = now + 3;
+    if (this.companion && this.companion.state !== 'port_lost') return;
+    this.cydStarting = true;
+    void this.restartCompanion().catch(() => false).finally(() => { this.cydStarting = false; });
   }
 
   /** The bottom strip's link summary (desktop main_window.py _link_info). */
@@ -581,6 +596,22 @@ export class AppController {
   async restartCompanion(): Promise<boolean> {
     await this.stopCompanion();
     return this.startCompanion();
+  }
+
+  /** The top bar's CYD chip, clicked while off: link now; with no port given yet,
+   *  show the browser's chooser first (this runs from the click). */
+  async connectCydNow(): Promise<boolean> {
+    if (this.companionPaused) return false;     // Setup's CYD tab holds the port
+    const picker = this.opts.picker;
+    const ports = this.portSource();
+    let known: PortInfo | null = null;
+    try { known = ports ? await findHandheld(ports, this.transport?.label ?? '') : null; } catch { known = null; }
+    if (!known && picker?.request) {
+      const picked = await picker.request([]);
+      if (!picked) return false;
+    }
+    this.nextCydTry = this.clock.now() + 3;
+    return this.restartCompanion();
   }
 
   /** A serial port was plugged in (or the CYD came back): link a CYD this browser

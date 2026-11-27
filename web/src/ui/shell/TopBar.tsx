@@ -8,6 +8,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { SCREENS, useSession, type CydStatus, type EcuStatus, type StallStatus } from '../../core/session';
 import type { Theme } from '../theme';
 import { FONTS } from '../theme';
+import { cydConnectAction } from './actions';
 import { mmss, rate } from './format';
 import { useStageSize } from './Stage';
 import { useTheme } from './useTheme';
@@ -213,7 +214,12 @@ export function TopBar() {
           {st.text}
         </span>}
         {fit < 4 && (
-          <button type="button" title={c.title} onClick={() => setScreen('setup')} style={chipBtn} data-testid="status-cyd">
+          <button type="button" title={cyd.state === 'ok' || cyd.state === 'connecting' || !cydConnectAction() ? c.title : `${c.title} · click to connect`}
+            onClick={() => {
+              const go = cydConnectAction();
+              if (go && cyd.state !== 'ok' && cyd.state !== 'connecting') void go().then((ok) => { if (!ok) setScreen('setup'); });
+              else setScreen('setup');
+            }} style={chipBtn} data-testid="status-cyd">
             <ChipBody c={c} t={t} />
           </button>
         )}

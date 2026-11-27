@@ -15,6 +15,7 @@ import type { MemLink } from '../ui/bytes/model/scanner';
 import { harshKindAt, migrateLocalNotes } from '../ui/events/notes';
 import { drivesChanged } from '../ui/replay/source';
 import { registerSetupDeps, type ConnectionControl } from '../ui/setup/deps';
+import { registerCydConnect } from '../ui/shell/actions';
 import { alarmSourceFromEngine } from '../ui/setup/AlarmsTab';
 import { cableSettings } from '../ui/setup/settings';
 import { AppController } from './controller';
@@ -200,5 +201,6 @@ export async function startApp(): Promise<AppController> {
   // A CYD this browser was given before links by itself: now, and whenever it is plugged back in.
   if (!app.companion) void app.startCompanion();
   watchPlugs(app);
+  registerCydConnect(() => app.connectCydNow());
   return app;
 }
