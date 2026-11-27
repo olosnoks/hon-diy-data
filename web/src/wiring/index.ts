@@ -155,6 +155,18 @@ export function flushOnHide(app: AppController, win: Window = window, doc: Docum
   };
 }
 
+/** Serial / USB plug events: a granted port coming back reconnects the CYD with no click. */
+function watchPlugs(app: AppController): void {
+  if (typeof navigator === 'undefined') return;
+  const plugged = () => { setTimeout(() => void app.portPlugged(), 500); };   // let the CH340 settle
+  const unplugged = () => { void app.portUnplugged(); };
+  const nav = navigator as Navigator & { serial?: EventTarget; usb?: EventTarget };
+  for (const target of [nav.serial, nav.usb]) {
+    target?.addEventListener('connect', plugged);
+    target?.addEventListener('disconnect', unplugged);
+  }
+}
+
 let started: AppController | null = null;
 
 export async function startApp(): Promise<AppController> {
@@ -185,5 +197,8 @@ export async function startApp(): Promise<AppController> {
     (window as unknown as { hondalog?: AppController }).hondalog = app;   // the console, for the owner
   }
   await firstConnect(app);
+  // A CYD this browser was given before links by itself: now, and whenever it is plugged back in.
+  if (!app.companion) void app.startCompanion();
+  watchPlugs(app);
   return app;
 }

@@ -233,7 +233,8 @@ export class AppController {
     this.useDemoDrive(sim);
     if (this.livePauses > 0) poller.pause();      // reconnected during a poke test
     void poller.start().catch((e: unknown) => { this.lastError = `poller: ${String(e)}`; });
-    if (this.opts.companion !== false && !sim) void this.startCompanion();
+    // The CYD may already be linked on its own: restart it so it relays this ECU link.
+    if (this.opts.companion !== false && !sim) void this.restartCompanion();
   }
 
   async disconnect(): Promise<void> {
@@ -246,6 +247,8 @@ export class AppController {
     await poller.stop().catch(() => undefined);
     this.transport = null;
     this.source = null;
+    // The CYD stays linked without the ECU (GPS, its own log and stall catcher).
+    if (this.opts.companion !== false) void this.startCompanion();
     useSession.getState().setEcu({ state: 'stopped', rateHz: 0, simulated: false, obd2: false, detail: '' });
     this.useDemoDrive(false);
     this.markStale();
@@ -572,7 +575,29 @@ export class AppController {
 
   async resumeCompanion(): Promise<void> {
     this.companionPaused = false;
-    if (this.poller && this.transport?.kind !== 'sim') await this.startCompanion();
+    if (this.transport?.kind !== 'sim') await this.startCompanion();
+  }
+
+  async restartCompanion(): Promise<boolean> {
+    await this.stopCompanion();
+    return this.startCompanion();
+  }
+
+  /** A serial port was plugged in (or the CYD came back): link a CYD this browser
+   *  was given before, with no click. A lost link is dropped and opened again. */
+  async portPlugged(): Promise<boolean> {
+    if (this.opts.companion === false || this.companionPaused || this.transport?.kind === 'sim') return false;
+    if (this.companion && this.companion.state !== 'port_lost') return false;
+    return this.restartCompanion();
+  }
+
+  /** A serial port went away: if it was the CYD's, show it off (not "lost" forever). */
+  async portUnplugged(): Promise<void> {
+    if (!this.companion) return;
+    const ports = this.portSource();
+    let still: PortInfo | null = null;
+    try { still = ports ? await findHandheld(ports, this.transport?.label ?? '') : null; } catch { still = null; }
+    if (!still) await this.stopCompanion();
   }
 
   private cydStatus(): Partial<CydStatus> {
