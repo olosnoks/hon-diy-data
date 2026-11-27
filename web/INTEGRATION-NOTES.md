@@ -1,5 +1,48 @@
 # Integration notes (integrator's checklist, from the agents' final reports)
 
+## Integrator pass, 2026-11-27: status
+
+Wiring lives in `src/wiring/` (not `src/app/`: Windows would clash with `App.tsx`): maps.ts (MapStore), recordermap.ts,
+pipeline.ts (MathEngine + AlarmEngine), obd2fallback.ts (IsoFallback), controller.ts (AppController), cydclient.ts
+(Setup CydClient over HlClient), index.ts (startApp, deps registration, first connection), app.test.ts (5 tests).
+
+DONE
+- [x] startDemo() gone from main.tsx: startApp() + registerServiceWorker(). demo.ts stays only as a test fixture.
+- [x] One FileStore interface (core/store/filestore.ts: list/remove required, description/persistent optional); platform/files.ts implements it; SqliteDriveStore.open(getFileStore()).
+- [x] Address map: first run writes DEFAULT_MAP_TEXT to "addressmap.toml"; a stored map that fails falls back to the shipped one with a message; Setup > Files / F7 Bytes saveMap -> MapStore.save (validated), reconnects.
+- [x] RecorderMap from #2's AddressMap (Channel.convert = #3 compiled formula); LivePipeline = #3 MathEngine + AlarmEngine from [[math]]/[[alarm]].
+- [x] Poller on the picker's transport or createSimTransport({preset:'p2p-car'}) ("Simulator" button; auto when no granted cable and Setup > Cable > No cable is ticked). SIMULATOR badge replaces "demo data".
+- [x] LiveSession fed from Poller events (onRead -> onBlock with t + latency, see below; onCycle -> decode -> onSample; onError; onPid). Session store: channels with min/max/history, raw bytes, ecu state/rate/errors/detail, alarms (engine active()), stall catcher status, recording state + drive row, marks, Esc acknowledge -> engine.
+- [x] Recording starts when the link first comes up; REC / Ctrl+R toggle; Space marks go into the drive; captures -> stall.lastFile/lastT; drivesChanged() on start/stop/capture/import/delete.
+- [x] CYD companion on a granted CH340 (auto, never the ECU port): GPS fixes -> gps stream (source handheld), handheld events -> LiveSession.onCydEvent; Relay started with the poller, active only when HELLO map hash = map hash; CYD chip status from the companion. Setup's CYD tab pauses the companion while it holds the port.
+- [x] OBD2 fallback: #6 Iso9141Link + Obd2Session behind Poller.isoFallback (protocol auto/obd2; "honda" = off). ECU detail says "keep hondalog in front" during the 5-baud init and names a hidden page when the init failed.
+- [x] setDriveSource(store) (#9); nav fields replayRequest/gpsFocus/powerFocus/replayDrive + openInReplay/showOnMap/openInPower moved into core/session.ts; ui/replay/nav.ts deleted, imports updated (events, replay, power, gps, tests).
+- [x] registerBytesDeps (MemLink over poller.submit readMem/raw; live pause/resume no-ops: the poller interleaves) and registerSetupDeps (alarm source, HlCydClient, store, picker, map, platform capabilities, ConnectionControl). Registries moved to ui/bytes/deps.tsx and ui/setup/deps.ts so registering does not load the lazy screens.
+- [x] Setup > Cable: new Connection card (Connect the KKL cable / Simulator / Disconnect, state line, OBD2 hint).
+- [x] setExprCompiler(compileExpr) at start-up (#7).
+- [x] format.ts units through core/units (US / Metric presets; MAP stays kPa).
+- [x] Enter on F1/F2 opens the last caught stall in Replay at its trigger. Theme tab swatches are buttons (touch) - checked in the browser.
+- [x] Unknown bytes seeded with the 2026-11-27 findings (0x0B.6, 0x0C.0, 0x0D, 0x0E, 0x16, 0x27, 0x2A, 0x2F, 0x32, 0x33, 0x35, 0x36, 0x37, 0x38, 0x3A.0, 0x3C, 0x80-0x8C, 0x86, 0x8F, 0x94-0x99, 0xA4.0): 44 entries.
+- [x] Contracts: AlarmSpec extends AlarmRuleInit, MathSpec extends MathChannelInit (display fields required); DriveInfo.captureKind (set by driveInfo for captures); DriveStore.deleteDrive(name, {allowKeep}); Transport.kind drops 'tauri'; UsbSerialTransport.kind = 'webusb', usbLatencyS 0.001 on the FTDI driver; WebSerialTransport.port public (esptool-js).
+- [x] @tauri-apps/api, @tauri-apps/cli and the "tauri" script removed from package.json (no npm install run: node_modules still holds them until the next install).
+- [x] Planners merged: core/link/planner.ts re-exports #2's addressmap/plan (spans, DP, bus load, predicted rates); only the positional CostModel and BlockPlanner stay. Link golden tests pass.
+- [x] Pull rule (both apps, decided 2026-11-27): detectPulls defaults throttle >= 50 % for >= 1.5 s in one gear, rpm rising; wot when >= 80 % for >= 1.0 s; ends at the throttle lift or where smoothed rpm stops rising (no 0.8 s tail); pull acceleration = local linear fit over 1.5 s inside the run; Pull.wot/label/key ("pull@t0"); gear tolerance 5 % + 0.5/vss, minKmh 5. Power screen classification uses pull.wot. Tests for the 23:03:07-shaped pull and 1st gear from 5 km/h.
+- [x] index.html: manifest, icon-192, apple-touch-icon (base-relative after build; checked with HONDALOG_BASE=/hon-diy-data/).
+
+BUG FIXED IN WIRING
+- Poller's EcuRead.t is already "t minus latency"; LiveSession.onBlock subtracts the latency again. The controller passes t + latencyS so the DB gets the ECU sample time once.
+
+NOT DONE / OPEN
+- Not checked on hardware: KKL cable, CH340 CYD companion/relay, HL session on a real CYD, firmware flash, OBD2 fallback on a real ECU (all unit-tested against fakes only).
+- Protocol "obd2 only" behaves as "auto" (the poller has no forced-OBD2 start; poller.obd2(fn) not ported).
+- Poke test live pause/resume are no-ops.
+- Events verdicts/notes still in localStorage (not the DB events table); DriveStore has no keep flag or CSV/MSL/MLG import.
+- Phone landscape (812x375): F1 Live clips the bottom tile row of each group (layout, #8); Replay is cramped but works.
+- A drive left "recording" by a reload is marked crashed only once its heartbeat is stale (next open after HEARTBEAT_STALE_S).
+- Main JS chunk 700 kB (sql.js glue, core); consider manualChunks.
+- Flaky under full-suite load: replay.test "opens the newest drive" (uPlot mock count) and once an unidentified timing test; both pass on rerun.
+- Open from the lists below: pyproject 0.2.0 bump, KML/stall GeoJSON in store, report.py, Drive pinning, CYD-only theme work.
+
 ## #12 platform (done)
 - Android = Trusted Web Activity (Bubblewrap) over the Pages site; serial on Android via WebUSB JS drivers (FTDI FT232R, CH340). No Tauri, no Rust/NDK. Desktop browsers use Web Serial.
 - Files: src/platform/{bytequeue,webserial,picker,files,pwa,index}.ts, src/platform/webusb/{driver,ftdi,ch340,transport}.ts, public/manifest.webmanifest, public/sw.js, public/icons/, android-twa/ (twa-manifest.json, assetlinks.template.json, build-apk.ps1 → builds in %USERPROFILE%\.hondalog-build\twa).
@@ -96,7 +139,7 @@
 - Image: firmware-out/dracula/hondalog-cyd-dracula-merged.bin (893,568 B, sha256 2E120BE3…676A), flash at 0x0. Not flashed. firmware-out/ is untracked (don't commit; add to .gitignore).
 - Changed: firmware/handheld/main/ui/{ui_theme.h,ui_theme.c,ui.c,ui.h,ui_input.h,ui_map.c,ui_perf.c}, sim/sim_main.c, docs/screenshots (46 renamed dracula-*/darker-*), docs/handheld.md, README.md (CYD screenshot path), HARDWARE.md.
 - Theme saved in NVS key `night` (0 → Dracula, 1 → Darker); hold 3 s toggles. Water colour #55809F added (map). Borders #6272A4 on the CYD (TN panel), not #44475A.
-- Owner decision (2026-11-27): YES, use CYD-only on_alarm #191A21 (5.5:1) on the CYD; rebuild the image after.
+- Owner decision (2026-11-27): YES, use CYD-only on_alarm #191A21 (5.5:1) on the CYD. DONE: ui_theme.c, docs/handheld.md, 4 screenshots; image rebuilt: firmware-out/dracula/hondalog-cyd-dracula-merged.bin, 893,568 B, sha256 f0c58b0e9bd1ac316c70ba14513b9c79836fc5b98804844106db95445b0a2293 (not flashed; uncommitted firmware changes in the worktree).
 - WSL ~/hh-build now on web-port with UI files copied, sim deleted there; prior local state in git stash "pre-dracula local state".
 
 ## Byte findings to fold into the map (both apps), 2026-11-27 reports

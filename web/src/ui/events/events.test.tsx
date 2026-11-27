@@ -5,14 +5,13 @@ import EventsScreen from './index';
 import { useEventNotes } from './notes';
 import { FixtureStore } from '../replay/fixture';
 import { setDriveSource } from '../replay/source';
-import { useReplayNav } from '../replay/nav';
 import { resetSession, useSession } from '../../core/session';
 
 beforeEach(() => {
   resetSession();
   localStorage.clear();
   useEventNotes.setState({ verdicts: {}, notes: {} });
-  useReplayNav.setState({ replayRequest: null, gpsFocus: null, powerFocus: null, replayDrive: null });
+  useSession.setState({ replayRequest: null, gpsFocus: null, powerFocus: null, replayDrive: null });
   setDriveSource(new FixtureStore(), true);
 });
 afterEach(cleanup);
@@ -58,13 +57,13 @@ describe('F3 Events', () => {
     const list = await open();
     fireEvent.click(nearRow(list, /44\d rpm/));
     fireEvent.click(screen.getByText('Open in Replay (F4)'));
-    const req = useReplayNav.getState().replayRequest!;
+    const req = useSession.getState().replayRequest!;
     expect(req.drive).toBe('drive_2026_11_26_2251');
     expect(req.t).toBeGreaterThan(228);
     expect(req.t).toBeLessThan(231);
     expect(useSession.getState().screen).toBe('replay');
     fireEvent.click(screen.getByText('Show on GPS map'));
-    expect(useReplayNav.getState().gpsFocus!.t).toBeCloseTo(req.t);
+    expect(useSession.getState().gpsFocus!.t).toBeCloseTo(req.t);
     expect(useSession.getState().screen).toBe('gps');
   });
 
@@ -94,7 +93,7 @@ describe('F3 Events', () => {
     act(() => { fireEvent.keyDown(window, { key: 'ArrowUp' }); fireEvent.keyDown(window, { key: 'ArrowUp' }); });
     expect(rows(list)[0]!.getAttribute('aria-selected')).toBe('true');
     act(() => { fireEvent.keyDown(window, { key: 'Enter' }); });
-    expect(useReplayNav.getState().replayRequest!.drive).toBe('drive_2026_11_26_2251');
+    expect(useSession.getState().replayRequest!.drive).toBe('drive_2026_11_26_2251');
   });
 
   it('says so when nothing is recorded', async () => {

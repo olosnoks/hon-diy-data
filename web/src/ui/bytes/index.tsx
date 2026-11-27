@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { FONTS, type Theme } from '../theme';
 import { useTheme as useShellTheme } from '../shell/useTheme';
 import { Tabs, ThemeContext } from './controls';
-import { BytesDepsContext, defaultBytesDeps, type BytesDeps } from './deps';
+import { BytesDepsContext, defaultBytesDeps, registeredBytesDeps, type BytesDeps } from './deps';
 import { MapView, tryParse } from './MapView';
 import { MemoryScanner } from './model/scanner';
 import { mergedEntries, type UnknownEntry } from './model/unknown';
@@ -35,16 +35,11 @@ export interface BytesScreenProps {
   onMapText?: (text: string) => void;
 }
 
-/** Deps the integrator registers once (link, live control, map store); the
- *  router renders screens without props, so this is how they arrive. */
-let registered: Partial<BytesDeps> = {};
-export function registerBytesDeps(deps: Partial<BytesDeps>): void {
-  registered = { ...registered, ...deps };
-}
+export { registerBytesDeps } from './deps';
 
 export default function BytesScreen(props: BytesScreenProps) {
   const sessionTheme = useShellTheme();
-  const deps = useMemo<BytesDeps>(() => ({ ...defaultBytesDeps(), ...registered, ...props.deps }), [props.deps]);
+  const deps = useMemo<BytesDeps>(() => ({ ...defaultBytesDeps(), ...registeredBytesDeps(), ...props.deps }), [props.deps]);
   const theme = props.theme ?? sessionTheme;
   const scanner = useMemo(() => deps.scanner ?? new MemoryScanner(deps.link, deps.clock), [deps.scanner, deps.link, deps.clock]);
   useEffect(() => () => { if (!deps.scanner) scanner.setSweeping(false); }, [scanner, deps.scanner]);

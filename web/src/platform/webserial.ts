@@ -19,7 +19,8 @@ export class WebSerialTransport implements Transport {
   private loop: Promise<void> | null = null;
   private stopping = false;
 
-  constructor(private readonly port: SerialPort) {
+  /** The W3C SerialPort (esptool-js flashes the CYD through it). */
+  constructor(readonly port: SerialPort) {
     const info = port.getInfo();
     if (info.usbVendorId !== undefined && info.usbProductId !== undefined) {
       this.usb = { vendorId: info.usbVendorId, productId: info.usbProductId };

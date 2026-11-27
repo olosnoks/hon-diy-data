@@ -90,12 +90,13 @@ export interface PullItem {
 }
 
 /** what makes a pull worth a curve */
+/** The pull rule both apps share (core detectPulls defaults): throttle >= 50 % held >= 1.5 s in one
+ *  gear with rpm rising; full throttle when >= 80 % for >= 1.0 s of it, else part throttle. */
 export const PULL_RULES = {
-  minTps: 20, minDurationS: 1,
-  /** full throttle: held at 80 % or more on average, never below 60 % (the pedal settling at the start) */
-  fullTps: 80, fullTpsMin: 60,
-  /** shorter, or less rpm than this, is too short for a curve */
-  minFullS: 2, minFullSpan: 1000,
+  minTps: 50, minDurationS: 1.5,
+  fullTps: 80, fullMinS: 1.0,
+  /** less rpm than this is too short for a curve */
+  minFullSpan: 1000,
 };
 
 function meanOf(a: Float64Array, i0: number, i1: number): number {
@@ -115,7 +116,7 @@ export interface DriveAnalysis {
 export function analyseDrive(drive: LoadedDrive | null | undefined, inputs: PowerInputs = DEFAULT_INPUTS): DriveAnalysis | null {
   if (!drive || !hasSeries(drive, 'rpm') || !hasSeries(drive, 'vss') || !hasSeries(drive, 'tps')) return null;
   const grid = dynamicsGrid(drive, 10, vehicleOf(inputs));
-  const raw = detectPulls(grid, { minTps: PULL_RULES.minTps, minDurationS: PULL_RULES.minDurationS });
+  const raw = detectPulls(grid, { minTps: PULL_RULES.minTps, minDurationS: PULL_RULES.minDurationS, fullTps: PULL_RULES.fullTps, fullMinS: PULL_RULES.fullMinS });
   const rpm = drive.series.rpm!;
   const pulls = raw.map((pull): PullItem => {
     const durationS = pull.t1 - pull.t0;
@@ -125,8 +126,7 @@ export function analyseDrive(drive: LoadedDrive | null | undefined, inputs: Powe
     for (let i = 1; i < rpm.t.length; i++) {
       if (rpm.t[i]! >= pull.t0 && rpm.t[i - 1]! <= pull.t1 + 3 && rpm.t[i]! - rpm.t[i - 1]! > 1) { linkGap = true; break; }
     }
-    const quality: PullQuality = durationS < PULL_RULES.minFullS || span < PULL_RULES.minFullSpan ? 'short'
-      : pull.fullThrottle || pull.tpsMin >= PULL_RULES.fullTps || (tpsMean >= PULL_RULES.fullTps && pull.tpsMin >= PULL_RULES.fullTpsMin) ? 'full' : 'part';
+    const quality: PullQuality = span < PULL_RULES.minFullSpan ? 'short' : pull.fullThrottle ? 'full' : 'part';
     return { id: pull.t0.toFixed(1), pull, quality, durationS, linkGap, tpsMean, mapMean: meanOf(grid.map, pull.i0, pull.i1) };
   });
   const rank: Record<PullQuality, number> = { full: 0, part: 1, short: 2 };

@@ -6,13 +6,17 @@
  * unless a name says _ms/_us/_unix; storage is metric.
  */
 
+import type { AlarmRuleInit } from './alarms/engine';
+import type { MathChannelInit } from './expr/mathch';
+
 // ---------------------------------------------------------------- transport
 
 /** One serial line (KKL cable to the ECU, or the CYD's USB-C). Implemented by
- *  WebSerialTransport (browser), TauriSerialTransport (Windows/Linux/Android),
- *  SimTransport (built-in simulator). Byte-exact, no framing. */
+ *  WebSerialTransport (desktop Chrome/Edge), UsbSerialTransport (WebUSB JS
+ *  drivers: Android and the TWA), SimTransport (built-in simulator).
+ *  Byte-exact, no framing. */
 export interface Transport {
-  readonly kind: 'webserial' | 'webusb' | 'tauri' | 'sim';
+  readonly kind: 'webserial' | 'webusb' | 'sim';
   /** A human label: "COM21", "/dev/ttyUSB0", "FTDI 0403:6001", "sim:". */
   readonly label: string;
   open(opts: { baud: number }): Promise<void>;
@@ -37,7 +41,7 @@ export interface Transport {
 }
 
 export interface TransportPicker {
-  /** Ask the user to pick a port (browser) or list ports (native). */
+  /** Ports the user already granted (no prompt). */
   list(): Promise<PortInfo[]>;
   request?(filters?: { vendorId: number; productId?: number }[]): Promise<PortInfo | null>;
   open(port: PortInfo): Transport;
@@ -78,8 +82,13 @@ export interface ChannelSpec {
   group?: string;
 }
 
-export interface MathSpec { name: string; label: string; expr: string; units: string; min: number; max: number; decimals: number }
-export interface AlarmSpec { name: string; when: string; level: 'warn' | 'alarm'; message: string; hold_s?: number; rearm_when?: string; channel?: string }
+/** A math channel as the map defines it: #3's MathChannelInit, with the
+ *  display fields every screen needs made required. */
+export interface MathSpec extends MathChannelInit { label: string; units: string; min: number; max: number; decimals: number }
+/** An alarm rule with the Python fields (#3's AlarmRuleInit: severity
+ *  warn/critical, low/high/rate limits, gate, hysteresis, actions ...).
+ *  level / rearm_when are the old short names (#2's AlarmRule fills them). */
+export interface AlarmSpec extends AlarmRuleInit { level?: 'warn' | 'alarm'; rearm_when?: string }
 
 export interface AddressMap {
   version: string;
@@ -152,6 +161,8 @@ export interface DriveInfo {
   mapVersion: string;
   ecuId: string;
   reason?: string;
+  /** What kind of capture a capture row is (stall, dropout, overtemp, lowbatt, manual ...). */
+  captureKind?: string;
 }
 
 /** Store backed by SQLite (sql.js in the browser, persisted to OPFS; the same
@@ -160,7 +171,7 @@ export interface DriveStore {
   listDrives(): Promise<DriveInfo[]>;
   /** Columns of a drive as typed arrays, time-aligned per stream. */
   loadDrive(name: string): Promise<LoadedDrive>;
-  deleteDrive(name: string): Promise<void>;
+  deleteDrive(name: string, opts?: { allowKeep?: boolean }): Promise<void>;
   importDb(file: Uint8Array): Promise<number>;
   exportDb(): Promise<Uint8Array>;
 }

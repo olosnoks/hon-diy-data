@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { LoadedDrive } from '../../core/types';
 import { useTheme } from '../shell/useTheme';
 import { FONTS, type Theme } from '../theme';
-import { useReplayNav } from '../replay/nav';
+import { useSession } from '../../core/session';
 import { saveText, type SaveFn } from '../gps/save';
 import {
   analyseDrive, computeResult, curveCsv, DEFAULT_INPUTS, loadBaseline, ordinal, pullDetail, QUALITY_LABEL, REFERENCE_D16Y8,
@@ -195,7 +195,7 @@ export function PowerView({ t, drive, focus, header, save = saveText }: PowerVie
         <Section t={t}>
           {header}
           <H2>PULLS FOUND</H2>
-          <div style={{ fontSize: 12, color: t.fg2, lineHeight: 1.4 }}>Found automatically: one gear, throttle held, rpm rising. Only full-throttle pulls make a curve.</div>
+          <div style={{ fontSize: 12, color: t.fg2, lineHeight: 1.4 }}>Found automatically: throttle at 50 % or more for 1.5 s in one gear, rpm rising. Full throttle = 80 % or more for 1 s of it; the rest are part-throttle pulls.</div>
         </Section>
         <div role="listbox" aria-label="Pulls" style={{ overflowY: 'auto', minHeight: 0 }}>
           {pulls.map((p) => {
@@ -240,7 +240,7 @@ export function PowerView({ t, drive, focus, header, save = saveText }: PowerVie
           {tab === 'curve' && (result
             ? <UPlotChart label={`Torque and horsepower against rpm for the ${title}, with the published D16Y8 curve`} options={options} data={data} />
             : <Empty t={t} title={drive ? 'No curve yet' : 'No drive open'}>{drive
-              ? 'This drive has no pull to measure. Log a full-throttle pull in one gear; it shows up on the left.'
+              ? 'This drive has no pull to measure. Log a pull in one gear (full throttle is best); it shows up on the left.'
               : 'Pick a drive. Drives come from the recorder, the CYD\'s SD card or an imported hondalog.db.'}</Empty>)}
           {tab === 'trace' && (trace
             ? <UPlotChart label={`rpm, speed, throttle and MAP through the ${title}`} options={trace.options} data={trace.data} />
@@ -294,7 +294,7 @@ export function PowerView({ t, drive, focus, header, save = saveText }: PowerVie
 /** F5 Power: the drive from the shared drive source (Replay's), the pull from Replay's "Open in Power". */
 export default function PowerScreen() {
   const t = useTheme();
-  const focus = useReplayNav((s) => s.powerFocus);
+  const focus = useSession((s) => s.powerFocus);
   const ds = useDrive(focus?.drive ?? null);
   const header = (
     <div style={{ marginBottom: 6 }}>

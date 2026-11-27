@@ -233,7 +233,7 @@ describe('adapter', () => {
   });
 
   it('CH340 is flagged as the handheld', () => {
-    const a = detectAdapter(t('tauri', { vendorId: 0x1a86, productId: 0x7523 }));
+    const a = detectAdapter(t('webusb', { vendorId: 0x1a86, productId: 0x7523 }));
     expect(a.isFtdi).toBe(false);
     expect(a.chip).toBe('CH340');
     expect(a.verdict).toBe('not-ftdi');

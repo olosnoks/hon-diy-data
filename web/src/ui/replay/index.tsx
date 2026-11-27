@@ -30,7 +30,7 @@ import { DrivePicker } from './DrivePicker';
 import { clock, length, signed } from './fmt';
 import { GG } from './GG';
 import { DEFAULT_LANES, type LaneDef, Lanes } from './Lanes';
-import { openInPower, useReplayNav } from './nav';
+import { openInPower, useSession } from '../../core/session';
 import { ReplayMap } from './ReplayMap';
 import { useDriveSource } from './source';
 import { eventsOf, type DriveEvent } from '../events/detect';
@@ -63,7 +63,7 @@ export function openDrive(raw: LoadedDrive): Opened {
 export default function ReplayScreen() {
   const t = useTheme();
   const { source, version } = useDriveSource();
-  const request = useReplayNav((s) => s.replayRequest);
+  const request = useSession((s) => s.replayRequest);
   const [opened, setOpened] = useState<Opened | null>(null);
   const [status, setStatus] = useState('Loading…');
   const [rev, setRev] = useState(0);
@@ -88,7 +88,7 @@ export default function ReplayScreen() {
       setPlaying(false);
       setNote('');
       setStatus('');
-      useReplayNav.setState({ replayDrive: name });
+      useSession.setState({ replayDrive: name });
     } catch (e) {
       setStatus(`Cannot open ${name}: ${String(e)}`);
     }
@@ -102,7 +102,7 @@ export default function ReplayScreen() {
       return;
     }
     if (opened) return;
-    const last = useReplayNav.getState().replayDrive;
+    const last = useSession.getState().replayDrive;
     if (last) { void load(last); return; }
     source.listDrives().then((all) => {
       const d = all.filter((x) => x.kind === 'drive').sort((a, b) => b.startedUnix - a.startedUnix)[0] ?? all[0];

@@ -502,6 +502,10 @@ The screen uses the app's two themes: **Dracula** (the default, above) and
 **Darker** (the same colours on darker grounds, below; hold the button 3 s to
 switch). Text is light on dark in both; large values stay bold for a TN panel
 in sun, and the comment blue (#6272A4) is only ever a border, never text.
+Text on the red alarm fill is #191A21 in both themes (5.5:1 in sun). This
+is the CYD's own choice and differs from the desktop and web theme on
+purpose: there the alarm text is the theme background, #282A36 in Dracula,
+which is only 4.53:1 on the red.
 The choice is kept in the handheld's own memory across power cycles; a unit
 that was left on the old Night theme comes up in Darker (Darker also keeps
 Night's dimmer backlight), and one on Daylight comes up in Dracula.

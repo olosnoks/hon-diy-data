@@ -1,10 +1,12 @@
 /**
  * Display formatting for tiles. Storage stays metric; the user's unit choice
- * converts at display time. TODO(integrator): swap convert() for the units
- * module (src/core/units, agent #3) once it lands; the call sites stay.
+ * converts at display time through the units module (src/core/units, #3):
+ * imperial = its US preset (°F, mph, mi, gal/h; MAP stays kPa as in the
+ * Python app), metric = its Metric preset.
  */
 import type { ChannelSpec, ChannelState, MathSpec } from '../../core/types';
 import type { UnitSystem } from '../../core/session';
+import { METRIC, US, canonical, convert as convertUnit, quantity } from '../../core/units';
 
 type Spec = ChannelSpec | MathSpec;
 
@@ -17,16 +19,14 @@ export function isVerified(spec: Spec): boolean {
   return !('status' in spec) || spec.status === 'verified';
 }
 
-const IMPERIAL: Record<string, { units: string; scale: number; offset: number }> = {
-  'km/h': { units: 'mph', scale: 0.621371, offset: 0 },
-  km: { units: 'mi', scale: 0.621371, offset: 0 },
-  '°C': { units: '°F', scale: 1.8, offset: 32 },
-  kPa: { units: 'kPa', scale: 1, offset: 0 },
-};
-
+/** A stored (metric, map-unit) value as the user's unit system shows it. */
 export function convert(value: number, units: string, system: UnitSystem): { value: number; units: string } {
-  const c = system === 'imperial' ? IMPERIAL[units] : undefined;
-  return c ? { value: value * c.scale + c.offset, units: c.units } : { value, units };
+  const q = quantity(units);
+  if (!q) return { value, units };
+  const to = (system === 'imperial' ? US : METRIC)[q];
+  if (canonical(units) === to) return { value, units };
+  const v = convertUnit(value, units, to);
+  return v === null ? { value, units } : { value: v, units: to };
 }
 
 export function unitsOf(spec: Spec, system: UnitSystem): string {

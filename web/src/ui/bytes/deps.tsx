@@ -42,6 +42,17 @@ export function defaultBytesDeps(): BytesDeps {
   };
 }
 
+/** Deps the integrator registers once (link, live control, map store); the
+ *  router renders screens without props, so this is how they arrive. Kept
+ *  here (not in index.tsx) so registering does not load the screen. */
+let registered: Partial<BytesDeps> = {};
+export function registerBytesDeps(deps: Partial<BytesDeps>): void {
+  registered = { ...registered, ...deps };
+}
+export function registeredBytesDeps(): Partial<BytesDeps> {
+  return registered;
+}
+
 export const BytesDepsContext = createContext<BytesDeps | null>(null);
 export const useBytesDeps = (): BytesDeps => {
   const d = useContext(BytesDepsContext);

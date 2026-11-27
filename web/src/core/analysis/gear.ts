@@ -25,8 +25,10 @@ export type GearStateCode = (typeof GearState)[keyof typeof GearState];
 
 export interface GearOptions {
   ratios?: readonly number[];
-  tol?: number;          // fraction, default 0.05
-  minKmh?: number;       // default 8
+  tol?: number;          // fraction, default 0.05; widened by vssTolKmh / vss per sample
+  /** vss resolution term (km/h): whole-km/h vss makes a plain 5 % test fail below ~10 km/h. Default 0.5 */
+  vssTolKmh?: number;
+  minKmh?: number;       // default 5 (1st gear counts from ~5 km/h when coupled)
   couplingS?: number;    // default 0.5
   hz?: number;           // grid rate, default 10
   rpm?: string;
@@ -55,7 +57,8 @@ export function gearOfRatio(ratio: number, ratios: readonly number[] = GEAR_RPM_
 export function gearFromArrays(t: Float64Array, rpm: Float64Array, vss: Float64Array, opts: GearOptions = {}): GearResult {
   const ratios = opts.ratios ?? GEAR_RPM_PER_KMH;
   const tol = opts.tol ?? 0.05;
-  const minKmh = opts.minKmh ?? 8;
+  const minKmh = opts.minKmh ?? 5;
+  const vssTol = opts.vssTolKmh ?? 0.5;
   const cs = opts.couplingS ?? 0.5;
   const n = t.length;
   const ratio = new Float64Array(n).fill(NaN);
@@ -64,7 +67,7 @@ export function gearFromArrays(t: Float64Array, rpm: Float64Array, vss: Float64A
     const v = vss[i]!; const r = rpm[i]!;
     if (Number.isNaN(v) || Number.isNaN(r) || v < minKmh) continue;
     ratio[i] = r / v;
-    raw[i] = gearOfRatio(ratio[i]!, ratios, tol);
+    raw[i] = gearOfRatio(ratio[i]!, ratios, tol + vssTol / v);
   }
   const gear = new Int8Array(n);
   const state = new Int8Array(n);

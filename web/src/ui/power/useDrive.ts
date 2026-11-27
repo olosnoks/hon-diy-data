@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import type { DriveInfo, LoadedDrive } from '../../core/types';
 import { useDriveSource } from '../replay/source';
-import { useReplayNav } from '../replay/nav';
+import { useSession } from '../../core/session';
 
 export interface DriveState {
   drives: DriveInfo[];
@@ -39,7 +39,7 @@ export function useDrive(want: string | null = null): DriveState {
       setDrives(list);
       setName((cur) => {
         if (cur && list.some((d) => d.name === cur)) return cur;
-        const replay = useReplayNav.getState().replayDrive;
+        const replay = useSession.getState().replayDrive;
         if (replay && list.some((d) => d.name === replay)) return replay;
         return newestDrive(list);
       });

@@ -18,10 +18,11 @@ export function driverFor(vendorId: number, productId: number): UsbSerialDriver 
 }
 
 export class UsbSerialTransport implements Transport {
-  /** Same contract kind as Web Serial: it is the browser's serial path. */
-  readonly kind = 'webserial' as const;
+  readonly kind = 'webusb' as const;
   readonly label: string;
   readonly usb: { vendorId: number; productId: number };
+  /** 0.001 s on the FTDI (the driver sets the latency timer to 1 ms); unknown on the CH340. */
+  get usbLatencyS(): number | undefined { return this.driver.latencyS; }
 
   private readonly driver: UsbSerialDriver;
   private queue = new ByteQueue();

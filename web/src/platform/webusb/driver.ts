@@ -7,6 +7,8 @@ export interface UsbSerialDriver {
   readonly name: string;
   /** Interface number to claim. */
   readonly interfaceNumber: number;
+  /** The receive latency the driver sets, in seconds (FTDI latency timer), when known. */
+  readonly latencyS?: number;
   /** Called once after the interface is claimed. */
   init(dev: USBDevice, baud: number): Promise<void>;
   setBaud(dev: USBDevice, baud: number): Promise<void>;

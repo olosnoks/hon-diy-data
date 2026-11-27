@@ -14,6 +14,7 @@ import { useTheme } from './ui/shell/useTheme';
 export function App() {
   const t = useTheme();
   const demo = useSession((s) => s.demo);
+  const simulated = useSession((s) => s.ecu.simulated && s.ecu.state !== 'stopped');
   useGlobalKeys();
   useEffect(() => {
     document.body.style.background = t.bg;
@@ -29,9 +30,11 @@ export function App() {
       >
         <TopBar />
         <ScreenRouter />
-        {demo && (
-          <div aria-hidden style={{ position: 'absolute', left: 8, bottom: 1, fontFamily: FONTS.mono, fontSize: 10, color: t.comment, pointerEvents: 'none' }}>
-            demo data
+        {(simulated || demo) && (
+          <div data-testid="sim-badge" title="Data from the built-in simulator, not a car"
+            style={{ position: 'absolute', right: 10, bottom: 34, padding: '1px 6px', fontFamily: FONTS.mono, fontSize: 11, fontWeight: 800,
+              letterSpacing: 1, color: t.bg, background: t.warn, pointerEvents: 'none' }}>
+            {simulated ? 'SIMULATOR' : 'DEMO DATA'}
           </div>
         )}
       </div>

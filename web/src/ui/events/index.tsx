@@ -10,7 +10,7 @@ import type { LoadedDrive } from '../../core/types';
 import { useTheme } from '../shell/useTheme';
 import { FONTS, type Theme } from '../theme';
 import { useDriveSource } from '../replay/source';
-import { openInReplay, showOnMap } from '../replay/nav';
+import { openInReplay, showOnMap } from '../../core/session';
 import { clock, day, length } from '../replay/fmt';
 import { autoVerdict, eventsOf, KIND_FILTER, KIND_LABEL, KIND_ORDER, VERDICTS, type DriveEvent, type EventKind } from './detect';
 import { useEventNotes } from './notes';

@@ -76,6 +76,8 @@ export interface StallStatus {
   /** Stalls caught this drive. */
   count: number;
   lastFile: string | null;
+  /** Session time of the last caught stall's trigger (Enter opens it in Replay there). */
+  lastT?: number | null;
 }
 
 export interface RecordingState {
@@ -109,6 +111,11 @@ export interface History {
   v: (number | null)[];
 }
 
+/** A moment in a drive another screen should open ("Open in Replay", "Show on map"). */
+export interface DriveMoment { drive: string; t: number; seq: number }
+/** A span of a drive ("Open in Power"). */
+export interface DriveSpan { drive: string; t0: number; t1: number; seq: number }
+
 export const HISTORY_N = 120;
 export const HISTORY_DT = 0.5;
 
@@ -134,6 +141,15 @@ export interface SessionData {
   marks: Mark[];
   /** The demo data source is feeding the store (no hardware). */
   demo: boolean;
+  // ---- requests between screens (Events -> Replay / GPS, Replay -> Power) ----
+  /** Replay should open this drive at t (seq tells a new request from an old one). */
+  replayRequest: DriveMoment | null;
+  /** F6 GPS should centre on this moment. */
+  gpsFocus: DriveMoment | null;
+  /** F5 Power should look at this span. */
+  powerFocus: DriveSpan | null;
+  /** The drive open in Replay (Events and Power start from it). */
+  replayDrive: string | null;
 }
 
 export interface SessionActions {
@@ -210,6 +226,10 @@ export function initialSession(): SessionData {
     recording: { active: false, startedUnixMs: null, drive: null },
     marks: [],
     demo: false,
+    replayRequest: null,
+    gpsFocus: null,
+    powerFocus: null,
+    replayDrive: null,
   };
 }
 
@@ -277,6 +297,23 @@ useSession.subscribe((s, prev) => {
 /** Back to a fresh session (tests, disconnect). Keeps nothing. */
 export function resetSession(): void {
   useSession.setState(initialSession());
+}
+
+let navSeq = 0;
+
+/** Events / Live (Enter on a caught stall) -> F4 Replay at a moment of a drive. */
+export function openInReplay(drive: string, t: number): void {
+  useSession.setState({ replayRequest: { drive, t, seq: ++navSeq }, screen: 'replay' });
+}
+
+/** Events / Replay -> F6 GPS map at a moment of a drive. */
+export function showOnMap(drive: string, t: number): void {
+  useSession.setState({ gpsFocus: { drive, t, seq: ++navSeq }, screen: 'gps' });
+}
+
+/** Replay -> F5 Power over a span of a drive. */
+export function openInPower(drive: string, t0: number, t1: number): void {
+  useSession.setState({ powerFocus: { drive, t0, t1, seq: ++navSeq }, screen: 'power' });
 }
 
 /** The alarm level a channel's tile shows: 0 none, 1 warn, 2 alarm. */

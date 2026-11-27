@@ -1,8 +1,10 @@
 /**
- * Where files live: an abstract store of whole files by name. Platform agent
- * #12 implements it for OPFS (web) and the Tauri file system (Windows,
- * Linux, Android); ``MemoryFileStore`` is for tests and for a session that
- * must not keep anything.
+ * Where files live: an abstract store of whole files by name. This is the
+ * one FileStore interface of the app: src/platform/files.ts implements it
+ * for OPFS (browser, installed PWA, Android TWA) and for memory only;
+ * ``MemoryFileStore`` here is for tests and for a session that must not
+ * keep anything. Names may contain "/" for one level of folders
+ * ("maps/cb400.toml").
  *
  * ``write`` must replace the file atomically (write a temporary file, then
  * rename): the database is written whole, and a power cut in the middle of a
@@ -14,11 +16,18 @@ export interface FileStore {
   read(name: string): Promise<Uint8Array | null>;
   /** Create or replace the file. */
   write(name: string, data: Uint8Array): Promise<void>;
-  remove?(name: string): Promise<void>;
-  list?(): Promise<string[]>;
+  remove(name: string): Promise<void>;
+  /** Every file name, with folder prefixes, sorted. */
+  list(): Promise<string[]>;
+  /** Where the files live, for the Setup screen ("Browser storage (OPFS)"). */
+  readonly description?: string;
+  /** False when files vanish with the tab (no OPFS). */
+  readonly persistent?: boolean;
 }
 
 export class MemoryFileStore implements FileStore {
+  readonly description = 'Memory only (files are lost on reload)';
+  readonly persistent = false;
   readonly files = new Map<string, Uint8Array>();
   writes = 0;
 

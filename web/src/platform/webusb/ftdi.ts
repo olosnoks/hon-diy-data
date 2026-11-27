@@ -51,6 +51,8 @@ export function ftdiUnwrap(data: Uint8Array, packetSize: number): Uint8Array {
 export class FtdiDriver implements UsbSerialDriver {
   readonly name = 'FTDI FT232R';
   readonly interfaceNumber = 0;
+  /** init() sets the latency timer to 1 ms. */
+  readonly latencyS = 0.001;
   /** wIndex of the port: 0 on single-port chips (FT232R). */
   private readonly port = 0;
   private line = LINE_8N1;

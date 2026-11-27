@@ -30,7 +30,7 @@ export function driveInfo(e: DriveEntry, mapVersion = e.mapVersion): DriveInfo {
   const reason = e.kind === 'drive' ? e.endReason : e.trigger || e.endReason;
   return {
     id: e.driveId, name: e.name, kind, startedUnix: e.startedUnix, durationS: e.duration, rows: e.rows, status,
-    mapVersion, ecuId: e.ecuId, ...(reason ? { reason } : {}),
+    mapVersion, ecuId: e.ecuId, ...(reason ? { reason } : {}), ...(e.kind !== 'drive' ? { captureKind: e.kind } : {}),
   };
 }
 

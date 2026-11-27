@@ -5,7 +5,7 @@ import { arange, ch, makeDrive } from './fixtures';
 import { estimateGear, gearFromArrays, GearState, gearOfRatio, gearShare, GEAR_RPM_PER_KMH } from './gear';
 import { estimateGrade } from './grade';
 import {
-  airflowGs, airflowHp, DEFAULT_VEHICLE, drivePulls, effectiveMass, fuelFlowGs, fuelUsed, gsToLph, overallRatio,
+  airflowGs, airflowHp, DEFAULT_VEHICLE, detectPulls, drivePulls, dynamicsGrid, effectiveMass, fuelFlowGs, fuelUsed, gsToLph, overallRatio,
   REFERENCE_D16Y8, referenceHp, referenceTorque, roadLoad, torqueFromAccel, torqueModel, torqueToHp, torqueWithBand,
 } from './power';
 
@@ -163,7 +163,8 @@ describe('power from a pull', () => {
     expect(c.pull.gear).toBe(2);
     expect(c.pull.fullThrottle).toBe(true);
     expect(c.pull.t0).toBeGreaterThanOrEqual(9.9);
-    expect(c.pull.t1).toBeLessThan(15);
+    expect(c.pull.t1).toBeGreaterThan(14.8);          // the top is kept up to the lift
+    expect(c.pull.t1).toBeLessThanOrEqual(15.05);
     const mid = c.points.filter((q) => q.t > 11 && q.t < 13.5);
     for (const q of mid) expect(q.torque).toBeCloseTo(120, -1);
     const meanMid = mid.reduce((a, q) => a + q.torque, 0) / mid.length;
@@ -180,11 +181,42 @@ describe('power from a pull', () => {
     expect(heavy.points[10]!.torque).toBeGreaterThan(c.points[10]!.torque);
   });
 
-  it('part throttle is not a full-throttle pull unless asked', () => {
-    expect(drivePulls(pullDrive(100, 60)).length).toBe(0);
-    const part = drivePulls(pullDrive(100, 60), DEFAULT_VEHICLE, { minTps: 50 });
+  it('part throttle is listed as a part-throttle pull; below 50 % it is not a pull', () => {
+    const part = drivePulls(pullDrive(100, 60));
     expect(part.length).toBe(1);
     expect(part[0]!.pull.fullThrottle).toBe(false);
+    expect(drivePulls(pullDrive(100, 45)).length).toBe(0);
+  });
+
+  it('keeps the top of the pull: ends at the throttle lift, not a fixed tail (the 23:03:07 pull)', () => {
+    // 2nd gear, 2,770 -> ~5,400 rpm in 3.5 s, throttle 80-83 % for 1.4 s, 50-80 % otherwise, then lift
+    const hz = 11.3; const dt = 1 / hz;
+    const t: number[] = []; const vss: number[] = []; const rpm: number[] = []; const tps: number[] = [];
+    for (let k = 0; k < 20 * hz; k++) {
+      const tt = k * dt; t.push(tt);
+      let r: number; let th: number;
+      if (tt < 10) { r = 2770; th = 15; } else if (tt < 13.5) { r = 2770 + (5400 - 2770) * ((tt - 10) / 3.5); th = tt >= 11.5 && tt < 12.9 ? 82 : 65; } else { r = Math.max(2500, 5400 - 900 * (tt - 13.5)); th = 0; }
+      rpm.push(r); vss.push(r / 76.8); tps.push(th);
+    }
+    const pulls = detectPulls(dynamicsGrid(makeDrive({ t: { t, v: t }, vss: { t, v: vss }, rpm: { t, v: rpm }, tps: { t, v: tps } })));
+    expect(pulls.length).toBe(1);
+    const p = pulls[0]!;
+    expect(p.gear).toBe(2);
+    expect(p.rpm1).toBeGreaterThan(5300);
+    expect(p.t1).toBeGreaterThan(13.3);
+    expect(p.fullThrottle).toBe(true);
+  });
+
+  it('1st gear counts from ~5 km/h when coupled', () => {
+    const hz = 10; const t: number[] = []; const vss: number[] = []; const rpm: number[] = []; const tps: number[] = [];
+    for (let k = 0; k < 60; k++) {
+      const tt = k / hz; t.push(tt);
+      const v = 5 + tt * 0.5;               // 5 -> 8 km/h: below the gear estimator's 8 km/h
+      vss.push(v); rpm.push(v * 133.6); tps.push(tt >= 1 && tt < 5.5 ? 90 : 10);
+    }
+    const pulls = detectPulls(dynamicsGrid(makeDrive({ t: { t, v: t }, vss: { t, v: vss }, rpm: { t, v: rpm }, tps: { t, v: tps } })));
+    expect(pulls.length).toBe(1);
+    expect(pulls[0]!.gear).toBe(1);
   });
 
   it('airflow, torque model and fuel flow', () => {

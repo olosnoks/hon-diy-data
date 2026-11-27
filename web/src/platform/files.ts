@@ -1,21 +1,12 @@
 /**
- * Flat-ish file storage for the app's own files (hondalog.db, maps, exports).
- * Names may contain "/" for one level of folders ("maps/cb400.toml").
- *
- * Defined here because src/core/store/ (agent #4) did not have a FileStore
- * yet; if #4 adds one, the integrator should point this at it.
+ * The platform's file storage for the app's own files (hondalog.db, maps,
+ * exports), behind the one FileStore interface of src/core/store/filestore.ts
+ * (SqliteDriveStore.open takes these directly). Names may contain "/" for
+ * one level of folders ("maps/cb400.toml").
  */
-export interface FileStore {
-  read(name: string): Promise<Uint8Array | null>;
-  write(name: string, bytes: Uint8Array): Promise<void>;
-  /** Every file name, with folder prefixes, sorted. */
-  list(): Promise<string[]>;
-  remove(name: string): Promise<void>;
-  /** Where the files live, for the Setup screen ("Browser storage (OPFS)"). */
-  readonly description: string;
-  /** False when files vanish with the tab (no OPFS). */
-  readonly persistent: boolean;
-}
+import type { FileStore } from '../core/store/filestore';
+
+export type { FileStore };
 
 function splitName(name: string): string[] {
   const parts = name.split('/').filter((p) => p.length > 0);

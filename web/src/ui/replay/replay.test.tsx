@@ -24,7 +24,7 @@ vi.mock('../gps/MapView', () => ({
 import ReplayScreen from './index';
 import { FixtureStore, SCRIPT_A, SCRIPT_B } from './fixture';
 import { setDriveSource } from './source';
-import { openInReplay, useReplayNav } from './nav';
+import { openInReplay } from '../../core/session';
 import { resetSession, useSession } from '../../core/session';
 import { clock } from './fmt';
 
@@ -34,7 +34,7 @@ const A0 = SCRIPT_A.started.getTime() / 1000;
 let frames: FrameRequestCallback[] = [];
 beforeEach(() => {
   resetSession();
-  useReplayNav.setState({ replayRequest: null, gpsFocus: null, powerFocus: null, replayDrive: null });
+  useSession.setState({ replayRequest: null, gpsFocus: null, powerFocus: null, replayDrive: null });
   setDriveSource(new FixtureStore(), true);
   frames = [];
   vi.stubGlobal('requestAnimationFrame', (f: FrameRequestCallback) => { frames.push(f); return frames.length; });

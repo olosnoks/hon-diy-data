@@ -15,11 +15,10 @@
  */
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { LoadedDrive } from '../../core/types';
-import { useSession, type UnitSystem } from '../../core/session';
+import { openInReplay, useSession, type UnitSystem } from '../../core/session';
 import { useTheme } from '../shell/useTheme';
 import { FONTS, type Theme } from '../theme';
 import { useDriveSource, type DriveSource } from '../replay/source';
-import { openInReplay, useReplayNav } from '../replay/nav';
 import { Button, DriveSelect, Empty, H2, Row, Section, Tabs } from '../power/widgets';
 import { useDrive } from '../power/useDrive';
 import { exportDrive, speedChannel, channelSeries, channelUnits, type GeoFormat } from './geo/exporters';
@@ -385,7 +384,7 @@ export function useTiles(settings: MapSettings): Tiles & { bytes: number; clear(
 export default function GpsScreen() {
   const t = useTheme();
   const units = useSession((s) => s.units);
-  const focus = useReplayNav((s) => s.gpsFocus);
+  const focus = useSession((s) => s.gpsFocus);
   const ds = useDrive(focus?.drive ?? null);
   const source = useDriveSource((s) => s.source);
   const [settings, setSettings] = useState<MapSettings>(loadMapSettings);

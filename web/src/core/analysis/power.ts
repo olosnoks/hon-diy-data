@@ -202,24 +202,83 @@ export function fuelUsed(drive: LoadedDrive, p: InjectorParams = DEFAULT_INJECTO
 
 // ---------------------------------------------------------------- pulls
 
+/**
+ * The pull rule both apps use (decided 2026-11-27, desktop and web):
+ * throttle at or above `minTps` (50 %) held at least `minDurationS` (1.5 s)
+ * in one gear with rpm rising; "full throttle" when it is at or above
+ * `fullTps` (80 %) for at least `fullMinS` (1.0 s) of it, else part
+ * throttle. The top of the pull is kept: the rpm slope is a centred
+ * derivative and the pull ends at the throttle lift (or where rpm peaks
+ * before it), not after a fixed tail trim. 1st gear counts from
+ * `firstGearMinKmh` (~5 km/h) when rpm/speed is on the 1st-gear ratio.
+ */
 export interface PullOptions {
-  /** throttle held at or above this (%); 80 = full throttle */
+  /** throttle held at or above this (%), default 50 (desktop min_tps) */
   minTps?: number;
-  minDurationS?: number;     // default 2
-  /** rpm must rise at least this fast throughout (rpm/s), default 50 */
+  /** default 1.5 (min_s) */
+  minDurationS?: number;
+  /** "full throttle": at or above this (%) ... (wot_tps, 80) */
+  fullTps?: number;
+  /** ... for at least this long within the pull (s), default 1.0 (wot_s) */
+  fullMinS?: number;
+  /** rpm must be rising at least this fast at the start (rpm/s), default 50 */
   minRpmRate?: number;
-  /** drop this much from the end: the 1.5 s derivative window smears the lift (default 0.8) */
-  trimEndS?: number;
+  /** centred derivative window for the rpm slope (s), default 0.5 */
+  slopeWindowS?: number;
   hz?: number;
 }
 
 export interface Pull {
-  i0: number; i1: number;        // [i0, i1) on the analysis grid, after trimming
+  i0: number; i1: number;        // [i0, i1) on the analysis grid
   t0: number; t1: number;
   gear: number;
   rpm0: number; rpm1: number;
   tpsMin: number;
+  /** throttle >= wotTps for >= wotS of the pull */
+  wot: boolean;
+  /** the same as wot (older name) */
   fullThrottle: boolean;
+  /** mean throttle over the pull, % */
+  tpsMean: number;
+  /** "full throttle" or "part throttle NN %" */
+  label: string;
+  /** "pull@{t0 to 0.1 s}", the same key as the desktop app */
+  key: string;
+}
+
+/** The desktop app's label for a pull. */
+export function pullLabel(wot: boolean, tpsMean: number): string {
+  return wot ? 'full throttle' : `part throttle ${Math.round(tpsMean)} %`;
+}
+
+/**
+ * Acceleration (m/s^2) through a pull: a local linear fit of true speed over
+ * `windowS` using only samples inside [i0, i1) (centred mid-run, one-sided
+ * at the ends), so the lift and the shift after it do not leak in.
+ */
+export function pullAccel(g: DynamicsGrid, i0: number, i1: number, vssScale = 1.011, windowS = 1.5): Float64Array {
+  const n = i1 - i0;
+  const out = new Float64Array(n).fill(NaN);
+  if (n < 2) return out;
+  const hz = g.t.length > 1 ? 1 / (g.t[1]! - g.t[0]!) : 10;
+  const w = Math.max(2, Math.round(windowS * hz) + 1);
+  for (let k = 0; k < n; k++) {
+    let a = i0 + k - (w >> 1);
+    let b = a + w;
+    if (a < i0) { b += i0 - a; a = i0; }
+    if (b > i1) { a -= b - i1; b = i1; }
+    a = Math.max(a, i0);
+    let sx = 0, sy = 0, sxx = 0, sxy = 0, m = 0;
+    for (let j = a; j < b; j++) {
+      const v = g.vss[j]!;
+      if (!Number.isFinite(v)) continue;
+      const x = g.t[j]!; const y = (v * vssScale) / 3.6;
+      sx += x; sy += y; sxx += x * x; sxy += x * y; m++;
+    }
+    const den = m * sxx - sx * sx;
+    if (m >= 3 && den > 0) out[k] = (m * sxy - sx * sy) / den;
+  }
+  return out;
 }
 
 export interface PullPoint {
@@ -269,31 +328,38 @@ export function dynamicsGrid(drive: LoadedDrive, hz = 10, p: VehicleParams = DEF
   };
 }
 
-/** Pulls: one gear, throttle held >= minTps, rpm rising, at least minDurationS. */
+/** Pulls (see PullOptions for the rule). */
 export function detectPulls(g: DynamicsGrid, opts: PullOptions = {}): Pull[] {
-  const minTps = opts.minTps ?? 80;
-  const hz = opts.hz ?? (g.t.length > 1 ? 1 / (g.t[1]! - g.t[0]!) : 10);
+  const minTps = opts.minTps ?? 50;
+  const fullTps = opts.fullTps ?? 80;
+  const n = g.t.length;
+  const hz = opts.hz ?? (n > 1 ? 1 / (g.t[1]! - g.t[0]!) : 10);
   const minRate = opts.minRpmRate ?? 50;
   const rpmF = fillGaps(g.t, g.rpm, 0.5);
-  const rate = savgol(rpmF, Math.max(3, Math.round(0.5 * hz) | 1), 2, 1, 1 / hz);
+  const rate = savgol(rpmF, Math.max(3, Math.round((opts.slopeWindowS ?? 0.5) * hz) | 1), 2, 1, 1 / hz);
+  const gear = g.gear.gear;
   const out: Pull[] = [];
-  const ok = (i: number) => g.gear.gear[i]! > 0 && g.tps[i]! >= minTps && rate[i]! >= minRate;
-  for (const [s, e] of runs(g.t.length, ok)) {
-    // split where the gear changes
+  const ok = (i: number) => gear[i]! > 0 && g.tps[i]! >= minTps;
+  for (const [s, e] of runs(n, ok)) {
     let a = s;
     for (let i = s + 1; i <= e; i++) {
-      if (i === e || g.gear.gear[i] !== g.gear.gear[a]) {
-        const dur = (i - a) / hz;
-        if (dur >= (opts.minDurationS ?? 2)) {
-          const trim = Math.round((opts.trimEndS ?? 0.8) * hz);
-          const i1 = Math.max(a + 2, i - trim);
-          let tpsMin = Infinity;
-          for (let k = a; k < i; k++) tpsMin = Math.min(tpsMin, g.tps[k]!);
-          out.push({ i0: a, i1, t0: g.t[a]!, t1: g.t[i1 - 1]!, gear: g.gear.gear[a]!, rpm0: g.rpm[a]!, rpm1: g.rpm[i1 - 1]!,
-            tpsMin, fullThrottle: tpsMin >= 80 });
-        }
-        a = i;
+      if (i < e && gear[i] === gear[a]) continue;
+      // one gear, throttle held: [a, i). Start where rpm rises; end at the lift or where smoothed rpm stops rising.
+      let i0 = a;
+      while (i0 < i && !(rate[i0]! >= minRate)) i0++;
+      let i1 = i0 + 1;
+      while (i1 < i && rate[i1]! > 0) i1++;
+      const top = i1 - 1;
+      if (top > i0 && (top - i0) / hz >= (opts.minDurationS ?? 1.5) - 1e-9 && g.rpm[top]! > g.rpm[i0]!) {
+        let tpsMin = Infinity; let full = 0; let tpsSum = 0;
+        for (let k = i0; k < i1; k++) { tpsMin = Math.min(tpsMin, g.tps[k]!); tpsSum += g.tps[k]!; if (g.tps[k]! >= fullTps) full++; }
+        const wot = full / hz >= (opts.fullMinS ?? 1.0) - 1e-9;
+        const tpsMean = tpsSum / (i1 - i0);
+        const t0 = g.t[i0]!;
+        out.push({ i0, i1, t0, t1: g.t[top]!, gear: gear[i0]!, rpm0: g.rpm[i0]!, rpm1: g.rpm[top]!,
+          tpsMin, wot, fullThrottle: wot, tpsMean, label: pullLabel(wot, tpsMean), key: `pull@${t0.toFixed(1)}` });
       }
+      a = i;
     }
   }
   return out;
@@ -304,8 +370,9 @@ export function pullCurve(g: DynamicsGrid, pull: Pull, p: VehicleParams = DEFAUL
   u: Uncertainty = DEFAULT_UNCERTAINTY, binRpm = 250): PullCurve {
   const points: PullPoint[] = [];
   let mid: ReturnType<typeof torqueWithBand> | null = null;
+  const acc = pullAccel(g, pull.i0, pull.i1, p.vssScale);
   for (let i = pull.i0; i < pull.i1; i++) {
-    const a = g.long.a[i]!; const v = g.long.v[i]!; const rpm = g.rpm[i]!;
+    const a = acc[i - pull.i0]!; const v = g.long.v[i]!; const rpm = g.rpm[i]!;
     if (Number.isNaN(a) || Number.isNaN(v) || Number.isNaN(rpm)) continue;
     const band = torqueWithBand(a, v, pull.gear, p, u);
     if (i >= (pull.i0 + pull.i1) >> 1 && !mid) mid = band;

@@ -21,6 +21,7 @@ import { AlarmsTab, type AlarmSource } from './AlarmsTab';
 import type { CydClient } from './cyd/client';
 import { CydTab, type Confirm } from './cyd/CydTab';
 import { useCable, type Protocol } from './settings';
+import { registeredSetupDeps, type ConnectionControl, type PlatformFacts, type SetupDeps } from './deps';
 import pkg from '../../../package.json';
 
 export type SetupTab = 'alarms' | 'cyd' | 'units' | 'cable' | 'files' | 'theme' | 'about';
@@ -28,26 +29,8 @@ export const TABS: readonly (readonly [SetupTab, string])[] = [
   ['alarms', 'Alarms'], ['cyd', 'CYD black box'], ['units', 'Units'], ['cable', 'Cable'], ['files', 'Files'], ['theme', 'Theme'], ['about', 'About'],
 ];
 
-export interface PlatformFacts { platform: string; serial: string; files: string; notes: string[] }
-
-export interface SetupDeps {
-  alarms: AlarmSource | null;
-  cyd: CydClient | null;
-  store: DriveStore | null;
-  picker: TransportPicker | null;
-  /** The address map in use and how to replace it. */
-  mapText: string;
-  saveMap: ((text: string) => Promise<void>) | null;
-  /** Platform facts for About and Cable (src/platform capabilities()). */
-  platform: () => PlatformFacts;
-  versions: Record<string, string>;
-  confirm: Confirm;
-}
-
-let registered: Partial<SetupDeps> = {};
-export function registerSetupDeps(deps: Partial<SetupDeps>): void {
-  registered = { ...registered, ...deps };
-}
+export type { ConnectionControl, PlatformFacts, SetupDeps } from './deps';
+export { registerSetupDeps } from './deps';
 
 function defaultPlatform(): PlatformFacts {
   return { platform: 'web', serial: typeof navigator !== 'undefined' && 'serial' in navigator ? 'webserial' : 'none', files: 'unknown', notes: [] };
@@ -56,7 +39,7 @@ function defaultPlatform(): PlatformFacts {
 export function defaultSetupDeps(): SetupDeps {
   return {
     alarms: null, cyd: null, store: null, picker: null, mapText: SHIPPED_MAP, saveMap: null, platform: defaultPlatform,
-    versions: { app: pkg.version }, confirm: (text) => window.confirm(text),
+    versions: { app: pkg.version }, confirm: (text) => window.confirm(text), connection: null,
   };
 }
 
@@ -84,7 +67,45 @@ function UnitsTab() {
   );
 }
 
-function CableTab(props: { picker: TransportPicker | null; notes: string[] }) {
+function ConnectionCard(props: { connection: ConnectionControl; picker: TransportPicker | null; ports: PortInfo[]; onPorts: (p: PortInfo[]) => void }) {
+  const t = useTheme();
+  const ecu = useSession((s) => s.ecu);
+  const cable = useCable();
+  const [msg, setMsg] = useState('');
+  const run = async (f: () => Promise<void>) => {
+    setMsg('');
+    try { await f(); } catch (e) { setMsg((e as Error).message); }
+  };
+  const connectCable = () => run(async () => {
+    let ports = props.ports.length ? props.ports : props.picker ? await props.picker.list() : [];
+    let port = ports.find((p) => p.id === cable.ecuPort) ?? ports.find((p) => p.guess === 'ecu');
+    if (!port && props.picker?.request) {
+      const asked = await props.picker.request();
+      if (asked) { ports = [...ports.filter((p) => p.id !== asked.id), asked]; port = asked; }
+    }
+    props.onPorts(ports);
+    if (!port) { setMsg(props.picker ? 'No KKL cable picked.' : 'No serial access on this platform: use the simulator.'); return; }
+    cable.set({ ecuPort: port.id });
+    await props.connection.connectPort(port);
+  });
+  const current = props.connection.current();
+  return (
+    <Card title="Connection" style={{ maxWidth: 860, marginBottom: 8 }}>
+      <div style={{ ...mono, marginBottom: 10 }} data-testid="connection-state">
+        {current ? `${current}: ${ecu.state}${ecu.detail ? ` (${ecu.detail})` : ''}` : 'not connected'}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Button onClick={() => void connectCable()} disabled={!props.picker}>Connect the KKL cable</Button>
+        <Button onClick={() => void run(() => props.connection.connectSim())}>Simulator</Button>
+        <Button onClick={() => void run(() => props.connection.disconnect())} disabled={!current}>Disconnect</Button>
+      </div>
+      <Note>An OBD2 (ISO 9141-2) slow init takes about 3 s: keep hondalog in front while it connects (a hidden tab slows its timers and the init fails).</Note>
+      {msg && <Note style={{ color: t.alarm }}>{msg}</Note>}
+    </Card>
+  );
+}
+
+function CableTab(props: { picker: TransportPicker | null; notes: string[]; connection: ConnectionControl | null }) {
   const t = useTheme();
   const cable = useCable();
   const [ports, setPorts] = useState<PortInfo[]>([]);
@@ -109,6 +130,8 @@ function CableTab(props: { picker: TransportPicker | null; notes: string[] }) {
     ...(current && !ports.some((p) => p.id === current) ? [[current, `${current} (last used)`] as const] : []),
   ];
   return (
+    <>
+    {props.connection && <ConnectionCard connection={props.connection} picker={props.picker} ports={ports} onPorts={setPorts} />}
     <Card title="Cable and ports" style={{ maxWidth: 860 }}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <Button onClick={() => void list()}>List ports</Button>
@@ -131,6 +154,7 @@ function CableTab(props: { picker: TransportPicker | null; notes: string[] }) {
       {props.notes.map((n) => <Note key={n}>{n}</Note>)}
       <Note>The CYD is the black box: when it relays, the ECU frames come through its USB-C and the KKL cable is not needed.</Note>
     </Card>
+    </>
   );
 }
 
@@ -236,7 +260,7 @@ export interface SetupScreenProps { deps?: Partial<SetupDeps>; theme?: Theme; in
 export default function SetupScreen(props: SetupScreenProps) {
   const sessionTheme = useShellTheme();
   const theme = props.theme ?? sessionTheme;
-  const deps = useMemo<SetupDeps>(() => ({ ...defaultSetupDeps(), ...registered, ...props.deps }), [props.deps]);
+  const deps = useMemo<SetupDeps>(() => ({ ...defaultSetupDeps(), ...registeredSetupDeps(), ...props.deps }), [props.deps]);
   const [tab, setTab] = useState<SetupTab>(props.initialTab ?? 'alarms');
   const [mapText, setMapText] = useState(deps.mapText);
   const saveMap = deps.saveMap ? async (t: string) => { await deps.saveMap!(t); setMapText(t); } : null;
@@ -255,7 +279,7 @@ export default function SetupScreen(props: SetupScreenProps) {
               onHello={(h) => setCyd({ mapHash: h.map, mapMatch: map && h.map ? h.map === map.hash : null })} />
           )}
           {tab === 'units' && <UnitsTab />}
-          {tab === 'cable' && <CableTab picker={deps.picker} notes={platform.notes} />}
+          {tab === 'cable' && <CableTab picker={deps.picker} notes={platform.notes} connection={deps.connection} />}
           {tab === 'files' && <FilesTab store={deps.store} mapText={mapText} saveMap={saveMap} confirm={deps.confirm} />}
           {tab === 'theme' && <ThemeTab />}
           {tab === 'about' && <AboutTab versions={deps.versions} platform={platform} mapText={mapText} />}
