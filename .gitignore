@@ -8,3 +8,7 @@ build/
 build-logs/
 tools/watch-and-run.log
 tools/.watch-pause
+packaging/windows/entry/
+docs/analysis/*/work-*/*.db*
+docs/analysis/*/work-*/venv/
+docs/analysis/*/work-*/*.pkl
