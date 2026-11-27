@@ -755,9 +755,9 @@ class IdleBar(QWidget):
         if launch:
             left, mid, right = signed_rpm(lo), "target", signed_rpm(hi)
         elif not self.has_target:
-            left, mid, right = f"{lo:,.0f}", "no idle target in the map", f"{hi:,.0f}"
+            left, mid, right = f"{lo:.0f}", "no idle target in the map", f"{hi:.0f}"
         else:
-            left, mid, right = f"{lo:,.0f}", "shaded = stall zone", f"{hi:,.0f}"
+            left, mid, right = f"{lo:.0f}", "yellow = stall zone", f"{hi:.0f}"   # the artboard's words
         p.drawText(sr, Qt.AlignTop | Qt.AlignLeft, left)
         p.drawText(sr, Qt.AlignTop | Qt.AlignRight, right)
         if launch:

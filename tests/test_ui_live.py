@@ -77,7 +77,8 @@ def test_group_table_names_each_channel_once():
     assert len(seen) == len(set(seen))
     assert live_mod.GROUP["ign_limit"] == "idle" and live_mod.GROUP["psp"] == "switches"
     assert live_mod.LABELS == {"ign_limit": "RPM×MAP idx", "knock": "RPM idx 0x3C",
-                               "psp": "Steering load"}
+                               "psp": "Steering load", "ign": "Timing", "o2": "O2 front",
+                               "alt_fr": "Alt field"}
 
 
 def test_idle_bar_readout_and_zones(app):

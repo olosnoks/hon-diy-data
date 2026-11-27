@@ -1,6 +1,6 @@
 """The moments of a drive worth a look, each with a short verdict: engine
 deaths, link dropouts, key-offs, near-stalls, VTEC, harsh acceleration and
-braking, knock retards and the driver's marks. Pure functions on the logged
+braking, hard cornering, knock retards and the driver's marks. Pure functions on the logged
 channels; no Qt. The Events screen (F3) lists them, Replay (F4) ticks them on
 its scrubber and steps through them.
 
@@ -26,6 +26,8 @@ link-dropouts.md, drive-idle-control.md) and 2026-11-27/index-bytes.md:
 - **VTEC** = the vtec flag on.
 - **Harsh accel / brake** = |a| from vss ≥ 0.30 g for 0.3 s (tonight's
   hardest braking was 0.22 g).
+- **Hard corner** = |lateral g| from the GPS heading rate × GPS speed ≥ 0.45 g
+  (``hondalog.analysis.motion.lateral_accel``; a rough, GPS-derived figure).
 - **Knock retard** = 0x27 (``ign_limit``, ignition correction in ¼° counts)
   falls by 5 or more from one read to the next with MAP > 44 kPa.
 - **Mark** = the driver's MARK (Space).
@@ -37,6 +39,8 @@ link-dropouts.md, drive-idle-control.md) and 2026-11-27/index-bytes.md:
 
 Times are whatever the channels' time base is (session seconds from a log);
 ``key`` (kind + time to 0.1 s) identifies an event for notes and overrides.
+The kind names are shared with the web app (web/src/ui/events/detect.ts), so
+a note written in one is found by the other.
 """
 
 from __future__ import annotations
@@ -46,16 +50,18 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
-from .motion import G, Car, gear, gear_name, grid, hold, longitudinal_accel, resample
+from .motion import G, Car, gear, gear_name, grid, hold, lateral_accel, longitudinal_accel, resample
 
 #: in list order for the filter chips
-KINDS = ("stall", "near_stall", "dropout", "key_off", "vtec", "harsh_accel", "harsh_brake", "knock", "mark")
+KINDS = ("stall", "near_stall", "dropout", "key_off", "vtec", "harsh_accel", "harsh_brake", "corner", "knock",
+         "mark")
 LABELS = {"stall": "ENGINE DIED", "near_stall": "NEAR-STALL", "dropout": "DROPOUT", "key_off": "KEY OFF",
           "vtec": "VTEC", "harsh_accel": "HARSH ACCEL", "harsh_brake": "HARSH BRAKE",
-          "knock": "KNOCK RETARD", "mark": "MARK"}
+          "corner": "HARD CORNER", "knock": "KNOCK RETARD", "mark": "MARK"}
 #: chip text
 CHIPS = {"stall": "Engine died", "near_stall": "Near-stall", "dropout": "Link dropout", "key_off": "Key off",
-         "vtec": "VTEC", "harsh_accel": "Harsh accel", "harsh_brake": "Harsh brake", "knock": "Knock retard",
+         "vtec": "VTEC", "harsh_accel": "Harsh accel", "harsh_brake": "Harsh brake", "corner": "Cornering",
+         "knock": "Knock retard",
          "mark": "Marks"}
 #: the verdicts a person can pick instead of the computed one, per kind
 VERDICT_CHOICES = {
@@ -67,6 +73,7 @@ VERDICT_CHOICES = {
     "vtec": ("VTEC on",),
     "harsh_accel": ("hard launch", "hard pull"),
     "harsh_brake": ("hard stop", "emergency stop"),
+    "corner": ("hard corner", "GPS noise"),
     "knock": ("knock retard", "transient (tip-in)"),
     "mark": ("mark",),
 }
@@ -83,6 +90,7 @@ class Rules:
     stall_rpm: float = 300.0
     harsh_g: float = 0.30
     harsh_min_s: float = 0.3
+    corner_g: float = 0.45
     knock_drop: int = 5
     knock_map_kpa: float = 44.0
     knock_merge_s: float = 2.0
@@ -124,6 +132,8 @@ class DriveEvent:
             return f"Link dropout · {self.value:.1f} s silent"
         if self.kind in ("harsh_accel", "harsh_brake"):
             return f"{name} · {self.value:.2f} g"
+        if self.kind == "corner":
+            return f"Hard {'right' if self.value > 0 else 'left'} · {abs(self.value):.2f} g"
         if self.kind == "knock":
             return f"Knock retard · {self.value:.2f}°"
         if self.kind == "vtec":
@@ -429,6 +439,39 @@ def harsh(channels: Mapping, car: Car = Car(), rules: Rules = Rules()) -> list[D
     return out
 
 
+def corners(channels: Mapping, rules: Rules = Rules()) -> list[DriveEvent]:
+    """Hard cornering: |lateral g| from the GPS heading rate past ``corner_g``,
+    one event per run (the peak), runs closer than 3 s merged. Value: the
+    signed peak in g (+ right)."""
+    hd, sp = _series(channels, "gps_heading"), _series(channels, "gps_speed")
+    if hd is None or sp is None or len(hd[0]) < 3:
+        return []
+    kmh = np.interp(hd[0], sp[0], sp[1])
+    t, a = lateral_accel(hd[0], hd[1], kmh)
+    g = a / G
+    out: list[DriveEvent] = []
+    i, n = 0, len(t)
+    while i < n:
+        if not (abs(g[i]) >= rules.corner_g):
+            i += 1
+            continue
+        sign, j, peak = np.sign(g[i]), i, i
+        while j + 1 < n and sign * g[j + 1] >= rules.corner_g and t[j + 1] - t[j] < 3.0:
+            j += 1
+            if abs(g[j]) > abs(g[peak]):
+                peak = j
+        pg, tp = float(g[peak]), float(t[peak])
+        side = "right" if pg > 0 else "left"
+        k = float(kmh[peak])
+        out.append(DriveEvent("corner", tp, float(t[j]),
+                              f"cornering {abs(pg):.2f} g to the {side} at {k:.0f} km/h", "hard corner",
+                              f"Lateral acceleration from the GPS heading rate peaked at {abs(pg):.2f} g to the "
+                              f"{side} at {k:.0f} km/h. GPS-derived: a rough figure.",
+                              "warn", pg, {"kmh": k}))
+        i = j + 1
+    return out
+
+
 def knock_retards(channels: Mapping, rules: Rules = Rules()) -> list[DriveEvent]:
     corr = _series(channels, "ign_limit")
     if corr is None or len(corr[0]) < 2:
@@ -477,7 +520,8 @@ def detect(channels: Mapping, markers: Sequence = (), *, t_end: float | None = N
     name -> (t, v). ``t_end``: the end of the recording (to tell a key-off at
     the end from nothing)."""
     found = (engine_deaths(channels, rules) + silences(channels, t_end, rules) + near_stalls(channels, rules)
-             + vtec_runs(channels) + harsh(channels, car, rules) + knock_retards(channels, rules) + marks(markers))
+             + vtec_runs(channels) + harsh(channels, car, rules) + corners(channels, rules)
+             + knock_retards(channels, rules) + marks(markers))
     return sorted(found, key=lambda e: (e.t, KINDS.index(e.kind) if e.kind in KINDS else 99))
 
 

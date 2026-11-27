@@ -1,4 +1,4 @@
-"""The shell: status bar, tab bar, the eight screens (F1 Live, F2 Drive,
+"""The shell: the top row (keys + status), the eight screens (F1 Live, F2 Drive,
 F3 Events, F4 Replay, F5 Power, F6 GPS map, F7 Bytes, F8 Setup), Tune while a
 ROM is open, the alarm strip, the keyboard map and the one frame timer
 everything paints from.
@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QComboBox, QInput
 from .. import __version__
 from . import adapters as ad
 from . import theme as _theme
-from .chrome import TABS, TUNE_TAB, AlarmStrip, StallBanner, StatusBar, TabBar
+from .chrome import TABS, TOPBAR_H, TUNE_TAB, AlarmStrip, StallBanner, TopBar
 from .perf import Perf
 from .screens.alarms import AlarmsScreen
 from .screens.drive import DriveScreen
@@ -152,12 +152,12 @@ class Shell(QMainWindow):
         lay = QVBoxLayout(central)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        self.status = StatusBar(show_bb=show_bb)
-        self.tabs = TabBar()
+        # one top row (the artboards, the web app): the keys and the status together
+        self.status = self.tabs = TopBar(show_bb=show_bb)
         self.stack = QStackedWidget()
         self.strip = AlarmStrip()
-        for widget in (self.status, self.tabs):
-            lay.addWidget(widget)
+        self.tabs.infoChanged.connect(self.strip.set_info)
+        lay.addWidget(self.status)
         lay.addWidget(self.stack, 1)
         lay.addWidget(self.strip)
         self.setCentralWidget(central)
@@ -355,7 +355,7 @@ class Shell(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self.banner.setGeometry(0, 44, self.width(), 44)
+        self.banner.setGeometry(0, TOPBAR_H, self.width(), 44)
 
     # ---- actions ----
 

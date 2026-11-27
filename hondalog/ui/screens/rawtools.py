@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox, QWidget
 
 from ... import protocol
 from .. import paint
+from ..paint import selected_row
 from ..controls import Button, Card, HexEdit
 from ..theme import T
 
@@ -168,8 +169,8 @@ class ByteInspector(Card):
         for q in range(8):
             on = v >= 0 and (v >> (7 - q)) & 1
             r = QRectF(x + q * 34, y, 30, 30)
-            paint.frame(p, r, 2, T.rule, T.fg if on else T.panel)
-            p.setPen(T.bg if on else T.fg)
+            paint.frame(p, r, 2, T.accent if on else T.rule, T.accent if on else T.panel)
+            p.setPen(T.on_accent if on else T.fg)
             p.drawText(r, Qt.AlignCenter, "1" if on else "0")
         p.setPen(T.fg)
         p.setFont(T.font(13, 700, mono=True))
@@ -295,9 +296,9 @@ class WizardCard(Card):
                 paint.stroke(p, paint.CHECK, box.x() + 5, box.y() + 5, 16, T.panel, 2.5)
                 ink = T.fg
             elif i == wz.step:
-                paint.frame(p, box, 3, T.fg, T.fg)
+                paint.frame(p, box, 3, T.accent, T.accent)
                 p.setFont(num)
-                p.setPen(T.bg)
+                p.setPen(T.on_accent)
                 p.drawText(box, Qt.AlignCenter, str(i + 1))
                 ink = T.fg
             else:
@@ -341,10 +342,10 @@ class WizardCard(Card):
                 r = QRectF(x, ty + 22 + n * self.ROW, w, self.ROW)
                 on = n + first == wz.target_index
                 if on:
-                    p.fillRect(r, T.fg)
+                    selected_row(p, r)
                 p.fillRect(QRectF(x, r.bottom() - 2, w, 2), T.sunk)
                 p.setFont(mono)
-                p.setPen(T.bg if on else T.fg)
+                p.setPen(T.fg)
                 p.drawText(r.adjusted(8, 0, -8, -2), Qt.AlignVCenter | Qt.AlignLeft,
                            paint.elide(mono, text, w - 16))
         elif wz.candidates:
@@ -359,9 +360,9 @@ class WizardCard(Card):
                 r = QRectF(x, ty + 22 + n * self.ROW, w, self.ROW)
                 on = c.addr == sel
                 if on:
-                    p.fillRect(r, T.fg)
+                    selected_row(p, r)
                 p.fillRect(QRectF(x, r.bottom() - 2, w, 2), T.sunk)
-                ink, ground = (T.bg, T.fg) if on else (T.fg, T.panel)
+                ink, ground = T.fg, (T.panel if on else T.sunk)
                 p.setFont(mono)
                 p.setPen(ink)
                 p.drawText(QRectF(x + cols[0], r.y(), 80, self.ROW - 2),
@@ -571,9 +572,9 @@ class RankCard(Card):
             r = QRectF(x, ty + 22 + n * self.ROW, w, self.ROW)
             on = n == self.sel
             if on:
-                p.fillRect(r, T.fg)
+                selected_row(p, r)
             p.fillRect(QRectF(x, r.bottom() - 2, w, 2), T.sunk)
-            ink, ground = (T.bg, T.fg) if on else (T.fg, T.panel)
+            ink, ground = T.fg, (T.panel if on else T.sunk)
             p.setFont(mono)
             p.setPen(ink)
             line = QRectF(r.x(), r.y(), r.width(), self.ROW - 2)

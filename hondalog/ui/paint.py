@@ -260,3 +260,10 @@ def paragraph(p: QPainter, x: float, y: float, width: float, text: str, font,
         p.drawText(QPointF(x, y + (line_h + m.ascent() - m.descent()) / 2.0), line)
         y += line_h
     return y
+
+
+def selected_row(p: QPainter, rect: QRectF) -> None:
+    """The selected row of a list: sunk ground and a 5 px accent bar on the
+    left, as the Events artboard (and the web app) draw it. Never a light fill."""
+    p.fillRect(rect, T.sunk)
+    p.fillRect(QRectF(rect.x(), rect.y(), 5, rect.height()), T.accent)

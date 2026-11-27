@@ -54,13 +54,13 @@ def test_status_chip_and_link_line_say_obd2_not_honda(obd2_session):
     st = s.ecu_status
     assert st.state == ad.OK and st.link == "OBD2" and st.simulated and st.rate_hz > 1
     _key, icon, style, text, monos = source_chip("ECU", st, "ecu")
-    assert icon == "ok" and style == "" and text == "ECU SIM OBD2 (ISO 9141-2)"
+    assert icon == "ok" and style == "" and text == "ECU SIM OBD2"
     assert monos[0].endswith("Hz")
     line = s.ecu.link_text()
     assert line.startswith("OBD2 ISO 9141-2 via 5-baud init") and "Honda reads off" in line
     assert "wire" not in line and "fast" not in line         # no Honda rate classes to fall short of
     # a Honda link stays as it was
-    assert source_chip("ECU", ad.SourceStatus(ad.OK, 20.0))[3] == "ECU OK"
+    assert source_chip("ECU", ad.SourceStatus(ad.OK, 20.0))[3] == "ECU"
 
 
 def test_pid_channels_are_shown_as_standard_values_and_put_back_after(obd2_session):

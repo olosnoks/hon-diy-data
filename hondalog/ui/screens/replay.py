@@ -59,9 +59,10 @@ SPEEDS = (("0.5", "0.5×"), ("1", "1×"), ("4", "4×"))
 #: event kind -> (token of its tick and pin colour, tick height)
 EVENT_STYLE = {"stall": ("alarm", 24), "near_stall": ("warn", 22), "dropout": ("series3", 18),
                "key_off": ("rule", 18), "vtec": ("ok", 18), "harsh_accel": ("series5", 16),
-               "harsh_brake": ("series5", 16), "knock": ("unverified", 12), "mark": ("fg", 18)}
+               "harsh_brake": ("series5", 16), "corner": ("series5", 16), "knock": ("unverified", 12),
+               "mark": ("fg", 18)}
 EVENT_PIN = {"stall": "stall", "near_stall": "alarm", "dropout": "capture", "key_off": "start", "mark": "marker",
-             "harsh_brake": "capture", "harsh_accel": "capture"}
+             "harsh_brake": "capture", "harsh_accel": "capture", "corner": "capture"}
 #: the sensors panel, grouped like Live (anything else goes under OTHER)
 SENSOR_GROUPS = (
     ("ENGINE", ("rpm", "map", "tps", "load_ecu", "load", "ect", "iat", "baro", "vss")),
@@ -634,10 +635,11 @@ class _Overlay(QWidget):
                 p.drawLine(QPointF(x, 10), QPointF(x, ay))
                 label = str(text)[:18]
                 tw = paint.text_w(tag, label) + 12
-                p.fillRect(QRectF(x - 1, 0, tw, 15), T.fg)
+                tagr = QRectF(x - 1, 0, tw, 15)        # a sunk tag outlined in fg: no light fills
+                paint.frame(p, tagr, 1, T.fg, T.sunk)
                 p.setFont(tag)
-                p.setPen(T.bg)
-                p.drawText(QRectF(x - 1, 0, tw, 15), Qt.AlignCenter, label)
+                p.setPen(T.fg)
+                p.drawText(tagr, Qt.AlignCenter, label)
         if b.trigger is not None and b.t0 <= b.trigger <= b.t1:
             x = b.x_of(b.trigger)
             p.fillRect(QRectF(x - 2, 0, 4, ay), T.alarm)

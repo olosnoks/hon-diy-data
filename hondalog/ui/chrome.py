@@ -1,20 +1,21 @@
-"""The frame shared by every screen (HANDOFF section 3): status bar, tab bar,
-stall banner and the alarm strip."""
+"""The frame shared by every screen: the one top row (wordmark, F1-F8 keys,
+status, theme, MARK) as on the design artboards and in the web app, the stall
+banner and the alarm strip."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QAbstractButton, QWidget
 
 from . import adapters as ad
 from . import paint
-from .controls import Button
 from .theme import T
 
-#: the eight screens, in the order of their keys (the Main artboard)
+#: the eight screens, in the order of their keys (the Main artboard; F6 is
+#: "GPS" in the bar, as on the screen artboards and in the web app)
 TABS = (("F1", "Live"), ("F2", "Drive"), ("F3", "Events"), ("F4", "Replay"),
-        ("F5", "Power"), ("F6", "GPS map"), ("F7", "Bytes"), ("F8", "Setup"))
+        ("F5", "Power"), ("F6", "GPS"), ("F7", "Bytes"), ("F8", "Setup"))
 #: shown after them only while a ROM is open (--rom): no key of its own
 TUNE_TAB = ("ROM", "Tune")
 
@@ -29,124 +30,249 @@ def _rate(hz: float) -> str:
 
 
 def source_chip(name: str, st: ad.SourceStatus, key: str = "") -> tuple:
-    """(key, icon, style, text, mono figures) for an ECU / BLACK BOX chip."""
+    """(key, icon, style, text, mono figures) for an ECU / BLACK BOX chip.
+    Wording as the web app's top bar (web/src/ui/shell/TopBar.tsx)."""
     sim = " SIM" if st.simulated else ""
     if st.state == ad.OK:
-        monos = (_rate(st.rate_hz), f"{st.errors} err") if name == "ECU" else (_rate(st.rate_hz),)
+        monos = (_rate(st.rate_hz),) + ((f"{st.errors} err",) if name == "ECU" and st.errors else ())
         if st.link == "OBD2":               # standard PIDs, not Honda reads
-            return (key, "ok", "", f"{name}{sim} OBD2 (ISO 9141-2)", monos)
-        return (key, "ok", "", f"{name}{sim} OK", monos)
+            return (key, "ok", "", f"{name}{sim} OBD2", monos)
+        return (key, "ok", "", f"{name}{sim}", monos)
     if st.state == ad.CONNECTING:
         return (key, "half", "caution", f"{name}{sim} {st.detail or 'connecting'}", ())
     if st.state == ad.SILENT:
-        return (key, "x", "bad", f"{name}{sim} SILENT", (f"{st.silent_s:.1f} s",))
+        return (key, "x", "bad", f"{name}{sim} silent", (f"{st.silent_s:.1f} s",))
     if st.state == ad.LOST:
-        return (key, "x", "bad", f"{name} PORT LOST", ())
+        return (key, "x", "bad", f"{name} port lost", ())
     return (key, "off", "", f"{name} {st.detail or 'off'}", ())
 
 
 def rec_chip(active: bool, elapsed: float) -> tuple:
     return ("rec", "rec", "", "REC", (_mmss(elapsed),)) if active else (
-        "rec", "off", "", "REC stopped", ())
+        "rec", "off", "", "REC off", ())
 
 
 def stall_chip(st: ad.StallStatus) -> tuple:
     if st.state == "armed":
-        return ("", "ring", "", "STALL CATCHER ARMED", ())
+        return ("", "", "", "Stall catcher armed", ())          # plain text, as on the artboard
     if st.state == "standby":
-        return ("", "half", "", "STALL CATCHER waits for engine", ())
+        return ("", "", "", "Stall catcher waits for engine", ())
     if st.state == "saving":
         return ("", "dot", "bad", f"STALL CAUGHT, saving +{st.post_left_s:.0f} s", ())
     if st.state == "triggered":
         return ("", "dot", "bad", "STALL CAUGHT", ())
-    return ("", "off", "", "STALL CATCHER off", ())
+    return ("", "", "", "Stall catcher off", ())
 
 
 def cyd_chip(st) -> tuple:
-    """The CYD black box: link, its SD log, whether it runs this map."""
+    """The CYD black box: link, its SD log, whether it runs this map. The
+    figures (link, SD, map) are drawn only when the bar has room for them."""
     link = getattr(st, "link", "off")
     if link == "off":
-        return ("cyd", "off", "", "CYD BLACK BOX off", ())
+        return ("cyd", "off", "", "CYD off", ())
     if link == "connecting":
-        return ("cyd", "half", "", "CYD BLACK BOX connecting", ())
+        return ("cyd", "half", "caution", "CYD connecting", ())
     if link == "lost":
-        return ("cyd", "x", "bad", "CYD BLACK BOX LOST", ())
+        return ("cyd", "x", "bad", "CYD port lost", ())
     words = {"usb": "USB", "relay": "RELAY", "kline": "K-LINE", "demo": "SIM"}
     sd = {"rec": f"SD REC #{st.drive_no}" if st.drive_no else "SD REC", "ok": "SD idle",
           "none": "NO SD"}.get(st.sd, "")
     map_ = {True: "map ok", False: "MAP DIFFERS", None: ""}[st.map_ok]
     bad = st.sd == "none" or st.map_ok is False
     monos = tuple(x for x in (words.get(link, link.upper()), sd, map_) if x)
-    return ("cyd", "x" if bad else "ok", "caution" if bad else "", "CYD BLACK BOX", monos)
+    text = ("CYD map mismatch" if st.map_ok is False
+            else "CYD no SD card" if st.sd == "none" else "CYD black box")
+    return ("cyd", "x" if bad else "ok", "caution" if bad else "", text, monos)
 
 
-def chip_width(chip: tuple) -> float:
-    _, _, _, text, monos = chip
-    w = 10 + 14 + 8 + paint.text_w(T.font(13, 700), text) + 10
-    mono = T.font(13, 700, mono=True)
-    for fig in monos:
-        w += 8 + paint.text_w(mono, fig)
+#: the status items of the top bar: 12-13 px semibold and a 10 px lamp (the Live artboard)
+CHIP_PX = 12
+CHIP_LAMP = 9.0
+CHIP_GAP = 12
+#: horizontal padding of a key in the top row
+KEY_PAD = 9
+#: the top row: 40 px + the 2 px rule under it
+TOPBAR_H = 42
+
+
+def _chip_fonts():
+    return T.font(CHIP_PX, 600), T.font(CHIP_PX, 700, mono=True)
+
+
+def chip_width(chip: tuple, figures: bool = True) -> float:
+    _, _, style, text, monos = chip
+    font, mono = _chip_fonts()
+    w = (CHIP_LAMP + 6 if chip[1] else 0) + paint.text_w(T.font(CHIP_PX, 800) if style == "bad" else font, text)
+    if figures:
+        for fig in monos:
+            w += 6 + paint.text_w(mono, fig)
+    if style == "bad":
+        w += 12                             # the alarm fill reaches 6 px past either end
     return float(int(w + 0.99))
 
 
-def draw_chip(p: QPainter, x: float, y: float, chip: tuple, blink_on: bool = True) -> float:
-    """One 32 px chip at (x, y). Returns its width."""
+def draw_chip(p: QPainter, x: float, y: float, chip: tuple, blink_on: bool = True,
+              height: float = 32, figures: bool = True) -> float:
+    """One status item at (x, y): lamp + text (+ mono figures) with no box, as
+    in the web app's top bar. 'bad' is filled with the alarm colour (STALL
+    CAUGHT, a lost link), 'caution' turns the lamp yellow. Returns its width."""
     _, icon, style, text, monos = chip
-    w = chip_width(chip)
-    r = QRectF(x, y, w, 32)
+    w = chip_width(chip, figures)
+    ink, lamp = T.fg, T.fg
+    font, mono = _chip_fonts()
     if style == "bad":
-        fill, ink, edge = T.alarm, T.on_alarm, T.alarm
+        p.fillRect(QRectF(x, y + (height - 24) / 2, w, 24), T.alarm)
+        ink = lamp = T.on_alarm
+        font = T.font(CHIP_PX, 800)
+        x += 6
     elif style == "caution":
-        fill, ink, edge = T.warn, T.on_warn, T.warn
-    else:
-        fill, ink, edge = T.panel, T.fg, T.rule
-    paint.frame(p, r, 2, edge, fill)
-    paint.chip_icon(p, icon, x + 10, y + 9, ink, blink_on)
-    font = T.font(13, 700)
+        lamp = T.warn
+    elif icon == "off":
+        lamp = T.rule
+    tx = x
+    if icon:
+        paint.chip_icon(p, icon, x, y + (height - CHIP_LAMP) / 2, lamp, blink_on, size=CHIP_LAMP)
+        tx += CHIP_LAMP + 6
     p.setFont(font)
     p.setPen(ink)
-    tx = x + 32
-    p.drawText(QRectF(tx, y, w, 32), Qt.AlignVCenter | Qt.AlignLeft, text)
+    p.drawText(QRectF(tx, y, w, height), Qt.AlignVCenter | Qt.AlignLeft, text)
     tx += paint.text_w(font, text)
-    mono = T.font(13, 700, mono=True)
-    p.setFont(mono)
-    for fig in monos:
-        tx += 8
-        p.drawText(QRectF(tx, y, w, 32), Qt.AlignVCenter | Qt.AlignLeft, fig)
-        tx += paint.text_w(mono, fig)
+    if figures:
+        p.setFont(mono)
+        for fig in monos:
+            tx += 6
+            p.drawText(QRectF(tx, y, w, height), Qt.AlignVCenter | Qt.AlignLeft, fig)
+            tx += paint.text_w(mono, fig)
     return w
 
 
-class StatusBar(QWidget):
-    """Wordmark, chips (ECU, REC, STALL CATCHER, CYD BLACK BOX; the separate
-    ESP32 black box only with ``show_bb``), theme, MARK."""
+class BarButton(QAbstractButton):
+    """A full-height cell at the right end of the top bar: MARK (accent fill)
+    or the theme toggle. ``show_text`` False draws only the icon and the key;
+    the text stays the button's name (tooltip, tests)."""
 
+    def __init__(self, text: str, key: str, kind: str = "normal", icon=None,
+                 show_text: bool = True, parent=None):
+        super().__init__(parent)
+        self.setText(text)
+        self.key, self.kind, self.icon_name, self.show_text = key, kind, icon, show_text
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def set_text(self, text: str) -> None:
+        if text != self.text():
+            self.setText(text)
+            self.updateGeometry()
+            self.update()
+
+    @staticmethod
+    def _keyfont():
+        return T.font(12, 700, mono=True)
+
+    def sizeHint(self) -> QSize:
+        w = 2 + 10 + 10
+        if self.icon_name:
+            w += CHIP_LAMP + 6
+        if self.show_text and self.text():
+            w += paint.text_w(T.font(13, 800), self.text()) + 6
+        w += paint.text_w(self._keyfont(), self.key) + 8
+        return QSize(int(w + 0.99), TOPBAR_H - 2)
+
+    def paintEvent(self, _event) -> None:
+        p = QPainter(self)
+        r = QRectF(self.rect())
+        lit = self.kind == "primary" or self.isDown()
+        fill, ink = (T.accent, T.on_accent) if lit else (T.bg, T.fg)
+        p.fillRect(r, fill)
+        p.fillRect(QRectF(0, 0, 2, r.height()), T.rule)
+        x, cy = 12.0, r.height() / 2
+        if self.icon_name:
+            paint.chip_icon(p, self.icon_name, x, cy - CHIP_LAMP / 2, ink, size=CHIP_LAMP)
+            x += CHIP_LAMP + 6
+        if self.show_text and self.text():
+            font = T.font(13, 800)
+            p.setFont(font)
+            p.setPen(ink)
+            p.drawText(QRectF(x, 0, r.width(), r.height()), Qt.AlignVCenter | Qt.AlignLeft,
+                       self.text())
+            x += paint.text_w(font, self.text()) + 6
+        kf = self._keyfont()
+        kw = paint.text_w(kf, self.key) + 8
+        p.setPen(T.cpen(ink, 1.5))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(QRectF(x + 0.75, cy - 8.25, kw - 1.5, 16.5))
+        p.setFont(kf)
+        p.drawText(QRectF(x, cy - 9, kw, 18), Qt.AlignCenter, self.key)
+        p.end()
+
+
+class TopBar(QWidget):
+    """The one top row of the design artboards and of the web app: HONDALOG,
+    the F1-F8 keys (Tune after them while a ROM is open), the always-on status
+    (ECU, REC, stall catcher, CYD black box; the separate ESP32 black box only
+    with ``show_bb``), the theme toggle (F9) and MARK (Space).
+
+    It is both the shell's ``status`` and its ``tabs``: ``picked`` /
+    ``set_tabs`` / ``set_current`` / ``_rects`` for the keys, ``sync`` /
+    ``_chips`` / ``_chip_rects`` for the status. ``info`` (the screen's own
+    title, or the link summary) is kept here and drawn by the alarm strip."""
+
+    picked = Signal(int)
     connectionMenu = Signal(QPoint)
     recordClicked = Signal()
     cydClicked = Signal()
+    infoChanged = Signal(str)
 
-    def __init__(self, parent=None, show_bb: bool = False):
+    def __init__(self, parent=None, tabs=TABS, show_bb: bool = False):
         super().__init__(parent)
-        self.setFixedHeight(44)
+        self.setFixedHeight(TOPBAR_H)
+        self.setMouseTracking(True)
         self.show_bb = show_bb
-        self.theme_btn = Button(T.label, "F9", icon="half", height=36, parent=self)
-        self.mark_btn = Button("MARK", "Space", kind="primary", height=36, parent=self)
-        self.mark_btn.setMinimumWidth(150)
-        self.theme_btn.clicked.connect(T.toggle)
+        self.tabs: tuple = tuple(tabs)
+        self.current = 0
+        self.info = ""
+        self._rects: list[QRectF] = []
         self._chips: tuple = ()
-        self._rects: list = []
+        self._chip_rects: list = []
         self._blink = True
+        self.theme_btn = BarButton(T.label, "F9", icon="half", show_text=False, parent=self)
+        self.mark_btn = BarButton("MARK", "Space", kind="primary", parent=self)
+        self.theme_btn.clicked.connect(T.toggle)
         self.retheme()
+
+    # ---- the keys ----
+
+    def set_tabs(self, tabs) -> None:
+        tabs = tuple(tabs)
+        if tabs != self.tabs:
+            self.tabs = tabs
+            self.update()
+
+    def set_current(self, index: int) -> None:
+        if index != self.current:
+            self.current = index
+            self.update()
+
+    def set_info(self, text: str) -> None:
+        if text != self.info:
+            self.info = text
+            self.infoChanged.emit(text)
+
+    # ---- the status ----
 
     def retheme(self) -> None:
         self.theme_btn.set_text(T.label)
+        self.theme_btn.setToolTip(f"Theme: {T.label.title()}. F9 switches Dracula / Darker")
+        self.mark_btn.setToolTip("Mark this moment (Space)")
         self._place()
+        self.update()
 
     def _place(self) -> None:
-        mw = max(150, self.mark_btn.sizeHint().width())
+        h = TOPBAR_H - 2
+        mw = self.mark_btn.sizeHint().width()
         tw = self.theme_btn.sizeHint().width()
-        self.mark_btn.setGeometry(self.width() - 8 - mw, 3, mw, 36)
-        self.theme_btn.setGeometry(self.width() - 8 - mw - 8 - tw, 3, tw, 36)
+        self.mark_btn.setGeometry(self.width() - mw, 0, mw, h)
+        self.theme_btn.setGeometry(self.width() - mw - tw, 0, tw, h)
 
     def resizeEvent(self, _event) -> None:
         self._place()
@@ -163,8 +289,13 @@ class StatusBar(QWidget):
             self.update()
 
     def mousePressEvent(self, event) -> None:
-        for key, rect in self._rects:
-            if rect.contains(event.position()):
+        pos = event.position()
+        for i, rect in enumerate(self._rects):
+            if rect.contains(pos):
+                self.picked.emit(i)
+                return
+        for key, rect in self._chip_rects:
+            if rect.contains(pos):
                 if key == "ecu":
                     self.connectionMenu.emit(self.mapToGlobal(rect.bottomLeft().toPoint()))
                 elif key == "rec":
@@ -172,97 +303,81 @@ class StatusBar(QWidget):
                 elif key == "cyd":
                     self.cydClicked.emit()
 
+    def mouseMoveEvent(self, event) -> None:
+        pos = event.position()
+        hot = any(r.contains(pos) for r in self._rects) or any(
+            k in ("ecu", "rec", "cyd") and r.contains(pos) for k, r in self._chip_rects)
+        self.setCursor(Qt.PointingHandCursor if hot else Qt.ArrowCursor)
+
+    def _fit(self, room: float) -> tuple:
+        """The chips that fit in ``room`` px: the figures go first (CYD's, then
+        the ECU rate, the REC clock last), then whole items from the right."""
+        chips = list(self._chips)
+        figures = [True] * len(chips)
+
+        def need():
+            return (sum(chip_width(c, f) for c, f in zip(chips, figures))
+                    + CHIP_GAP * max(0, len(chips) - 1))
+        drop = sorted(range(len(chips)), key=lambda i: ("cyd", "", "ecu", "rec").index(chips[i][0])
+                      if chips[i][0] in ("cyd", "", "ecu", "rec") else 1)
+        for i in drop:                              # REC's clock goes last
+            if need() <= room:
+                break
+            figures[i] = False
+        while chips and need() > room:
+            chips.pop()
+            figures.pop()
+        return chips, figures, need()
+
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
-        w = self.width()
-        p.fillRect(self.rect(), T.panel)
-        p.fillRect(QRectF(0, 42, w, 2), T.rule)
-        font = T.font(19, 800, spacing=-0.02)
+        w, h = self.width(), TOPBAR_H - 2
+        p.fillRect(self.rect(), T.bg)
+        p.fillRect(QRectF(0, h, w, 2), T.rule)
+        # the wordmark
+        font = T.font(15, 800)
         p.setFont(font)
         p.setPen(T.fg)
-        p.drawText(QRectF(8, 0, 200, 42), Qt.AlignVCenter | Qt.AlignLeft, "hondalog")
-        x = 8 + paint.text_w(font, "hondalog") + 12
-        self._rects = []
-        limit = self.theme_btn.x() - 8
-        for chip in self._chips:
-            cw = chip_width(chip)
-            if x + cw > limit:
-                break
-            draw_chip(p, x, 5, chip, self._blink)
-            self._rects.append((chip[0], QRectF(x, 5, cw, 32)))
-            x += cw + 8
-        p.end()
-
-
-class TabBar(QWidget):
-    """The screen keys. The current one is filled with the accent."""
-
-    picked = Signal(int)
-
-    def __init__(self, parent=None, tabs=TABS):
-        super().__init__(parent)
-        self.setFixedHeight(44)
-        self.tabs: tuple = tuple(tabs)
-        self.current = 0
-        self.info = ""
-        self._rects: list[QRectF] = []
-        self.setCursor(Qt.PointingHandCursor)
-
-    def set_tabs(self, tabs) -> None:
-        tabs = tuple(tabs)
-        if tabs != self.tabs:
-            self.tabs = tabs
-            self.update()
-
-    def set_current(self, index: int) -> None:
-        if index != self.current:
-            self.current = index
-            self.update()
-
-    def set_info(self, text: str) -> None:
-        if text != self.info:
-            self.info = text
-            self.update()
-
-    def mousePressEvent(self, event) -> None:
-        for i, rect in enumerate(self._rects):
-            if rect.contains(event.position()):
-                self.picked.emit(i)
-
-    def paintEvent(self, _event) -> None:
-        p = QPainter(self)
-        w = self.width()
-        p.fillRect(self.rect(), T.panel)
-        font = T.font(15, 700)
-        x = 0.0
+        ww = 14 + paint.text_w(font, "HONDALOG") + 14
+        p.drawText(QRectF(14, 0, ww, h), Qt.AlignVCenter | Qt.AlignLeft, "HONDALOG")
+        p.fillRect(QRectF(ww, 0, 2, h), T.rule)
+        x = ww + 2
+        # the keys: mono key, 13 px name, the current one filled with the accent
+        kfont, nfont = T.font(12, 700, mono=True), T.font(13, 700)
         self._rects = []
         for i, (key, name) in enumerate(self.tabs):
-            tw = 14 + paint.keycap_w(key) + 8 + paint.text_w(font, name) + 14
-            r = QRectF(x, 0, tw, 42)
+            kw = paint.text_w(kfont, key)
+            tw = KEY_PAD + kw + 5 + paint.text_w(nfont, name) + KEY_PAD
+            r = QRectF(x, 0, tw, h)
             on = i == self.current
             if on:
                 p.fillRect(r, T.accent)
-            ink = T.on_accent if on else T.fg
-            p.setPen(ink)
-            kw = paint.keycap(p, x + 14, 21, key, ink)
-            p.setFont(font)
-            p.setPen(ink)
-            p.drawText(QRectF(x + 14 + kw + 8, 0, tw, 42), Qt.AlignVCenter | Qt.AlignLeft, name)
+            p.setPen(T.on_accent if on else T.fg)
+            p.setFont(kfont)
+            p.drawText(QRectF(x + KEY_PAD, 0, tw, h), Qt.AlignVCenter | Qt.AlignLeft, key)
+            p.setFont(nfont)
+            p.drawText(QRectF(x + KEY_PAD + kw + 5, 0, tw, h), Qt.AlignVCenter | Qt.AlignLeft, name)
             x += tw
-            p.fillRect(QRectF(x, 0, 1, 42), T.line)
+            p.fillRect(QRectF(x, 0, 1, h), T.line)
             x += 1
             self._rects.append(r)
-        mono = T.font(13, 500, mono=True)
-        p.setFont(mono)
-        p.setPen(T.fg2)
-        p.drawText(QRectF(x + 8, 0, w - x - 16, 42), Qt.AlignVCenter | Qt.AlignRight,
-                   paint.elide(mono, self.info, w - x - 16))
-        p.fillRect(QRectF(0, 42, w, 2), T.rule)
+        # the status, right-aligned against the theme toggle
+        limit = self.theme_btn.x() - 12
+        chips, figures, need = self._fit(limit - (x + 2 + 12))
+        self._chip_rects = []
+        if chips:
+            cx = limit - need
+            p.fillRect(QRectF(cx - 12 - 2, 0, 2, h), T.rule)
+            for chip, fig in zip(chips, figures):
+                cw = draw_chip(p, cx, 0, chip, self._blink, height=h, figures=fig)
+                self._chip_rects.append((chip[0], QRectF(cx, 0, cw, h)))
+                cx += cw + CHIP_GAP
         p.end()
 
 
 class StallBanner(QWidget):
-    """44 px alarm bar that covers the tab row, so the content does not move."""
+    """44 px alarm bar laid over the top of the screen, under the top row, so
+    the content does not move."""
 
     openRequested = Signal()
     dismissed = Signal()
@@ -338,7 +453,9 @@ def paint_banner(p: QPainter, r: QRectF, title: str, cause: str, owner=None) -> 
 
 
 class AlarmStrip(QWidget):
-    """Bottom 32 px: the worst active alarm and warning, or 'No active alarms'."""
+    """Bottom 32 px: the worst active alarm and warning, or 'No active alarms';
+    a passing message, else the screen's own title or the link summary (``info``,
+    the second row's right side before the bar became one row); the key hints."""
 
     HINTS = "Space mark · F1–F8 screens · F9 theme · Esc acknowledge"
 
@@ -348,6 +465,7 @@ class AlarmStrip(QWidget):
         self._alarm = ""
         self._warn = ""
         self.right_text = self.HINTS
+        self.info = ""
         self._rev = -1
         self._message = ""
         self._message_until = 0.0
@@ -355,6 +473,11 @@ class AlarmStrip(QWidget):
     def show_message(self, text: str, now: float, seconds: float = 6.0) -> None:
         self._message, self._message_until = text, now + seconds
         self.update()
+
+    def set_info(self, text: str) -> None:
+        if text != self.info:
+            self.info = text
+            self.update()
 
     def set_right(self, text: str) -> None:
         if text != self.right_text:
@@ -420,6 +543,12 @@ class AlarmStrip(QWidget):
             p.setPen(T.fg)
             p.drawText(QRectF(x + 12, 2, room - x - 24, 30), Qt.AlignVCenter | Qt.AlignLeft,
                        paint.elide(mfont, self._message, room - x - 24))
+        elif self.info and room - x - 36 > 80:
+            p.setFont(mono)
+            p.setPen(T.fg2)
+            p.drawText(QRectF(x + 12, 2, room - x - 36, 30), Qt.AlignVCenter | Qt.AlignRight,
+                       paint.elide(mono, self.info, room - x - 36))
+            p.fillRect(QRectF(room - 12, 9, 1, 16), T.line)
         p.setFont(mono)
         p.setPen(T.fg)
         p.drawText(QRectF(w - right_w, 2, right_w - 10, 30), Qt.AlignVCenter | Qt.AlignRight,

@@ -60,8 +60,8 @@ def test_events_screen_on_the_demo_drive(shell, app):
     assert counts["near_stall"] == 1 and counts["dropout"] == 1 and counts["key_off"] == 1 and counts["vtec"] == 1
     assert counts["knock"] == 1 and counts["harsh_brake"] == 1 and counts["mark"] == 1
     # "All" leaves the knock retards to their own chip; newest first
-    assert len(e.shown) == 6 and all(r.event.kind != "knock" for r in e.shown)
-    assert e.shown[0].event.kind == "key_off" and e.list.chips()[0] == ("all", "All 6")
+    assert len(e.shown) == 7 and counts["corner"] == 1 and all(r.event.kind != "knock" for r in e.shown)
+    assert e.shown[0].event.kind == "key_off" and e.list.chips()[0] == ("all", "All 7")
     assert e.title_text() == "2026-11-26 · 1 drive · 3 min"
     # filters
     e.set_filter("near_stall")

@@ -388,3 +388,16 @@ def test_notes_and_verdicts_live_in_the_events_table(tmp_path):
     assert eventnotes.load(database, name) == {}
     with pytest.raises(ValueError):
         eventnotes.save(database, "drive_nope", "x", note="y")
+
+
+def test_hard_corner_from_gps_heading_rate_kind_shared_with_the_web():
+    """25 °/s at 50 km/h through north is ~0.62 g to the left: one "corner"
+    event (the web app's kind name, so notes keyed kind@t carry over)."""
+    t = np.arange(0, 60, 1.0)
+    hd = np.where(t < 20, 350.0, np.where(t < 26, (350 + (t - 20) * -25.0) % 360, 200.0))
+    found = events.corners({"gps_heading": (t, hd), "gps_speed": (t, np.full(len(t), 50.0))})
+    assert len(found) == 1
+    e = found[0]
+    assert e.kind == "corner" and e.value == pytest.approx(-0.62, abs=0.05)
+    assert e.title.startswith("Hard left") and e.key.startswith("corner@")
+    assert "corner" in events.KINDS and events.corners({"rpm": (t, t)}) == []

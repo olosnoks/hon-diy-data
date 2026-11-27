@@ -44,11 +44,15 @@ def active(shell, app):
 
 def test_frame_regions_match_the_handoff(shell):
     assert (shell.width(), shell.height()) == (1366, 768)
-    assert shell.status.geometry() == QRect(0, 0, 1366, 44)
-    assert shell.tabs.geometry() == QRect(0, 44, 1366, 44)
-    assert shell.stack.geometry() == QRect(0, 88, 1366, 648)
+    # one top row, as on the artboards and in the web app: keys and status together
+    assert shell.status is shell.tabs
+    assert shell.status.geometry() == QRect(0, 0, 1366, 42)
+    assert shell.stack.geometry() == QRect(0, 42, 1366, 694)
     assert shell.strip.geometry() == QRect(0, 736, 1366, 32)
-    assert shell.status.mark_btn.width() >= 150
+    bar = shell.status
+    assert bar.mark_btn.width() >= 100 and bar.mark_btn.geometry().right() == 1365
+    assert bar.theme_btn.isVisible() and bar.theme_btn.geometry().right() < bar.mark_btn.x()
+    assert bar._rects[-1].right() < bar._chip_rects[0][1].x()     # keys and status do not overlap
 
 
 def test_live_shows_every_panel_on_one_screen_no_scrolling(shell):
@@ -280,8 +284,8 @@ def test_escape_acknowledges_and_dismisses_enter_opens_the_stall(active, app, tm
     win.session.banner = cap
     win.banner.show_stall("STALL 14:02:11", "RPM dropped to 0.")
     app.processEvents()
-    assert win.banner.isVisible() and win.banner.geometry() == QRect(0, 44, 1366, 44)
-    assert win.stack.geometry().y() == 88, "content does not move under the banner"
+    assert win.banner.isVisible() and win.banner.geometry() == QRect(0, 42, 1366, 44)
+    assert win.stack.geometry().y() == 42, "content does not move under the banner"
     key(win, Qt.Key_Escape)
     assert not win.banner.isVisible() and win.session.banner is None
     win.session.banner = cap
@@ -485,7 +489,7 @@ def test_mark_button_click_with_qtbot(app, shell, qtbot):
 
 # ---- the redesign: screen order, Tune only with a ROM, the CYD black box chip ----
 
-NEW_ORDER = ["Live", "Drive", "Events", "Replay", "Power", "GPS map", "Bytes", "Setup"]
+NEW_ORDER = ["Live", "Drive", "Events", "Replay", "Power", "GPS", "Bytes", "Setup"]
 
 
 def test_tabs_follow_the_new_order(shell, app):
@@ -546,11 +550,11 @@ def test_old_theme_names_map_to_dracula_and_darker(app, tmp_path):
 def test_black_box_chip_only_with_bb_cyd_chip_always(shell, app, settings):
     texts = [c[3] for c in shell.status._chips]
     assert not any(t.startswith("BLACK BOX") for t in texts)
-    assert any(t.startswith("CYD BLACK BOX") for t in texts)
+    assert any(t.startswith("CYD black box") for t in texts)
     assert texts[0].startswith("ECU") and any(t.startswith("REC") for t in texts)
-    assert any(t.startswith("STALL CATCHER") for t in texts)
-    drawn = [k for k, _ in shell.status._rects]
-    assert "cyd" in drawn, "the CYD chip fits at 1366 px"
+    assert any(t.startswith("Stall catcher") for t in texts)
+    drawn = [k for k, _ in shell.status._chip_rects]
+    assert drawn == ["ecu", "rec", "", "cyd"], "every status item fits the one row at 1366 px"
     from hondalog.ui.session import build_session
     win = mw.Shell(build_session(demo=True, demo_clock=lambda: 100.0), settings, show_bb=True)
     try:
@@ -566,10 +570,10 @@ def test_black_box_chip_only_with_bb_cyd_chip_always(shell, app, settings):
 def test_cyd_chip_states():
     from hondalog.ui.chrome import cyd_chip
     from hondalog.ui.session import CydState
-    assert cyd_chip(CydState())[3] == "CYD BLACK BOX off"
+    assert cyd_chip(CydState())[3] == "CYD off"
     assert cyd_chip(CydState("lost"))[2] == "bad"
     key, icon, style, text, monos = cyd_chip(CydState("relay", "rec", 41, True))
-    assert (key, icon, style, text) == ("cyd", "ok", "", "CYD BLACK BOX")
+    assert (key, icon, style, text) == ("cyd", "ok", "", "CYD black box")
     assert monos == ("RELAY", "SD REC #41", "map ok")
     _, icon, style, _, monos = cyd_chip(CydState("usb", "ok", 0, False))
     assert style == "caution" and "MAP DIFFERS" in monos

@@ -1,5 +1,5 @@
 """F3 Events: every stall, link dropout, near-stall, key-off, VTEC run, harsh
-acceleration or braking, knock retard and mark of a day's drives in one list,
+acceleration or braking, hard cornering, knock retard and mark of a day's drives in one list,
 with filters and counts ("All" leaves the many knock retards to their own
 chip); the selected event's verdict, why, and a timeline
 from 10 s before to 5 s after; Open in Replay (F4), Show on GPS map, Add a
@@ -38,8 +38,9 @@ LIST_ROW_H = 38
 BADGES = {"stall": ("alarm", "alarm", "on_alarm"), "near_stall": ("warn", "warn", "on_warn"),
           "dropout": (None, "accent", "accent"), "key_off": (None, "line", "fg2"),
           "vtec": ("ok", "ok", "panel"), "harsh_accel": (None, "unverified", "unverified"),
-          "harsh_brake": (None, "unverified", "unverified"), "knock": (None, "unverified", "unverified"),
-          "mark": ("fg", "fg", "bg")}
+          "harsh_brake": (None, "unverified", "unverified"), "corner": (None, "unverified", "unverified"),
+          "knock": (None, "unverified", "unverified"),
+          "mark": (None, "fg", "fg")}                  # outlined, as the web app: no light fills
 WINDOW = (-10.0, 5.0)
 #: kinds so frequent that "All" leaves them out: they have their own chip
 QUIET = ("knock",)

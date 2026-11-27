@@ -146,7 +146,7 @@ def test_calculated_channels_and_events_join_the_model():
     assert set(channels) >= {"rpm", "vss", "tps", "gps_heading"}
     d, found = analyse(view)
     kinds = [e.kind for e in found]
-    assert kinds == ["near_stall", "knock", "vtec", "dropout", "harsh_brake", "mark", "key_off"]
+    assert kinds == ["near_stall", "knock", "vtec", "dropout", "corner", "harsh_brake", "mark", "key_off"]
     near = found[0]
     assert near.value == pytest.approx(460, abs=15) and near.verdict.startswith("throttle 0.")
     assert d.at(38.0)["gear"] == 2 and d.at(38.0)["power"] > 30
@@ -275,7 +275,7 @@ def test_jumps_walk_the_drives_events(shell, app):
     shell.show_screen(mw.REPLAY)
     r, b = shell.replay, shell.replay.block
     times = [round(e.t, 2) for e in r.drive_events]
-    assert [e.kind for e in r.drive_events][0] == "near_stall" and len(times) == 7
+    assert [e.kind for e in r.drive_events][0] == "near_stall" and len(times) == 8
     key(shell, Qt.Key_Home)
     seen = []
     for _ in range(len(times) + 1):
@@ -328,7 +328,7 @@ def test_map_gg_pull_readouts_and_sensors(shell, app):
     r, b = shell.replay, shell.replay.block
     spin(app, shell)
     assert r.track is not None and len(r.track) == 195
-    assert sorted(p.kind for p in r.canvas.pins) == ["alarm", "capture", "capture", "marker", "start"]
+    assert sorted(p.kind for p in r.canvas.pins) == ["alarm", "capture", "capture", "capture", "marker", "start"]
     assert r.canvas.title.startswith("GPS · coloured by speed")
     # the car follows the cursor; a click on a pin moves the cursor there
     b.set_cursor(60.0)

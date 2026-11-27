@@ -54,8 +54,10 @@ GROUP = {cid: key for key, _, ids in PANELS for cid in ids}
 GROUP.update({cid: "switches" for cid in SWITCHES})
 GROUP.update({cid: "consumed" for cid in CONSUMED})
 
-#: Live's own names where the map's label says something the byte is not
-LABELS = {"ign_limit": "RPM×MAP idx", "knock": "RPM idx 0x3C", "psp": "Steering load"}
+#: Live's own names where the map's label says something the byte is not, and
+#: the Live artboard's names (the web app's web/src/ui/live/layout.ts uses the same)
+LABELS = {"ign_limit": "RPM×MAP idx", "knock": "RPM idx 0x3C", "psp": "Steering load",
+          "ign": "Timing", "o2": "O2 front", "alt_fr": "Alt field"}
 
 #: worked-out tiles of the CYD panel: (label, units, decimals)
 VIRTUAL = {
