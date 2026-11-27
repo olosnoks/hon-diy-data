@@ -44,9 +44,12 @@ def test_bytes_pages_and_keys(screen, app):
     assert raw.console.geometry().bottom() <= raw.height() and raw.console.height() >= 90
     assert press(screen, Qt.Key_S) and screen.session.mapper.sweeping      # memory keys still work
     press(screen, Qt.Key_S)
-    assert press(screen, Qt.Key_Tab) and screen.page == "map"
+    # the web app's pages, in its order
+    assert [label for _, label in screen.tabs.options] == ["Scanner", "Unknown bytes", "Address map", "Verify",
+                                                           "Rank", "Poke test"]
+    assert press(screen, Qt.Key_Tab) and screen.page == "unknown"
     assert not press(screen, Qt.Key_S)                                     # other pages: not the scanner's
-    for name in ("unknown", "poke", "memory"):
+    for name in ("map", "verify", "rank", "poke", "memory"):
         screen.show_page(name)
         assert screen.stack.currentWidget() is screen.pages[name]
         screen.grab()
@@ -70,10 +73,10 @@ def test_unknown_list_seed_notes_and_rank(screen, settings):
     page.fill()
     i = keys.index("0x1C") if "0x1C" in keys else 0
     assert page.table.item(i, 0).text() == page.model.rows[i]["key"]
-    # "Rank against it": the memory page at that byte with the correlation finder open
+    # "Rank against it": that byte, on the Rank page
     screen.rank_byte(0x2F)
-    assert screen.page == "memory" and screen.raw.grid.sel == 0x2F
-    assert screen.raw.rank is None or screen.raw.rank.isVisible()
+    assert screen.page == "rank" and screen.raw.grid.sel == 0x2F
+    assert screen.rank_page.inspector.addr == 0x2F
 
 
 def test_map_page_validate_edit_bump_diff_save(screen, tmp_path):

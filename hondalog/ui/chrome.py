@@ -235,6 +235,9 @@ class TopBar(QWidget):
         self._chips: tuple = ()
         self._chip_rects: list = []
         self._blink = True
+        #: "DEMO DATA" (--demo) or "SIMULATOR" (a simulated ECU): worked out here, drawn by the
+        #: bottom strip (as in the web app: the top bar has no room for it)
+        self.badge = ""
         self.theme_btn = BarButton(T.label, "F9", icon="half", show_text=False, parent=self)
         self.mark_btn = BarButton("MARK", "Space", kind="primary", parent=self)
         self.theme_btn.clicked.connect(T.toggle)
@@ -284,9 +287,15 @@ class TopBar(QWidget):
                  stall_chip(session.stall),
                  cyd_chip(getattr(session, "cyd", None)))
         blink = (now % 1.2) < 0.6
-        if chips != self._chips or (blink != self._blink and session.recording.active):
-            self._chips, self._blink = chips, blink
+        badge = ("DEMO DATA" if getattr(session, "demo", False) else
+                 "SIMULATOR" if getattr(session.ecu_status, "simulated", False) else "")
+        if chips != self._chips or badge != self.badge or (blink != self._blink and session.recording.active):
+            self._chips, self._blink, self.badge = chips, blink, badge
             self.update()
+
+    @staticmethod
+    def badge_width(text: str) -> float:
+        return paint.text_w(T.font(11, 800, mono=True), text) + 12 if text else 0.0
 
     def mousePressEvent(self, event) -> None:
         pos = event.position()
@@ -469,6 +478,12 @@ class AlarmStrip(QWidget):
         self._rev = -1
         self._message = ""
         self._message_until = 0.0
+        self.badge = ""                     # DEMO DATA / SIMULATOR (the top bar works it out)
+
+    def set_badge(self, text: str) -> None:
+        if text != self.badge:
+            self.badge = text
+            self.update()
 
     def show_message(self, text: str, now: float, seconds: float = 6.0) -> None:
         self._message, self._message_until = text, now + seconds
@@ -513,6 +528,14 @@ class AlarmStrip(QWidget):
         x = 0.0
         mono = T.font(13, 500, mono=True)
         right_w = paint.text_w(mono, self.right_text) + 20
+        bw = TopBar.badge_width(self.badge)
+        if bw:                                  # DEMO DATA / SIMULATOR, yellow, left of the key hints
+            bx = w - right_w - 8 - bw
+            p.fillRect(QRectF(bx, 7, bw, 20), T.warn)
+            p.setFont(T.font(11, 800, mono=True))
+            p.setPen(T.on_warn)
+            p.drawText(QRectF(bx, 7, bw, 20), Qt.AlignCenter, self.badge)
+            right_w += bw + 16
         room = w - right_w
         for text, fill, ink, path in ((self._alarm, T.alarm, T.on_alarm, paint.OCTAGON),
                                       (self._warn, T.warn, T.on_warn, paint.TRIANGLE)):

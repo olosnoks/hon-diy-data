@@ -1,4 +1,7 @@
 """F8, Setup: everything that is set once and left alone, one page at a time.
+The pages are the web app's (Alarms, CYD black box, Units, Cable, Files,
+Theme, About) plus ROM / Tune, which only the desktop has: the P28 ROM tools
+are Python only.
 
 Alarms (``screens/alarms.py``), the CYD black box (``screens/handheld.py``:
 status, SD card drives, config, the offline map push, console, firmware),
@@ -28,7 +31,7 @@ from .alarms import AlarmsScreen
 from .bytesmap import map_path_for
 from .common import TAB_H, TabStrip, label, restyle
 
-PAGES = (("alarms", "Alarms"), ("cyd", "CYD black box"), ("units", "Units"), ("cable", "Cable / ports"),
+PAGES = (("alarms", "Alarms"), ("cyd", "CYD black box"), ("units", "Units"), ("cable", "Cable"),
          ("files", "Files"), ("theme", "Theme"), ("rom", "ROM / Tune"), ("about", "About"))
 ALIASES = {"handheld": "cyd"}
 KEYS = (("F1", "Live"), ("F2", "Drive"), ("F3", "Events"), ("F4", "Replay"), ("F5", "Power"), ("F6", "GPS map"),
@@ -519,6 +522,8 @@ class AboutPage(QWidget):
             grid.addWidget(label(str(v), mono=True), i, 1)
         grid.setColumnStretch(1, 1)
         box.addLayout(grid)
+        box.addWidget(label("ROM / Tune (the P28-family chip tables) is only in this desktop app: the ROM tools "
+                            "are Python. The web and Android app has every other page.", dim=True, wrap=True))
         lay.addWidget(frame)
         kframe, kbox = _box("Keys")
         kgrid = QGridLayout()
@@ -558,6 +563,7 @@ class SetupScreen(QWidget):
             self.stack.addWidget(page)
         for page in (self.handheld, self.cable, self.files, self.rom):
             page.message.connect(self.message)
+        self.files.mapChanged.connect(self.alarms.reload_rules)
         self.rom.romOpened.connect(self.romOpened)
         self.tabs.picked.connect(self.show_page)
         self.page = "alarms"
@@ -604,8 +610,8 @@ class SetupScreen(QWidget):
 
     def resizeEvent(self, _event) -> None:
         w, h = self.width(), self.height()
-        self.tabs.setGeometry(8, 8, w - 16, TAB_H)
-        top = 8 + TAB_H + 6
+        self.tabs.setGeometry(0, 0, w, TAB_H)        # the joined strip, edge to edge
+        top = TAB_H + 8
         self.stack.setGeometry(0, top, w, h - top)
 
     def paintEvent(self, _event) -> None:

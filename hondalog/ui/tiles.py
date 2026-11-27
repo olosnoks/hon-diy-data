@@ -55,11 +55,12 @@ COMPACT = Metrics(24, 8, 6, 13, 16, 44, 40, 7, 14, 10, (3, 8, 4), 22, 0, 12, 30,
 DRIVE = Metrics(40, 12, 10, 22, 24, 150, 104, 35, 22, 22, (6, 14, 10), 44, 30, 18, 60, 9, 104, True)
 #: the drive tile when the idle bars take the bottom of the Drive screen: 252 px instead of 306
 DRIVE_COMPACT = replace(DRIVE, row_h=112, value_base=26, spark_h=28)
-#: Live (F1) panel tiles, tallest first: 96 px, 82 px without the min / max line,
-#: 66 px without the sparkline. The raw-byte drawer uses RAW (66 px).
-PANEL = Metrics(19, 7, 6, 12, 13, 28, 24, 6, 12, 0, (0, 8, 0), 16, 14, 12, 18, 3, 20, False,
+#: Live (F1) panel tiles, tallest first: 82 px (the session min / max small at the
+#: right of the sparkline, as in the web app), 66 px without the sparkline (and so
+#: without min / max). The raw-byte drawer uses RAW (66 px).
+PANEL = Metrics(19, 7, 6, 12, 13, 28, 24, 6, 12, 0, (0, 8, 0), 16, 0, 10, 18, 3, 20, False,
                 note_h=15, mono_value=True, slim=True)
-PANEL_COMPACT = replace(PANEL, foot_h=0)
+PANEL_COMPACT = PANEL
 PANEL_TIGHT = replace(PANEL, foot_h=0, spark_h=0)
 RAW = replace(PANEL, row_h=28, value_px=20, note_h=0, spark_h=16, foot_h=0)
 RAW_TIGHT = replace(RAW, spark_h=0)
@@ -105,6 +106,7 @@ class Tile(QWidget):
         self._pts = fn.ndarray_from_qpolygonf(self._poly)
         self._pts[:] = 0.0
         self._spark_pm: QPixmap | None = None
+        self._mm_reserve = 0                # px kept free right of the sparkline for min / max
         self._reset()
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
         if state is not None:
@@ -198,8 +200,8 @@ class Tile(QWidget):
         if value:
             top, mid = self._bands()
             self.update(0, top, w, mid + 4 - top)
-            if value > 1 and not trace:             # min / max in the footer moved too
-                foot = int(self._spark_top()) + self.m.spark_h
+            if value > 1 and not trace:             # min / max moved too
+                foot = int(self._spark_top()) + (0 if self._mm_inline() else self.m.spark_h)
                 self.update(0, foot, w, self.height() - foot)
         if trace:
             _, mid = self._bands()
@@ -245,6 +247,9 @@ class Tile(QWidget):
                 and on == self._on):
             return 0
         foot = vmin != self._min or vmax != self._max
+        if foot and self._mm_inline() and self._mm_need(vmin, vmax) != self._mm_reserve:
+            self._spark_gen = -1                # the sparkline gets narrower / wider on its next sample
+            self._spark_key = None
         if text != self._text or self._value_font is None:
             self._text = text
             self._fit_value()
@@ -269,6 +274,23 @@ class Tile(QWidget):
                 break
         self._value_font, self._value_w = font, width
 
+    def _mm_inline(self) -> bool:
+        """Min / max drawn small at the right of the sparkline (Live panel tiles)."""
+        m = self.m
+        return (m.slim and bool(m.spark_h) and not m.foot_h and self.foot_override is None
+                and not (self._spec is not None and self._spec.is_flag))
+
+    def _mm_font(self):
+        return T.font(self.m.foot_px, 600, mono=True)
+
+    def _mm_need(self, vmin: str, vmax: str) -> int:
+        """px to keep free right of the sparkline for "▼min ▲max", in 8 px steps
+        (the sparkline is not re-laid at every digit)."""
+        if not self._mm_inline() or not vmin:
+            return 0
+        need = paint.text_w(self._mm_font(), f"▼{vmin} ▲{vmax}") + 12
+        return int(-(-need // 8) * 8)
+
     def _refresh_spark(self, st, spec) -> None:
         m = self.m
         data = st.spark
@@ -277,7 +299,8 @@ class Tile(QWidget):
         if n_bad == SPARK_N:
             self._have_spark = False
             return
-        w, h = self.width() - 4.0, float(m.spark_h)
+        reserve = self._mm_reserve = self._mm_need(self._min, self._max)
+        w, h = max(8.0, self.width() - 4.0 - reserve), float(m.spark_h)
         top = self._spark_top()
         pts = self._pts
         pts[:, 0] = np.linspace(2.0, 2.0 + w, SPARK_N)
@@ -458,6 +481,15 @@ class Tile(QWidget):
                 self._spark_key = key
                 self._render_spark(ink)
             p.drawPixmap(2, int(self._spark_top()) - 2, self._spark_pm)
+        # the session min / max, small, right of the sparkline (Live panel tiles)
+        if (body or low) and self._mm_inline() and not stale and self._min:
+            font = self._mm_font()
+            p.setFont(font)
+            p.setPen(ink if alarm else T.fg2)
+            top = self._spark_top()
+            p.drawText(QRectF(2 + m.pad_l, top - 2, w - 4 - m.pad_l - m.pad_r, m.spark_h + 4),
+                       Qt.AlignVCenter | Qt.AlignRight, f"▼{self._min} ▲{self._max}")
+            p.setPen(ink)
         # the session min / max ticks reach a pixel into the sparkline band: both draw them
         if (body or low) and m.gauge_h and not spec.is_flag:
             tick = ink if alarm else T.accent

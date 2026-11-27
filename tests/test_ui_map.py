@@ -3,6 +3,7 @@ Replay's cursor and the dot that follows it, colouring, the All stalls
 view on a real database, exports, the live position, tiles (fixture tiles,
 both dark themes, the grid without any) and the paint budget for an hour."""
 
+import json
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -181,7 +182,14 @@ def test_exports_from_the_screen(shell, app, stall_db, tmp_path):
     m.export("kml", tmp_path / "d.kml")
     desc = ET.parse(tmp_path / "d.kml").getroot()[0].find("{http://www.opengis.net/kml/2.2}description").text
     assert "rpm" in desc
+    # the drive as GeoJSON (the web app's three formats)
+    assert m.drive_json_btn.isVisible() and m.export("geojson", tmp_path / "d.geojson").startswith("Wrote")
+    doc = json.loads((tmp_path / "d.geojson").read_text(encoding="utf-8"))
+    kinds = [f["properties"]["kind"] for f in doc["features"]]
+    assert doc["type"] == "FeatureCollection" and kinds[0] == "track"
+    assert doc["features"][0]["geometry"]["type"] == "LineString" and "rpm" in doc["features"][0]["properties"]
     m.set_mode("stalls")
+    assert not m.drive_json_btn.isVisible()
     assert "4 stalls" in m.export("geojson", tmp_path / "s.geojson")
     assert (tmp_path / "s.geojson").stat().st_size > 200
 

@@ -23,7 +23,7 @@ from datetime import datetime
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QCursor, QPainter, QPolygonF
-from PySide6.QtWidgets import QInputDialog, QMenu, QWidget
+from PySide6.QtWidgets import QComboBox, QInputDialog, QMenu, QWidget
 
 from ...analysis import eventnotes
 from ...analysis import events as ev
@@ -366,6 +366,12 @@ class EventsScreen(QWidget):
         self.next_day.clicked.connect(lambda: self.step_day(1))
         self.prev_day.setToolTip("Previous day (PgUp)")
         self.next_day.setToolTip("Next day (PgDn)")
+        # the day dropdown (the web app has the same): every day with drives, newest first
+        self.day_pick = QComboBox(self)
+        self.day_pick.setFocusPolicy(Qt.NoFocus)
+        self.day_pick.setToolTip("Pick a day with drives")
+        self.day_pick.activated.connect(self._day_picked)
+        self._restyle_pick()
         self._enable()
 
     # ---- loading ----
@@ -408,6 +414,7 @@ class EventsScreen(QWidget):
             return []
 
     def _rebuild(self, keep=None) -> None:
+        self._sync_days()
         rows = [Row(d, e) for d in self.drives for e in d.events]
         rows.sort(key=lambda r: ((r.drive.epoch or 0) + r.event.t), reverse=True)     # newest first
         for r in rows:
@@ -436,6 +443,34 @@ class EventsScreen(QWidget):
     def cycle_filter(self) -> None:
         keys = [k for k, _ in self.list.chips()]
         self.set_filter(keys[(keys.index(self.filter) + 1) % len(keys)] if self.filter in keys else "all")
+
+    def _day_picked(self, index: int) -> None:
+        day = self.day_pick.itemData(index)
+        if day and day != self.day:
+            self.reload(day)
+
+    def _sync_days(self) -> None:
+        """The dropdown lists self.days (or just the demo's day) with the current one picked."""
+        days = self.days or ([self.day] if self.day else [])
+        pick = self.day_pick
+        pick.blockSignals(True)
+        if [pick.itemData(i) for i in range(pick.count())] != days:
+            pick.clear()
+            for d in days:
+                pick.addItem(d, d)
+        if self.day in days:
+            pick.setCurrentIndex(days.index(self.day))
+        pick.blockSignals(False)
+        pick.setEnabled(len(days) > 1)
+
+    def _restyle_pick(self) -> None:
+        t = T.tokens
+        self.day_pick.setFont(T.font(14, 800, mono=True))
+        self.day_pick.setStyleSheet(
+            f"QComboBox {{ background: {t.panel}; color: {t.fg}; border: 2px solid {t.rule}; border-radius: 0;"
+            f" padding: 0 8px; }} QComboBox:disabled {{ color: {t.fg}; border: 2px solid {t.line}; }}"
+            f" QComboBox QAbstractItemView {{ background: {t.bg}; color: {t.fg};"
+            f" selection-background-color: {t.accent}; selection-color: {t.on_accent}; border: 2px solid {t.rule}; }}")
 
     def step_day(self, direction: int) -> None:
         if not self.days or self.day not in self.days:
@@ -578,6 +613,7 @@ class EventsScreen(QWidget):
         self.ensure_loaded()
 
     def retheme(self) -> None:
+        self._restyle_pick()
         self.update()
         self.list.update()
         self.timeline.update()
@@ -625,6 +661,7 @@ class EventsScreen(QWidget):
         self.list.setGeometry(0, 44, left, h - 44)
         self.prev_day.setGeometry(left - 84, 7, 36, 30)
         self.next_day.setGeometry(left - 44, 7, 36, 30)
+        self.day_pick.setGeometry(10, 7, 150, 30)
         x = left + 16
         rw = w - x - 16
         self._detail = QRectF(x, 12, rw, h - 24)
@@ -644,8 +681,11 @@ class EventsScreen(QWidget):
         p.fillRect(QRectF(left, 0, 2, self.height()), T.rule)
         p.setFont(T.font(14, 800))
         p.setPen(T.fg)
-        p.drawText(QRectF(12, 0, left - 100, 44), Qt.AlignVCenter | Qt.AlignLeft,
-                   paint.elide(T.font(14, 800), self.title_text(), left - 100))
+        rest = self.title_text()                # the day is in the dropdown: the rest after it
+        if self.day and rest.startswith(self.day):
+            rest = rest[len(self.day):]
+        p.drawText(QRectF(168, 0, left - 100 - 156, 44), Qt.AlignVCenter | Qt.AlignLeft,
+                   paint.elide(T.font(14, 800), rest, left - 100 - 156))
         p.fillRect(QRectF(0, 43, left, 1), T.line)
         row = self.selected_row()
         d = getattr(self, "_detail", QRectF(left + 16, 12, 600, 600))

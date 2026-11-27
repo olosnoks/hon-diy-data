@@ -124,7 +124,9 @@ def extras(win, session, shot, settle, clock) -> None:
             other.data[cid] = np.roll(other.data[cid], 25)
     win.show_screen(mw.REPLAY)
     replay.set_overlay(other)
-    replay.block.set_cursor(replay.forensics.loss[0].t)
+    # the first loss when the forensics found one (the demo stall may have none): else 3 s before the stall
+    loss = list(getattr(getattr(replay, "forensics", None), "loss", None) or [])
+    replay.block.set_cursor(loss[0].t if loss else -3.0)
     replay.toggle_cursor_b()
     replay.block.set_cursor(0.0)
 
@@ -133,9 +135,9 @@ def extras(win, session, shot, settle, clock) -> None:
     for k in range(40):
         mapper.fill(70.0 + k * 0.9)
     mapper.revision += 1
-    win.raw.show_rank(True)
-    win.raw.rank.set_reference("tps")
-    win.raw.rank.rank()
+    win.bytes.show_rank(True)                       # the Rank page
+    win.bytes.rank.set_reference("tps")
+    win.bytes.rank.rank()
 
     # Tune: the demo ROM opened from inside the app, one cell edited, the engine moving
     tables = wired.RomTableModel(backends.DemoTableModel(writable=False), store_dir=TMP / "roms")

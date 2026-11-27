@@ -655,6 +655,7 @@ class Shell(QMainWindow):
             elif event.text:
                 self.say(event.text)
         self.status.sync(s, now)
+        self.strip.set_badge(self.status.badge)
         self.strip.sync(s.alarms, now)
         if now - self._info_t >= 1.0:
             self._info_t = now

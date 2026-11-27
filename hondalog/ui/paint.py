@@ -90,10 +90,9 @@ def chip_icon(p: QPainter, kind: str, x: float, y: float, color: QColor,
     """ok / off / half / ring / rec / x, 14 px. Shape first, colour second."""
     p.setRenderHint(QPainter.Antialiasing, True)
     r = QRectF(x, y, size, size)
-    if kind == "ok":
-        p.setPen(Qt.NoPen)
-        p.setBrush(T.ok)
-        p.drawEllipse(r)
+    if kind == "ok":                        # a filled square: link up (the design's lamp)
+        p.setRenderHint(QPainter.Antialiasing, False)
+        p.fillRect(QRectF(x + 0.5, y + 0.5, size - 1, size - 1), T.ok)
     elif kind == "rec":
         if blink_on:
             p.setPen(Qt.NoPen)

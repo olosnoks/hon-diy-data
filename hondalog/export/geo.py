@@ -19,6 +19,7 @@ No Qt in here.
 
 from __future__ import annotations
 
+import json
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -31,7 +32,8 @@ from .. import __version__, ramps
 from ..geo.track import Track, Waypoint, log_waypoints
 
 GEO_FORMATS = {".gpx": "GPX 1.1 (GPS track with times, waypoints for markers and stalls)",
-               ".kml": "KML (GPS track coloured by a channel, for Google Earth)"}
+               ".kml": "KML (GPS track coloured by a channel, for Google Earth)",
+               ".geojson": "GeoJSON (the track as LineStrings, markers and stalls as Points)"}
 GPX_NS = "http://www.topografix.com/GPX/1/1"
 KML_NS = "http://www.opengis.net/kml/2.2"
 HL_NS = "https://github.com/olosnoks/hon-diy-data/gpx/1"
@@ -238,9 +240,42 @@ def write_kml(path: str | os.PathLike, track: Track, values: np.ndarray | None =
     return path
 
 
+def write_geojson(path: str | os.PathLike, track: Track, waypoints: Sequence[Waypoint] = (), *, name: str = "",
+                  epoch: float | None = None, channel: str = "", values: np.ndarray | None = None) -> Path:
+    """The drive as GeoJSON (RFC 7946): one LineString per stretch without a
+    gap (times, and the channel's value at every fix), one Point per marker.
+    The same shape as the web app's ``writeGeoJson``."""
+    def g4(v: float):
+        return float(f"{v:.4g}")
+    features = []
+    for seg in _segments(track):
+        coords = [[round(float(track.lon[i]), 7), round(float(track.lat[i]), 7)] for i in seg]
+        times = [_iso(epoch + float(track.t[i])) if epoch is not None else round(float(track.t[i]), 3)
+                 for i in seg]
+        props: dict = {"kind": "track", "name": name or "hondalog drive", "times": times}
+        if values is not None and channel:
+            props[channel] = [g4(float(values[i])) if np.isfinite(values[i]) else None for i in seg]
+        geometry = ({"type": "LineString", "coordinates": coords} if len(coords) > 1
+                    else {"type": "Point", "coordinates": coords[0]})
+        features.append({"type": "Feature", "geometry": geometry, "properties": props})
+    for w in waypoints:
+        where = place(track, w.t)
+        if where is None:
+            continue
+        props = {"kind": w.kind, "name": w.name, "text": w.text, "t": round(float(w.t), 3)}
+        if epoch is not None:
+            props["time"] = _iso(epoch + w.t)
+        features.append({"type": "Feature", "properties": props,
+                         "geometry": {"type": "Point", "coordinates": [round(where[1], 7), round(where[0], 7)]}})
+    path = Path(path)
+    path.write_text(json.dumps({"type": "FeatureCollection", "generator": f"hondalog {__version__}",
+                                "features": features}, indent=1, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
 def export_geo(log: Any, path: str | os.PathLike, fmt: str | None = None, *, channel: str | None = None,
                t0: float | None = None, t1: float | None = None) -> Path:
-    """Write a log's GPS track as ``.gpx`` or ``.kml`` (from ``fmt`` or the
+    """Write a log's GPS track as ``.gpx``, ``.kml`` or ``.geojson`` (from ``fmt`` or the
     extension). ``channel`` colours the KML (default: speed) and is added to
     every GPX point. Raises ValueError when the log has no GPS fixes."""
     path = Path(path)
@@ -263,8 +298,11 @@ def export_geo(log: Any, path: str | os.PathLike, fmt: str | None = None, *, cha
     if ext == ".gpx":
         extra = (channel, log.units(channel), values) if channel not in ("gps_speed",) else None
         return write_gpx(path, track, pins, name=name, epoch=epoch, extra=extra)
+    if ext == ".geojson":
+        return write_geojson(path, track, pins, name=name, epoch=epoch, channel=channel, values=values)
     return write_kml(path, track, values, name=name, channel=channel, units=log.units(channel), waypoints=pins,
                      epoch=epoch)
 
 
-__all__ = ["GEO_FORMATS", "epoch_of", "export_geo", "place", "speed_channel", "write_gpx", "write_kml"]
+__all__ = ["GEO_FORMATS", "epoch_of", "export_geo", "place", "speed_channel", "write_geojson", "write_gpx",
+           "write_kml"]

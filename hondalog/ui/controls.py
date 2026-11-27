@@ -6,6 +6,8 @@ keyboard focus: every action has a key, handled in one place (the shell).
 
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QAbstractButton, QLineEdit, QSizePolicy, QWidget
@@ -14,8 +16,14 @@ from . import paint
 from .theme import T
 
 
+#: a key written after the label as "(F4)", like the design, instead of a keycap
+FKEY = re.compile(r"F\d{1,2}")
+
+
 class Button(QAbstractButton):
-    """kind: 'normal' or 'primary'. A checked button is drawn inverted."""
+    """kind: 'normal' or 'primary'. A checked button is drawn inverted. An
+    F-key is written after the label, "Open in Replay (F4)"; other keys get a
+    keycap."""
 
     def __init__(self, text: str = "", key: str = "", kind: str = "normal",
                  icon=None, height: int = 44, parent=None):
@@ -36,14 +44,24 @@ class Button(QAbstractButton):
             self.updateGeometry()
             self.update()
 
+    def shown_text(self) -> str:
+        """The label as drawn: with " (F4)" when the key is an F-key."""
+        if self.key and FKEY.fullmatch(self.key):
+            return f"{self.text()} ({self.key})" if self.text() else f"({self.key})"
+        return self.text()
+
+    def _cap(self) -> str:
+        return "" if not self.key or FKEY.fullmatch(self.key) else self.key
+
     def sizeHint(self) -> QSize:
         w = 28.0
-        if self.text():
-            w += paint.text_w(T.font(self.px, 700), self.text())
+        text = self.shown_text()
+        if text:
+            w += paint.text_w(T.font(self.px, 700), text)
         if self.icon_path is not None:
-            w += 16 + (8 if self.text() else 0)
-        if self.key:
-            w += paint.keycap_w(self.key) + 8
+            w += 16 + (8 if text else 0)
+        if self._cap():
+            w += paint.keycap_w(self._cap()) + 8
         return QSize(max(44, int(w + 0.99)), self.height())
 
     def minimumSizeHint(self) -> QSize:
@@ -66,9 +84,10 @@ class Button(QAbstractButton):
                 fill, ink, edge = T.panel, T.fg, T.rule
             paint.frame(p, r, 2, edge, fill)
         font = T.font(self.px, 700)
-        tw = paint.text_w(font, self.text()) if self.text() else 0.0
+        text, cap = self.shown_text(), self._cap()
+        tw = paint.text_w(font, text) if text else 0.0
         iw = 16.0 if self.icon_path is not None else 0.0
-        kw = paint.keycap_w(self.key) if self.key else 0.0
+        kw = paint.keycap_w(cap) if cap else 0.0
         total = tw + iw + kw + (8 if tw and iw else 0) + (8 if kw and (tw or iw) else 0)
         x = (r.width() - total) / 2.0
         cy = r.height() / 2.0
@@ -83,11 +102,10 @@ class Button(QAbstractButton):
         if tw:
             p.setFont(font)
             p.setPen(ink)
-            p.drawText(QRectF(x, 0, tw + 2, r.height()), Qt.AlignVCenter | Qt.AlignLeft,
-                       self.text())
+            p.drawText(QRectF(x, 0, tw + 2, r.height()), Qt.AlignVCenter | Qt.AlignLeft, text)
             x += tw + 8
         if kw:
-            paint.keycap(p, x, cy, self.key, ink)
+            paint.keycap(p, x, cy, cap, ink)
         p.end()
 
 

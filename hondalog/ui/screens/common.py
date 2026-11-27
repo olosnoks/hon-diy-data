@@ -17,10 +17,13 @@ TAB_H = 34
 
 
 class TabStrip(QWidget):
-    """A row of tabs: the current one filled with the accent, the others
-    outlined with a quiet line. ``picked(id)`` when one is clicked."""
+    """The sub-tab row: one joined strip as in the web app (``Tabs`` in
+    web/src/ui/bytes/controls.tsx): the cells side by side with a 1 px line
+    between them, the current one filled with the accent, a 2 px rule under
+    the whole strip. ``picked(id)`` when one is clicked."""
 
     picked = Signal(str)
+    PAD = 14
 
     def __init__(self, options, current: str | None = None, parent=None):
         super().__init__(parent)
@@ -53,14 +56,14 @@ class TabStrip(QWidget):
         font = T.font(14, 700)
         x, out = 0.0, []
         for _, label in self.options:
-            w = paint.text_w(font, label) + 28
-            out.append(QRectF(x, 0, w, TAB_H))
-            x += w + 6
+            w = paint.text_w(font, label) + 2 * self.PAD
+            out.append(QRectF(x, 0, w, TAB_H - 2))
+            x += w + 1                          # the 1 px line between cells
         return out
 
     def sizeHint(self) -> QSize:
         cells = self._cells()
-        return QSize(int(cells[-1].right()) + 2 if cells else 100, TAB_H)
+        return QSize(int(cells[-1].right()) + 1 if cells else 100, TAB_H)
 
     def mousePressEvent(self, event) -> None:
         for (oid, _), r in zip(self.options, self._cells()):
@@ -72,14 +75,16 @@ class TabStrip(QWidget):
         p = QPainter(self)
         font = T.font(14, 700)
         p.setFont(font)
+        p.fillRect(self.rect(), T.bg)
         for (oid, label), r in zip(self.options, self._cells()):
             if oid == self.current:
                 p.fillRect(r, T.accent)
                 p.setPen(T.on_accent)
             else:
-                paint.frame(p, r, 2, T.line, T.bg)
                 p.setPen(T.fg)
             p.drawText(r, Qt.AlignCenter, label)
+            p.fillRect(QRectF(r.right(), 0, 1, TAB_H - 2), T.line)
+        p.fillRect(QRectF(0, TAB_H - 2, self.width(), 2), T.rule)
         p.end()
 
 

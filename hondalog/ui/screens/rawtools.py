@@ -1,12 +1,14 @@
 """F7, Bytes: the raw tools and the address map together.
 
-``BytesScreen`` is the tab: four pages under a tab row.
+``BytesScreen`` is the tab: six pages under the sub-tab strip, the same as
+the web app's: Scanner · Unknown bytes · Address map · Verify · Rank · Poke test.
 
-- **Memory**: ``RawScreen``, the memory scanner (HANDOFF 5.5): hex grid with
-  change heat, byte inspector, hex console, the host for the guided wizard,
-  and the "Rank addresses" panel: W3's correlation finder on the sweep
-  history (which addresses followed a channel, or moved steadily one way),
-  with the result assigned to a channel through the map editor.
+- **Scanner**: ``RawScreen``, the memory scanner (HANDOFF 5.5): hex grid with
+  change heat, byte inspector, hex console.
+- **Verify**: the guided "Map a channel" wizard (``WizardCard``).
+- **Rank**: the "Rank addresses" panel (``RankCard``): W3's correlation finder
+  on the sweep history (which addresses followed a channel, or moved steadily
+  one way), with the result assigned to a channel through the map editor.
 - **Address map**, **Unknown bytes** and **Poke test**: ``bytesmap.py``.
 """
 
@@ -124,10 +126,18 @@ class HexGrid(QWidget):
 
 
 class ByteInspector(Card):
+    """The selected byte: hex, decimal, its bits, its trace, min / max, what
+    the map calls it, and each bit over the last sweeps (b7..b0, as the web)."""
+
+    BITS_TOP = 208
+    BIT_ROW = 18
+    HEIGHT = BITS_TOP + 8 * BIT_ROW + 10
+
     def __init__(self, mapper, parent=None):
         super().__init__("", parent=parent)
         self.mapper = mapper
         self.addr = 0x14
+        self._hist = np.zeros(0, dtype=int)
         self._poly = fn.create_qpolygonf(120)
         self._pts = fn.ndarray_from_qpolygonf(self._poly)
         self._n = 0
@@ -138,6 +148,7 @@ class ByteInspector(Card):
 
     def sync(self) -> None:
         hist = self.mapper.history(self.addr)[-120:]
+        self._hist = np.asarray(hist, dtype=float)
         self._n = n = len(hist)
         w = self.width() - 24.0
         if n >= 2:
@@ -200,6 +211,28 @@ class ByteInspector(Card):
                 f"Address map: {info[0]} · " + ("verified" if info[1] else "unverified guess"))
         p.setFont(T.font(14, 700))
         p.drawText(QRectF(x, y + 22, w, 20), Qt.AlignVCenter | Qt.AlignLeft, text)
+        if self.height() < self.HEIGHT - 4:
+            return
+        # each bit over the last sweeps: filled where it was 1
+        hist = self._hist
+        valid = hist[np.isfinite(hist) & (hist >= 0)].astype(int) if len(hist) else hist
+        small = T.font(12, 700, mono=True)
+        p.setFont(small)
+        tx, tw = x + 28, w - 28
+        for q in range(8):
+            bit = 7 - q
+            ry = self.BITS_TOP + q * self.BIT_ROW
+            p.setPen(T.fg)
+            p.drawText(QRectF(x, ry, 26, self.BIT_ROW), Qt.AlignVCenter | Qt.AlignLeft, f"b{bit}")
+            track = QRectF(tx, ry + 4, tw, self.BIT_ROW - 8)
+            p.fillRect(track, T.sunk)
+            n = len(valid)
+            if n:
+                on = (valid >> bit) & 1
+                step = tw / 120.0
+                x0 = tx + tw - n * step
+                for i in np.flatnonzero(on):
+                    p.fillRect(QRectF(x0 + i * step, track.y(), step + 0.5, track.height()), T.accent)
 
 
 class WizardCard(Card):
@@ -641,18 +674,10 @@ class RawScreen(QWidget):
         self.export_btn = Button("Export", parent=self)
         self.grid = HexGrid(self.mapper, self)
         self.inspector = ByteInspector(self.mapper, self)
-        self.wizard = WizardCard(self.mapper, self)
-        # the correlation finder takes the wizard's place while it is in use
-        self.rank_btn = Button("Rank", "R", parent=self)
-        self.rank_btn.setCheckable(True)
-        self.rank_btn.setToolTip("Rank addresses: which bytes followed a channel, or a shape "
-                                 "you made, in the sweeps so far")
-        self.rank_btn.setVisible(hasattr(self.mapper, "rank"))
-        self.rank = RankCard(self.mapper, self) if hasattr(self.mapper, "rank") else None
-        if self.rank is not None:
-            self.rank.hide()
-            self.rank.pickAddr.connect(lambda addr: self.grid.select(addr))
-            self.rank_btn.clicked.connect(lambda: self.show_rank(self.rank_btn.isChecked()))
+        # the wizard and the correlation finder are pages of their own now (Verify, Rank):
+        # BytesScreen sets these to them
+        self.wizard: WizardCard | None = None
+        self.rank: RankCard | None = None
         self.console = ConsoleCard(self)
         self.tx = HexEdit(self.console)
         self.tx.setText("20 05 14 01")
@@ -673,10 +698,10 @@ class RawScreen(QWidget):
         self.send_btn.clicked.connect(self.send)
         self.tx.returnPressed.connect(self.send)
         self.grid.selected.connect(self.inspector.set_addr)
-        self.wizard.pickAddr.connect(self.grid.select)
+        #: Rank (R) and Rank now (G) from the scanner: the host opens the Rank page
+        self.rank_hook = None
         self._rev = -1
         self._status = ""
-        self._wiz_t = -1.0
         self._map_version: tuple | None = None
 
     # ---- actions ----
@@ -690,15 +715,10 @@ class RawScreen(QWidget):
         self.mapper.set_sweeping(not self.mapper.sweeping)
         self._rev = -1
 
-    def show_rank(self, on: bool) -> None:
-        """R: the Rank addresses panel in the wizard's place, or the wizard back."""
-        if self.rank is None:
-            return
-        self.rank_btn.setChecked(on)
-        self.rank.setVisible(on)
-        self.wizard.setVisible(not on)
-        if on:
-            self.rank.reload()
+    def show_rank(self, on: bool = True) -> None:
+        """R: the Rank page (BytesScreen), or back to the scanner."""
+        if callable(self.rank_hook):
+            self.rank_hook(on)
 
     def send(self) -> None:
         try:
@@ -716,7 +736,8 @@ class RawScreen(QWidget):
 
     # ---- frame ----
 
-    def refresh(self, now: float) -> None:
+    def sync_map(self) -> None:
+        """The grid's "in the map, unverified" marks, when the map changed (any page)."""
         m = self.mapper
         version = (self.session.bus.version, getattr(m, "map_revision", 0))
         if version != self._map_version:
@@ -725,8 +746,10 @@ class RawScreen(QWidget):
                 info = m.mapped(a)
                 self.grid.guess[a] = info is not None and not info[1]
             self._rev = -1
-            if self.rank is not None and self.rank.isVisible():
-                self.rank.reload()          # the map changed: other references, other "in the map as"
+
+    def refresh(self, now: float) -> None:
+        m = self.mapper
+        self.sync_map()
         if m.revision != self._rev:
             self._rev = m.revision
             self.sweep_btn.setChecked(m.sweeping)
@@ -743,12 +766,7 @@ class RawScreen(QWidget):
             self.console.set_rx(m.console())
             self.grid.update()
             self.inspector.sync()
-            if self.rank is not None and self.rank.isVisible():
-                self.rank._sync()           # "now" values, and Rank now once there is a link
             self.update()
-        if now - self._wiz_t >= 0.2:
-            self._wiz_t = now
-            self.wizard.sync()
 
     def key(self, event) -> bool:
         k = event.key()
@@ -765,15 +783,6 @@ class RawScreen(QWidget):
             self.toggle_sweep()
         elif k == Qt.Key_C:
             self.mapper.clear_changes()
-        elif k == Qt.Key_R and self.rank is not None:
-            self.show_rank(not self.rank.isVisible())
-        elif k == Qt.Key_G and self.rank is not None:
-            self.show_rank(True)
-            self.rank.rank()
-        elif k == Qt.Key_N and self.wizard.isVisible():
-            self.wizard.go_next()
-        elif k == Qt.Key_B and self.wizard.isVisible():
-            self.wizard.go_back()
         elif k in (Qt.Key_Return, Qt.Key_Enter):
             self.send()
         else:
@@ -786,7 +795,7 @@ class RawScreen(QWidget):
         w, h = self.width(), self.height()
         left = 772
         x = 8
-        for btn in (self.sweep_btn, self.clear_btn, self.rank_btn):
+        for btn in (self.sweep_btn, self.clear_btn):
             if not btn.isVisibleTo(self):
                 continue
             bw = max(btn.sizeHint().width(), 120 if btn is self.sweep_btn else 0)
@@ -813,10 +822,7 @@ class RawScreen(QWidget):
             b.setFixedHeight(40)
         rx = 8 + left + 8
         rw = w - 8 - rx
-        self.inspector.setGeometry(rx, 8, rw, 208)
-        self.wizard.setGeometry(rx, 224, rw, h - 8 - 224)
-        if self.rank is not None:
-            self.rank.setGeometry(rx, 224, rw, h - 8 - 224)
+        self.inspector.setGeometry(rx, 8, rw, ByteInspector.HEIGHT)
 
     def retheme(self) -> None:
         self.tx.restyle()
@@ -829,7 +835,7 @@ class RawScreen(QWidget):
         p.setPen(T.fg)
         room = self.export_btn.x() - self._status_x - 8
         status = self._status
-        if paint.text_w(mono, status) > room:           # the Rank button took the room: drop the range
+        if paint.text_w(mono, status) > room:           # a narrow window: drop the range
             status = status.replace("0x00–0xFF · ", "")
         p.drawText(QRectF(self._status_x, 8, room, 44), Qt.AlignVCenter | Qt.AlignLeft,
                    paint.elide(mono, status, room))
@@ -864,14 +870,58 @@ class RawScreen(QWidget):
 
 # ---- F7 Bytes: the tab that holds the memory scanner and the map tools ------
 
-BYTES_PAGES = (("memory", "Memory · scanner"), ("map", "Address map"), ("unknown", "Unknown bytes"),
-               ("poke", "Poke test"))
+#: the same pages, in the same order, as the web app's Bytes screen
+BYTES_PAGES = (("memory", "Scanner"), ("unknown", "Unknown bytes"), ("map", "Address map"),
+               ("verify", "Verify"), ("rank", "Rank"), ("poke", "Poke test"))
+
+
+class _CardPage(QWidget):
+    """A page with one big card on the left and the byte inspector on the right."""
+
+    SIDE = 560
+
+    def __init__(self, mapper, card: QWidget, parent=None):
+        super().__init__(parent)
+        self.mapper = mapper
+        self.card = card
+        card.setParent(self)
+        self.inspector = ByteInspector(mapper, self)
+
+    def resizeEvent(self, _event) -> None:
+        w, h = self.width(), self.height()
+        side = min(self.SIDE, max(360, w // 3))
+        self.card.setGeometry(8, 0, w - 16 - side - 8, h - 8)
+        self.inspector.setGeometry(w - 8 - side, 0, side, min(h - 8, ByteInspector.HEIGHT))
+
+    def paintEvent(self, _event) -> None:
+        p = QPainter(self)
+        p.fillRect(self.rect(), T.bg)
+        p.end()
+
+
+class VerifyPage(_CardPage):
+    """Verify: the guided "Map a channel" wizard (N next, B back)."""
+
+    def __init__(self, mapper, parent=None):
+        super().__init__(mapper, WizardCard(mapper), parent)
+        self.wizard = self.card
+        self.wizard.pickAddr.connect(self.inspector.set_addr)
+
+
+class RankPage(_CardPage):
+    """Rank: which addresses followed a channel (G ranks now)."""
+
+    def __init__(self, mapper, parent=None):
+        super().__init__(mapper, RankCard(mapper), parent)
+        self.rank = self.card
+        self.rank.pickAddr.connect(self.inspector.set_addr)
 
 
 class BytesScreen(QWidget):
-    """F7: the memory scanner (``self.raw``), the address-map editor, the
-    unknown-bytes list and the poke-test launcher, one page at a time. Tab
-    moves to the next page; the memory page keeps all of its keys."""
+    """F7: Scanner (``self.raw``), Unknown bytes, Address map, Verify (the
+    wizard), Rank (the correlation finder) and Poke test, one page at a time.
+    Tab moves to the next page; R opens Rank, G ranks now, N / B step the
+    wizard on Verify; the scanner keeps its own keys."""
 
     message = Signal(str)
 
@@ -885,14 +935,27 @@ class BytesScreen(QWidget):
         self._restyle = restyle
         self.setObjectName("bytesroot")
         self.session = session
+        self.mapper = session.mapper
         self.settings = settings if settings is not None else QSettings("hondalog", "hondalog")
-        self.tabs = TabStrip(BYTES_PAGES, "memory", self)
+        has_rank = hasattr(self.mapper, "rank")
+        pages = tuple(pg for pg in BYTES_PAGES if pg[0] != "rank" or has_rank)
+        self.tabs = TabStrip(pages, "memory", self)
         self.stack = QStackedWidget(self)
         self.raw = RawScreen(session)
         self.map_page = MapPage(session)
         self.unknown = UnknownPage(session, self.settings)
+        self.verify = VerifyPage(self.mapper)
+        self.rank_page = RankPage(self.mapper) if has_rank else None
         self.poke = PokePage(session, self.settings)
-        self.pages = {"memory": self.raw, "map": self.map_page, "unknown": self.unknown, "poke": self.poke}
+        self.raw.wizard = self.verify.wizard
+        self.raw.rank = self.rank_page.rank if self.rank_page is not None else None
+        self.raw.rank_hook = self.show_rank
+        self.pages = {"memory": self.raw, "unknown": self.unknown, "map": self.map_page,
+                      "verify": self.verify, "poke": self.poke}
+        if self.rank_page is not None:
+            self.pages["rank"] = self.rank_page
+            self.rank_page.rank.pickAddr.connect(self.raw.grid.select)
+        self.verify.wizard.pickAddr.connect(self.raw.grid.select)
         for page in self.pages.values():
             self.stack.addWidget(page)
         for page in (self.map_page, self.poke):
@@ -901,7 +964,18 @@ class BytesScreen(QWidget):
         self.unknown.rankRequested.connect(self.rank_byte)
         self.tabs.picked.connect(self.show_page)
         self.page = "memory"
+        self._rev = -1
+        self._wiz_t = -1.0
+        self._map_version: tuple | None = None
         self.retheme()
+
+    @property
+    def wizard(self):
+        return self.verify.wizard
+
+    @property
+    def rank(self):
+        return self.rank_page.rank if self.rank_page is not None else None
 
     def show_page(self, name: str) -> None:
         if name not in self.pages:
@@ -911,23 +985,54 @@ class BytesScreen(QWidget):
         self.stack.setCurrentWidget(self.pages[name])
         if name == "unknown":
             self.unknown.fill()                     # "in the map as" may have changed
+        elif name == "rank":
+            self.rank.reload()
+            self.rank_page.inspector.set_addr(self.raw.grid.sel)
+        elif name == "verify":
+            self.verify.wizard.sync()
+            self.verify.inspector.set_addr(self.raw.grid.sel)
+        self._rev = -1
+
+    def show_rank(self, on: bool = True) -> None:
+        """The Rank page (R), or back to the scanner."""
+        self.show_page("rank" if on and self.rank_page is not None else "memory")
 
     def rank_byte(self, addr: int) -> None:
-        """From the unknown list: the memory page at that byte, the correlation finder open."""
-        self.show_page("memory")
+        """From the unknown list: that byte, on the Rank page."""
         self.raw.grid.select(addr)
         self.raw.inspector.set_addr(addr)
-        self.raw.show_rank(True)
+        self.show_rank(True)
 
     def _map_saved(self) -> None:
         self.raw._map_version = None                # the grid's "in the map" marks again
-        rank = self.raw.rank
-        if rank is not None:
-            rank.reload()
+        if self.rank is not None:
+            self.rank.reload()
+        hook = getattr(getattr(self.window(), "alarms", None), "reload_rules", None)
+        if callable(hook):
+            hook()                                  # Setup > Alarms lists the map's rules
 
     def refresh(self, now: float) -> None:
+        m = self.mapper
+        if self.page != "memory":
+            self.raw.sync_map()
         if self.page == "memory":
             self.raw.refresh(now)
+        elif self.page == "verify":
+            if now - self._wiz_t >= 0.2:
+                self._wiz_t = now
+                self.verify.wizard.sync()
+            if m.revision != self._rev:
+                self._rev = m.revision
+                self.verify.inspector.sync()
+        elif self.page == "rank" and self.rank is not None:
+            version = (self.session.bus.version, getattr(m, "map_revision", 0))
+            if version != self._map_version:
+                self._map_version = version
+                self.rank.reload()              # the map changed: other references, other "in the map as"
+            if m.revision != self._rev:
+                self._rev = m.revision
+                self.rank._sync()               # "now" values, and Rank now once there is a link
+                self.rank_page.inspector.sync()
 
     def retheme(self) -> None:
         self._restyle(self, "bytesroot")
@@ -935,8 +1040,19 @@ class BytesScreen(QWidget):
         self.update()
 
     def key(self, event) -> bool:
-        if event.key() == Qt.Key_Tab:
+        k = event.key()
+        if k == Qt.Key_Tab:
             self.tabs.step(1)
+            return True
+        if k == Qt.Key_R and self.rank is not None and self.page in ("memory", "rank"):
+            self.show_rank(self.page != "rank")
+            return True
+        if k == Qt.Key_G and self.rank is not None and self.page in ("memory", "rank"):
+            self.show_rank(True)
+            self.rank.rank()
+            return True
+        if self.page == "verify" and k in (Qt.Key_N, Qt.Key_B):
+            (self.verify.wizard.go_next if k == Qt.Key_N else self.verify.wizard.go_back)()
             return True
         if self.page == "memory":
             return bool(self.raw.key(event))
@@ -948,8 +1064,8 @@ class BytesScreen(QWidget):
     def resizeEvent(self, _event) -> None:
         from .common import TAB_H
         w, h = self.width(), self.height()
-        self.tabs.setGeometry(8, 8, w - 16, TAB_H)
-        top = 8 + TAB_H + 6
+        self.tabs.setGeometry(0, 0, w, TAB_H)        # the joined strip, edge to edge
+        top = TAB_H + 8
         self.stack.setGeometry(0, top, w, h - top)
 
     def paintEvent(self, _event) -> None:

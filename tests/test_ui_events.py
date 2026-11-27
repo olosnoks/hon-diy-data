@@ -145,6 +145,14 @@ def test_days_step_through_the_database(shell, app, tmp_path):
     assert e.day == "2026-11-25"                            # nothing older
     e.step_day(1)
     assert e.day == "2026-11-26"
+    # the day dropdown lists the same days and opens the one picked
+    pick = e.day_pick
+    assert [pick.itemText(i) for i in range(pick.count())] == ["2026-11-26", "2026-11-25"]
+    assert pick.currentText() == "2026-11-26" and pick.isEnabled()
+    pick.activated.emit(1)
+    assert e.day == "2026-11-25" and pick.currentText() == "2026-11-25"
+    e.step_day(1)
+    assert pick.currentText() == "2026-11-26"
     opened = []
     e.openRequested.connect(opened.append)                  # no Replay given: it asks the shell
     e.open_in_replay()

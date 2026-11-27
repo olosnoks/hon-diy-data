@@ -138,6 +138,7 @@ class LaneBlock(QWidget):
     cursorMoved = Signal(float)
     windowChanged = Signal()
     laneMenu = Signal(str, object)          # lane id, global position
+    laneClosed = Signal(str)                # the lane's × was clicked
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -489,11 +490,22 @@ class LaneBlock(QWidget):
 
     # ---- paint (label column and frame) ----
 
+    @staticmethod
+    def close_rect(lane) -> QRectF:
+        """The lane's × (top right of its label), as in the web app."""
+        return QRectF(LABEL_W - 22, lane.y + 3, 18, 18)
+
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.RightButton and event.position().x() < LABEL_W:
-            lane = self.lane_at(event.position().y())
-            if lane is not None:
-                self.laneMenu.emit(lane.cid, event.globalPosition().toPoint())
+        pos = event.position()
+        if pos.x() >= LABEL_W:
+            return
+        lane = self.lane_at(pos.y())
+        if lane is None:
+            return
+        if event.button() == Qt.RightButton:
+            self.laneMenu.emit(lane.cid, event.globalPosition().toPoint())
+        elif event.button() == Qt.LeftButton and len(self.lanes) > 1 and self.close_rect(lane).contains(pos):
+            self.laneClosed.emit(lane.cid)
 
     def lane_at(self, y: float) -> Lane | None:
         return next((lane for lane in self.lanes if lane.y <= y < lane.y + lane.h), None)
@@ -508,8 +520,12 @@ class LaneBlock(QWidget):
             p.fillRect(QRectF(8, lane.y + 6, 4, min(20.0, lane.h - 10)), T.color(lane.token))
             p.setFont(name)
             p.setPen(T.fg)
-            p.drawText(QRectF(18, lane.y + 3, LABEL_W - 22, 18), Qt.AlignVCenter | Qt.AlignLeft,
-                       paint.elide(name, lane.label, LABEL_W - 22))
+            p.drawText(QRectF(18, lane.y + 3, LABEL_W - 44, 18), Qt.AlignVCenter | Qt.AlignLeft,
+                       paint.elide(name, lane.label, LABEL_W - 44))
+            if len(self.lanes) > 1:             # × closes the lane (the sensors panel adds it back)
+                p.setFont(T.font(15, 700))
+                p.setPen(T.fg2)
+                p.drawText(self.close_rect(lane), Qt.AlignCenter, "×")
             p.setFont(mono)
             p.drawText(QRectF(18, lane.y + 21, LABEL_W - 24, 20), Qt.AlignVCenter | Qt.AlignLeft, lane.value)
             if lane.delta and lane.h >= 60:
@@ -994,6 +1010,7 @@ class ReplayScreen(QWidget):
         self.block = LaneBlock(self)
         self.block.cursorMoved.connect(self._cursor_moved)
         self.block.laneMenu.connect(self.lane_menu)
+        self.block.laneClosed.connect(self.toggle_lane)
         self.readouts = ReadoutGrid(self)
         self.sensors = SensorPanel(self)
         self.sensors.laneRequested.connect(self.toggle_lane)

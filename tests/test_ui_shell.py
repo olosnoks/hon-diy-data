@@ -63,7 +63,8 @@ def test_live_shows_every_panel_on_one_screen_no_scrolling(shell):
     assert [p.title for p in live.panels] == ["ENGINE", "IDLE CONTROL", "FUEL", "IGNITION",
                                               "ELECTRICAL", "CYD · BLACK BOX"]
     shown = [t for t in live.tiles if t.parent() is live] + list(live.virtual.values())
-    assert [t.state.spec.id for t in live.panels[0].tiles] == ["rpm", "map", "tps", "ect", "iat"]
+    assert [t.state.spec.id for t in live.panels[0].tiles] == ["rpm", "map", "tps", "load", "ect", "iat",
+                                                                   "vss", "baro"]
     area = live.rect()
     for t in shown:
         assert area.contains(t.geometry()), t.state.spec.id
@@ -109,18 +110,37 @@ def test_every_screen_lays_out_inside_the_window(shell, app, name):
 
 
 def test_tile_states_are_carried_by_shape_and_fill(shell, app):
-    shell.show_screen(mw.ALARMS)
-    spin(app, shell)
-    tiles = shell.alarms.key_tiles
+    import numpy as np
+
+    from hondalog.ui.bus import ChannelBus
+    bus = ChannelBus()
+    tiles = []
+    for spec, value, level, stale in (
+            (ChannelSpec("k_rpm", "RPM", "rpm", 0, 0, 8000, verified=True), 3731, "", False),
+            (ChannelSpec("k_map", "MAP", "kPa", 0, 0, 110), 78, "", False),
+            (ChannelSpec("k_iat", "Intake air", "°C", 0, -20, 80), 46, "warn", False),
+            (ChannelSpec("k_fpv", "FP feed", "V", 2, 0, 16, source="BB", verified=True), 9.8, "alarm", False),
+            (ChannelSpec("k_o2", "O2", "V", 2, 0, 1.2), 0.4, "", True)):
+        state = bus.register(spec)
+        bus.publish({spec.id: value}, t=0.0)
+        state.vmin, state.vmax = value * 0.82, value * 1.08
+        state.timeout = float("inf")
+        state.spark[:] = value * (1 + 0.04 * np.sin(np.arange(len(state.spark)) * 0.21))
+        state.spark_gen += 1
+        tile = Tile(state, SENSOR)
+        tile.demo_level, tile.demo_stale = level, stale
+        tile.resize(160, 142)
+        tile.sync(0.0, None, True)
+        tiles.append(tile)
     D = theme.DRACULA
     states = [(t._level, t._stale) for t in tiles]
-    assert states == [("", False), ("", False), ("warn", False), ("alarm", False),
-                      ("", True), ("", False), ("", False), ("alarm", False)]
+    assert states == [("", False), ("", False), ("warn", False), ("alarm", False), ("", True)]
     alarm = tiles[3].grab().toImage()
-    assert alarm.pixelColor(80, 100).name().upper() == D.alarm
+    filled = sum(alarm.pixelColor(x, y).name().upper() == D.alarm for x in range(4, 156, 4) for y in range(4, 138, 4))
+    assert filled > 0.6 * 38 * 34
     warn = tiles[2].grab().toImage()
     assert warn.pixelColor(100, 6).name().upper() == D.warn       # header band
-    assert warn.pixelColor(100, 100).name().upper() == D.panel    # body stays plain
+    assert warn.pixelColor(140, 50).name().upper() == D.panel     # body stays plain
     stale = tiles[4].grab().toImage()
     seen = {stale.pixelColor(x, 120).name().upper() for x in range(4, 150)}
     assert D.sunk in seen and tiles[4]._text == "---"             # hatch + dashes
@@ -383,10 +403,12 @@ def test_raw_tools_keys(active, app):
     assert m.changes.sum() == 0
     key(win, Qt.Key_S)
     assert not m.sweeping
+    win.bytes.show_page("verify")               # the wizard is the Verify page
     key(win, Qt.Key_N)
     assert m.wizard().step == 1
     key(win, Qt.Key_B)
     assert m.wizard().step == 0
+    win.bytes.show_page("memory")
     key(win, Qt.Key_Return)
     assert "demo" in m.console()
 
@@ -434,12 +456,14 @@ def test_read_only_tables_explain_themselves(app, settings):
         # black box are hidden without --bb. Live: each one a tile or a switch.
         math = len(session.bus.channels("MATH"))
         live = win.sensors
-        shown = [t.state.spec.id for t in live.tiles] + [c.state.spec.id for c in live.flags]
+        # as in the web app a channel may show twice (Speed in Engine and Idle, VTEC as a tile and a
+        # switch) and a listed channel the map lacks is a hatched placeholder: count the mapped ones
+        shown = [t.state.spec.id for t in live.tiles if t.state.spec.mapped] +             [c.state.spec.id for c in live.flags if c.state.spec.mapped]
         from hondalog.ui.screens.sensors import CONSUMED       # GPS position: read into notes
         mapped = {s.spec.id for s in session.bus.channels()
                   if s.spec.mapped and s.spec.source != "BB" and s.spec.id not in CONSUMED}
-        assert math >= 5 and len(shown) == len(set(shown)) and set(shown) == mapped
-        assert len(shown) >= 28 + math
+        assert math >= 5 and set(shown) == mapped
+        assert len(set(shown)) >= 28 + math
         assert win.session.ecu_status.state == "off"
     finally:
         win.close()

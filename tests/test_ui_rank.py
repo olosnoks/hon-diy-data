@@ -107,15 +107,15 @@ def test_assign_refuses_the_shipped_map(monkeypatch):
 def test_rank_panel_in_the_demo(shell, app):
     shell.show_screen(mw.RAW)
     raw, mapper = shell.raw, shell.session.mapper
+    screen = shell.bytes
     spin(app, shell)
-    assert raw.rank_btn.isVisible() and raw.wizard.isVisible() and not raw.rank.isVisible()
-    key(shell, Qt.Key_R)                                    # R: the panel takes the wizard's place
-    assert raw.rank.isVisible() and not raw.wizard.isVisible() and raw.rank_btn.isChecked()
-    assert raw.rank.geometry() == raw.wizard.geometry()
+    assert screen.page == "memory" and not raw.rank.isVisible()
+    key(shell, Qt.Key_R)                                    # R: the Rank page
+    assert screen.page == "rank" and raw.rank.isVisible() and not raw.wizard.isVisible()
     card = raw.rank
     assert card.ref is not None and card.ref.verified and card.ref_btn.text().startswith("Follows: ")
     assert not card.assign_btn.isEnabled() and card.rank_btn.isEnabled() and not card.ranked
-    key(shell, Qt.Key_N)                                    # the wizard's keys are its own
+    key(shell, Qt.Key_N)                                    # the wizard's keys are Verify's
     assert mapper.wizard().step == 0
 
     key(shell, Qt.Key_G)                                    # too few sweeps: says so
@@ -133,7 +133,8 @@ def test_rank_panel_in_the_demo(shell, app):
     assert raw.grid.sel == card.rows[0].addr                # the best one is selected in the hex grid
     QTest.mouseClick(card, Qt.LeftButton, Qt.NoModifier,
                      QPoint(40, int(card._rows_top() + card.ROW * 1.5)))
-    assert card.sel == 1 and raw.grid.sel == card.rows[1].addr and raw.inspector.addr == card.rows[1].addr
+    assert card.sel == 1 and raw.grid.sel == card.rows[1].addr
+    assert screen.rank_page.inspector.addr == card.rows[1].addr
 
     # Assign to channel…: asks, then writes through the session's map editor
     asked = []
@@ -155,6 +156,6 @@ def test_rank_panel_in_the_demo(shell, app):
     assert card.ref_btn.text() == "Rises steadily" and "Clear changes (C)" in card.instruction()
     card.rank()
     assert card.rows and all(r.formula == "" for r in card.rows)
-    shell.raw.grab()
-    key(shell, Qt.Key_R)
-    assert raw.wizard.isVisible() and not raw.rank.isVisible() and not raw.rank_btn.isChecked()
+    screen.grab()
+    key(shell, Qt.Key_R)                                    # R again: back to the scanner
+    assert screen.page == "memory" and not raw.rank.isVisible()

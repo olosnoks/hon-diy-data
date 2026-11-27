@@ -4,9 +4,14 @@ Six panels in a 3 x 2 grid: ENGINE, IDLE CONTROL (with the rpm against the
 ECU's idle target), FUEL, IGNITION, ELECTRICAL and CYD · BLACK BOX. The on /
 off channels sit in a SWITCHES strip along the bottom; the raw bytes and
 anything the group table does not know are in a drawer behind
-"Raw bytes (N) ▸". A channel the address map does not have is simply absent.
-The separate USB black box ("BB") gets a panel only when the app was started
-with ``--bb`` (``show_bb``).
+"Raw bytes (N) ▸".
+
+The tiles of each group are the web app's (web/src/ui/live/layout.ts, the
+group table web/src/core/addressmap/groups.ts): the listed tiles, a listed
+channel the map does not have drawn hatched with "not in address map", then
+the map's other channels of that group, nine at most. The one-line notes are
+the web's. The separate USB black box ("BB") gets a panel only when the app
+was started with ``--bb`` (``show_bb``).
 """
 
 from __future__ import annotations
@@ -32,32 +37,79 @@ DRAWER_HEAD = 34
 SPARK_FRAMES = 30               # frames in which every tile redraws its sparkline once (1 s)
 
 # ---- the group table --------------------------------------------------------
-# name -> group, in the order shown. A channel the map does not have is not
-# shown; a channel this table does not name goes to the Raw drawer.
+# The web app's F1 Live layout (web/src/ui/live/layout.ts): the listed tiles of
+# each group in order (a listed channel the map does not have is drawn hatched,
+# "not in address map"), then the map's other channels of that group
+# (``group_of``, web/src/core/addressmap/groups.ts), MAX_TILES at most.
 
 PANELS = (
-    ("engine", "ENGINE", ("rpm", "map", "tps", "load_ecu", "load", "ect", "iat")),
-    ("idle", "IDLE CONTROL", ("idle_target", "iac_cmd", "iacv", "iac_learn", "ign_limit", "vss")),
-    ("fuel", "FUEL", ("stft", "ltft", "o2", "o2_2", "o2_post", "inj", "purge_duty", "fuel_status")),
-    ("ignition", "IGNITION", ("ign", "vtec", "vtec_psw", "knock")),
+    ("engine", "ENGINE", ("rpm", "map", "tps", "load", "ect", "iat")),
+    ("idle", "IDLE CONTROL", ("idle_target", "iac_cmd", "iacv", "iac_learn", "rpm_map_idx", "vss")),
+    ("fuel", "FUEL", ("stft", "ltft", "o2", "o2_post", "inj", "purge")),
+    ("ignition", "IGNITION", ("ign", "vtec", "vtec_psw", "rpm_idx_3c")),
     ("electrical", "ELECTRICAL", ("batt", "alt_fr", "eld")),
     ("cyd", "CYD · BLACK BOX", ("gps_speed", "@gear", "@trip", "@cyd_sd", "@cyd_link",
                                 "@cyd_stalls")),
 )
-SWITCHES = ("starter", "brake", "psp", "ac_sw", "ac_clutch", "fan", "fuel_pump", "closed_loop",
+MAX_TILES = 9
+#: the switches strip, in the canvas order; then the map's other switches
+SWITCHES = ("starter", "brake", "psp", "ac_sw", "ac_clutch", "fuel_pump", "closed_loop",
             "o2_heater", "mil")
 #: read into another tile's note, never a tile of their own
 CONSUMED = ("gps_lat", "gps_lon", "gps_heading", "gps_sats", "gps_fix")
-#: second choices: in the panel only when the first is not in the map (else in the drawer)
-FALLBACK = {"load": "load_ecu", "o2_post": "o2_2"}
+
+#: which group a channel shows under (web/src/core/addressmap/groups.ts GROUP_OF)
+GROUP_OF = {
+    **dict.fromkeys(("rpm", "vss", "map", "baro", "tps", "ect", "iat", "load_ecu", "calc_load", "load",
+                     "rpm_rate", "rpm_smooth", "map_avg"), "engine"),
+    **dict.fromkeys(("idle_target", "iac_cmd", "iacv", "iac_learn"), "idle"),
+    **dict.fromkeys(("stft", "ltft", "o2", "o2_2", "o2_post", "inj", "purge_duty", "fuel_status", "closed_loop",
+                     "o2_heater", "inj_duty", "fuel_flow", "total_trim", "afr_est"), "fuel"),
+    **dict.fromkeys(("ign", "ign_limit", "knock"), "ignition"),
+    **dict.fromkeys(("batt", "alt_fr", "eld", "batt_min_5s"), "electrical"),
+    **dict.fromkeys(("ac_sw", "ac_clutch", "brake", "starter", "psp", "mil", "fan", "fuel_pump", "vtec",
+                     "vtec_psw"), "switches"),
+}
+_GROUP_PATTERNS = ((re.compile(r"^raw_[0-9a-f]{2}$|^b[0-9a-f]{2}$", re.I), "raw"),
+                   (re.compile(r"^(cyd|gps|imu|hh)_"), "cyd"), (re.compile(r"^(iac|idle)"), "idle"),
+                   (re.compile(r"^(o2|stft|ltft|inj|fuel|purge|afr)"), "fuel"),
+                   (re.compile(r"^(ign|knock|spark)"), "ignition"),
+                   (re.compile(r"^(batt|alt|eld|volt)"), "electrical"))
+
+
+def group_of(name: str, kind: str = "") -> str:
+    """The Live group of a channel: the table, then name patterns, then the
+    kind (a flag is a switch, anything else is raw). As groupOf() in the web app."""
+    if name in GROUP_OF:
+        return GROUP_OF[name]
+    for pattern, group in _GROUP_PATTERNS:
+        if pattern.search(name):
+            return group
+    return "switches" if kind == "flag" else "raw"
+
+
+#: Live's names (the web app's layout.ts labels): where the map's label is long or says too much
+LABELS = {"tps": "Throttle", "load": "Load", "ect": "Coolant", "iat": "Intake air",
+          "idle_target": "Idle target", "iac_cmd": "IAC command", "iacv": "Idle valve",
+          "iac_learn": "IAC learn", "rpm_map_idx": "RPM×MAP idx", "vss": "Speed",
+          "stft": "Short trim", "ltft": "Long trim", "o2": "O2 front", "o2_post": "O2 rear",
+          "inj": "Injector", "purge": "Purge duty?", "ign": "Timing", "vtec": "VTEC",
+          "vtec_psw": "VTEC press. sw", "rpm_idx_3c": "RPM idx 0x3C", "batt": "Battery",
+          "alt_fr": "Alt field", "eld": "Elec load", "gps_speed": "GPS speed",
+          # the switches strip
+          "starter": "Starter", "brake": "Brake", "psp": "Steering load", "ac_sw": "A/C switch",
+          "ac_clutch": "A/C clutch", "fuel_pump": "Fuel pump", "closed_loop": "Closed loop",
+          "o2_heater": "O2 heater?", "mil": "MIL"}
+#: the web's fixed notes: (text, draw it in the alarm colour)
+NOTES = {"tps": ("opening, closed = 0", False), "load": ("ECU calc", False),
+         "ect": ("reads ~14 °C low?", True), "idle_target": ("set by coolant", False),
+         "iac_cmd": ("moves first", False), "o2": ("switching 0.1–0.9", False),
+         "o2_post": ("post-cat", False), "ign": ("BTDC", False), "eld": ("fan +7.5 A", False)}
+MISSING = "not in address map"
+#: kept for older callers: every name the table places
 GROUP = {cid: key for key, _, ids in PANELS for cid in ids}
 GROUP.update({cid: "switches" for cid in SWITCHES})
 GROUP.update({cid: "consumed" for cid in CONSUMED})
-
-#: Live's own names where the map's label says something the byte is not, and
-#: the Live artboard's names (the web app's web/src/ui/live/layout.ts uses the same)
-LABELS = {"ign_limit": "RPM×MAP idx", "knock": "RPM idx 0x3C", "psp": "Steering load",
-          "ign": "Timing", "o2": "O2 front", "alt_fr": "Alt field"}
 
 #: worked-out tiles of the CYD panel: (label, units, decimals)
 VIRTUAL = {
@@ -307,6 +359,7 @@ class SensorsScreen(QWidget):
         self.flags: list[FlagChip] = []
         self.virtual: dict[str, Tile] = {}  # "@gear" ... -> its tile
         self._vstates: dict[str, ChannelState] = {}
+        self._missing_states: dict[str, ChannelState] = {}
         self.raw_button = RawButton(self)
         self.raw_button.clicked.connect(self.toggle_raw)
         self.drawer = RawDrawer(self)
@@ -337,10 +390,19 @@ class SensorsScreen(QWidget):
         tile.label_override = LABELS.get(state.spec.id, "")
         tile.max_decimals = 2
         tile.bind(state)
-        tile.clicked.connect(self.pinRequested)
-        tile.menuRequested.connect(self.menuRequested)
+        if state.spec.mapped:
+            tile.clicked.connect(self.pinRequested)
+            tile.menuRequested.connect(self.menuRequested)
         tile.show()
         return tile
+
+    def _missing(self, cid: str, flag: bool = False) -> ChannelState:
+        """A listed channel the map does not have: never fed, so hatched and "---"."""
+        state = self._missing_states.get(cid)
+        if state is None:
+            spec = ChannelSpec(cid, LABELS.get(cid, cid), kind="flag" if flag else "value", mapped=False)
+            state = self._missing_states[cid] = ChannelState(spec, hist_n=2)
+        return state
 
     def _rebuild(self) -> None:
         bus = self.session.bus
@@ -365,20 +427,22 @@ class SensorsScreen(QWidget):
                     self.virtual[cid] = tile
                     panel.tiles.append(tile)
                     continue
-                state = have.get(cid)
-                if state is None or FALLBACK.get(cid) in have:
+                state = have.get(cid) or self._missing(cid)
+                panel.tiles.append(self._channel_tile(state, self))
+                placed.add(cid)
+            # the map's other channels of this group, after the listed ones
+            for cid, state in have.items():
+                if len(panel.tiles) >= MAX_TILES:
+                    break
+                if cid in ids or cid in CONSUMED or group_of(cid, state.spec.kind) != key:
                     continue
                 panel.tiles.append(self._channel_tile(state, self))
                 placed.add(cid)
             if key == "idle":
                 panel.bar = IdleBar("idle", parent=self)
                 panel.bar.show()
-            if any(not t.state.spec.id.startswith("@") for t in panel.tiles) or key == "cyd":
-                self.panels.append(panel)
-                self.tiles += [t for t in panel.tiles if not t.state.spec.id.startswith("@")]
-            elif panel.bar is not None:
-                panel.bar.setParent(None)
-                panel.bar.deleteLater()
+            self.panels.append(panel)
+            self.tiles += [t for t in panel.tiles if not t.state.spec.id.startswith("@")]
         # the separate USB black box: a panel of its own with --bb, otherwise not shown at all
         bb = [s for s in self.session.ordered("BB") if s.spec.mapped]
         if bb and self._bb:
@@ -386,9 +450,13 @@ class SensorsScreen(QWidget):
             panel.tiles = [self._channel_tile(s, self) for s in bb]
             self.tiles += panel.tiles
             self.panels.append(panel)
-        for cid in SWITCHES:
+        extra = [cid for cid, st in have.items() if cid not in SWITCHES and st.spec.is_flag
+                 and group_of(cid, st.spec.kind) == "switches"]
+        for cid in (*SWITCHES, *extra):
             state = have.get(cid)
-            if state is None or not state.spec.is_flag:
+            if state is None:
+                state = self._missing(cid, flag=True)       # dashed: the map has no such switch
+            elif not state.spec.is_flag:
                 continue
             chip = FlagChip(state, LABELS.get(cid, ""), self)
             chip.clicked.connect(self.pinRequested)
@@ -397,6 +465,7 @@ class SensorsScreen(QWidget):
             self.flags.append(chip)
             placed.add(cid)
         placed.update(CONSUMED)
+        # the drawer: the raw bytes and whatever the panels had no room for
         rest = [s for s in have.values() if s.spec.id not in placed]
         rest.sort(key=lambda s: (not s.spec.id.startswith("raw_"), s.spec.source != "ECU",
                                  s.spec.id))
@@ -534,24 +603,53 @@ class SensorsScreen(QWidget):
             tile = self.virtual.get(cid)
             if tile is not None:
                 tile.set_note(text, hot)
-        # worked-out notes win over the map's note
-        live = {}
+        # the web's notes: fixed ones, and the worked-out ones
+        def bound(cid: str, which: str) -> str:
+            st = bus.channel(cid)
+            if st is None:
+                return "---"
+            value = st.vmin if which == "min" else st.vmax
+            return U.text(st.spec, value) if value == value else "---"
+        live = dict(NOTES)
+        rpm_state = bus.channel("rpm")
+        if rpm_state is not None:
+            live["rpm"] = (f"min {bound('rpm', 'min')} · max {bound('rpm', 'max')}", False)
         baro = bus.channel("baro")
         if baro is not None and not baro.stale(now):
-            live["map"] = (f"baro {U.with_unit(baro.spec, baro.value)}", False)
-        total = bus.channel("total_trim")
-        if total is not None and not total.stale(now):
-            live["ltft"] = (f"total {signed(total.value)} %", abs(total.value) >= 15)
+            live["map"] = (f"baro {U.text(baro.spec, baro.value)}", False)
+        iacv = v("iacv", now)
+        if iacv == iacv and iacv < 10:
+            live["iacv"] = ("near floor", True)
+        ect = v("ect", now)
+        if ect == ect and ect < 80:
+            live["iac_learn"] = ("frozen: coolant low", False)
         if gear != "---":
             live["vss"] = (f"gear {gear}", False)
+        st, lt = v("stft", now), v("ltft", now)
+        if st == st and lt == lt:
+            total = st + lt
+        else:
+            tt = bus.channel("total_trim")
+            total = tt.value if tt is not None and not tt.stale(now) else float("nan")
+        if total == total:
+            live["ltft"] = (f"total {signed(total)} %", abs(total) >= 15)
+        vtec = bus.channel("vtec")
+        if vtec is not None:
+            seen = vtec.vmax == vtec.vmax and vtec.vmax >= 0.5
+            live["vtec"] = (f"seen at {bound('rpm', 'max')}" if seen else "not seen this drive", False)
+        if bus.channel("batt") is not None:
+            live["batt"] = (f"min {bound('batt', 'min')} at dips", False)
         sats, fix = v("gps_sats", now), v("gps_fix", now)
         if sats == sats or fix == fix:
             parts = (f"{sats:.0f} sats" if sats == sats else "",
-                     ("fix 3D" if fix >= 0.5 else "no fix") if fix == fix else "")
+                     ("fix 3D" if fix >= 0.5 else "fix none") if fix == fix else "")
             live["gps_speed"] = (" · ".join(x for x in parts if x), fix == fix and fix < 0.5)
         for tile in self.tiles:
-            cid = tile.state.spec.id
-            text, hot = live.get(cid, (self._notes.get(cid, ""), False))
+            spec = tile.state.spec
+            if not spec.mapped:
+                tile.set_note(MISSING, False)
+                continue
+            text, hot = live.get(spec.id, ("", False))
             tile.set_note(text, hot)
         # panel subtitles
         subs = dict(SUBTITLE)
@@ -590,6 +688,7 @@ class SensorsScreen(QWidget):
             self._info_t = now
             self._update_derived(now)
         self._sync_bar(now)
+        self._bound_notes()
         alarms = self.session.alarms
         blink = (now % 1.0) < 0.5
         # Values update at once. A sparkline covers 60 s: each tile strokes its
@@ -604,6 +703,19 @@ class SensorsScreen(QWidget):
             tile.sync(now, None, blink, False)
         for chip in self.flags:
             chip.sync(now, alarms, blink)
+
+    def _bound_notes(self) -> None:
+        """rpm's and the battery's notes carry the session min / max: kept up every frame."""
+        bus = self.session.bus
+        for tile in self.tiles:
+            cid = tile.state.spec.id
+            if cid in ("rpm", "batt") and tile.state.spec.mapped:
+                st = bus.channel(cid)
+                if st is None:
+                    continue
+                lo = U.text(st.spec, st.vmin) if st.vmin == st.vmin else "---"
+                hi = U.text(st.spec, st.vmax) if st.vmax == st.vmax else "---"
+                tile.set_note(f"min {lo} · max {hi}" if cid == "rpm" else f"min {lo} at dips", False)
 
     def _sync_bar(self, now: float) -> None:
         for panel in self.panels:

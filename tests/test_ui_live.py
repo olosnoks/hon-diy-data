@@ -75,10 +75,13 @@ def test_group_table_names_each_channel_once():
     seen = [cid for _, _, ids in live_mod.PANELS for cid in ids] + list(live_mod.SWITCHES) \
         + list(live_mod.CONSUMED)
     assert len(seen) == len(set(seen))
-    assert live_mod.GROUP["ign_limit"] == "idle" and live_mod.GROUP["psp"] == "switches"
-    assert live_mod.LABELS == {"ign_limit": "RPM×MAP idx", "knock": "RPM idx 0x3C",
-                               "psp": "Steering load", "ign": "Timing", "o2": "O2 front",
-                               "alt_fr": "Alt field"}
+    # the web app's group table (web/src/core/addressmap/groups.ts)
+    g = live_mod.group_of
+    assert g("ign_limit") == "ignition" and g("psp") == "switches" and g("load_ecu") == "engine"
+    assert g("raw_2a") == "raw" and g("gps_lat") == "cyd" and g("iac_whatever") == "idle"
+    assert g("o2_new") == "fuel" and g("thing", "flag") == "switches" and g("thing") == "raw"
+    assert live_mod.LABELS["psp"] == "Steering load" and live_mod.LABELS["rpm_map_idx"] == "RPM×MAP idx"
+    assert live_mod.MAX_TILES == 9
 
 
 def test_idle_bar_readout_and_zones(app):
@@ -103,8 +106,8 @@ def test_idle_bar_readout_and_zones(app):
 
 
 def test_panel_metrics_step_down_by_band():
-    assert metrics_height(PANEL) == 96
-    assert metrics_height(PANEL_COMPACT) == 82 and PANEL_COMPACT.foot_h == 0
+    # min / max sit small beside the sparkline (as in the web app): no footer row
+    assert metrics_height(PANEL) == 82 and PANEL.foot_h == 0 and PANEL_COMPACT is PANEL
     assert metrics_height(PANEL_TIGHT) == 66 and PANEL_TIGHT.spark_h == 0
 
 
@@ -114,25 +117,32 @@ def test_car_map_fills_the_panels_like_the_artboard(shell, app):
     add_car(shell, app)
     live = shell.sensors
     ids = {p.key: [t.state.spec.id for t in p.tiles] for p in live.panels}
-    assert ids["engine"] == ["rpm", "map", "tps", "load_ecu", "ect", "iat"]
-    assert ids["idle"] == ["idle_target", "iac_cmd", "iacv", "iac_learn", "ign_limit", "vss"]
-    assert ids["fuel"] == ["stft", "ltft", "o2", "o2_2", "inj", "fuel_status"]
-    assert ids["ignition"] == ["ign", "vtec", "vtec_psw", "knock"]
+    # the web app's listed tiles first (missing ones hatched), then the map's others of the group
+    assert ids["engine"] == ["rpm", "map", "tps", "load", "ect", "iat", "vss", "baro", "load_ecu"]
+    assert ids["idle"] == ["idle_target", "iac_cmd", "iacv", "iac_learn", "rpm_map_idx", "vss"]
+    assert ids["fuel"] == ["stft", "ltft", "o2", "o2_post", "inj", "purge", "closed_loop", "o2_2",
+                           "fuel_status"]
+    assert ids["ignition"] == ["ign", "vtec", "vtec_psw", "rpm_idx_3c", "knock", "ign_limit"]
     assert ids["electrical"] == ["batt", "alt_fr", "eld"]
     assert ids["cyd"] == ["gps_speed", "@gear", "@trip", "@cyd_sd", "@cyd_link", "@cyd_stalls"]
-    assert [c.state.spec.id for c in live.flags] == ["starter", "psp", "ac_sw", "fan", "fuel_pump",
-                                                    "closed_loop", "o2_heater", "mil"]
-    assert [c.label for c in live.flags][1] == "Steering load"
+    missing = tile(live, "rpm_map_idx")
+    assert not missing.state.spec.mapped and missing._note_src == "not in address map"
+    assert missing._label == "RPM×MAP idx" and missing._text == "---"
+    assert [c.state.spec.id for c in live.flags] == ["starter", "brake", "psp", "ac_sw", "ac_clutch",
+                                                    "fuel_pump", "closed_loop", "o2_heater", "mil",
+                                                    "vtec", "fan", "vtec_psw"]
+    assert [c.label for c in live.flags][2] == "Steering load"
     drawer = [t.state.spec.id for t in live.drawer.tiles]
-    assert drawer[:2] == ["raw_03", "raw_2a"] and "total_trim" in drawer and "baro" in drawer
+    assert drawer[:2] == ["raw_03", "raw_2a"] and "total_trim" in drawer
     assert "gps_lat" not in drawer and "gps_sats" not in drawer
     assert live.raw_button.text == f"Raw bytes ({len(drawer)}) ▸"
-    # names and notes
-    assert tile(live, "ign_limit")._label == "RPM×MAP idx"
-    assert tile(live, "knock")._label == "RPM idx 0x3C"
+    # names and the web's notes
+    assert tile(live, "tps")._label == "Throttle" and tile(live, "tps")._note_src == "opening, closed = 0"
+    assert tile(live, "ect")._note_src == "reads ~14 °C low?" and tile(live, "ect")._note_hot
     assert tile(live, "map")._note_src.startswith("baro ")   # in the display unit
-    assert tile(live, "ltft")._note_src == "total +18 %" and tile(live, "ltft")._note_hot
+    assert tile(live, "ltft")._note_src == "total +3 %" and not tile(live, "ltft")._note_hot
     assert tile(live, "vss")._note_src == "gear N"
+    assert tile(live, "rpm")._note_src.startswith("min ") and " · max " in tile(live, "rpm")._note_src
     # the idle bar
     bar = next(p.bar for p in live.panels if p.key == "idle")
     assert bar.readout() == "812 / 824 · −12"
