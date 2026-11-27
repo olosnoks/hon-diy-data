@@ -22,6 +22,7 @@ export const LINK_EVERY_S = 1.0;
 export const QUEUE_MAX = 1024;
 
 export const TOO_OLD = 'handheld: firmware too old for relay';
+export const OWN_KLINE = 'handheld: reads the ECU on its own cable (no relay)';
 export const TX_ONLY = 'handheld: TX-only (GPS on P1), no relay';
 export const MAP_DIFFERS = 'handheld map differs: push the map to the handheld';
 
@@ -84,6 +85,7 @@ export class Relay {
     if (h === null) return '';
     if (!P.twoWay(h)) return TX_ONLY;
     if (this.force) return '';
+    if (P.ownKline(h)) return OWN_KLINE;
     if (!(h.caps & P.CAP_RELAY)) return TOO_OLD;
     if (h.mapHash !== this.mapHash) return MAP_DIFFERS;
     return '';

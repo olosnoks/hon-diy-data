@@ -72,6 +72,10 @@ function devSim(): boolean {
   try { return new URLSearchParams(window.location.search).has('sim'); } catch { return false; }
 }
 
+const SOURCE_TEXT: Record<'kkl' | 'cyd' | 'sim' | '', string> = {
+  kkl: 'KKL cable', cyd: 'through the CYD', sim: 'simulator (dev)', '': 'not connected',
+};
+
 function ConnectionCard(props: { connection: ConnectionControl; picker: TransportPicker | null; ports: PortInfo[]; onPorts: (p: PortInfo[]) => void }) {
   const t = useTheme();
   const ecu = useSession((s) => s.ecu);
@@ -94,16 +98,23 @@ function ConnectionCard(props: { connection: ConnectionControl; picker: Transpor
     await props.connection.connectPort(port);
   });
   const current = props.connection.current();
+  const source = props.connection.source?.() ?? (current ? 'kkl' : '');
+  const connectCyd = props.connection.connectCyd;
   return (
     <Card title="Connection" style={{ maxWidth: 860, marginBottom: 8 }}>
+      <div style={{ ...mono, marginBottom: 4 }} data-testid="connection-source">
+        {`Source: ${SOURCE_TEXT[source]}`}
+      </div>
       <div style={{ ...mono, marginBottom: 10 }} data-testid="connection-state">
         {current ? `${current}: ${ecu.state}${ecu.detail ? ` (${ecu.detail})` : ''}` : 'not connected'}
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Button onClick={() => void connectCable()} disabled={!props.picker}>Connect the KKL cable</Button>
+        {connectCyd && <Button onClick={() => void run(() => connectCyd())} disabled={!props.picker}>Connect through the CYD</Button>}
         {devSim() && <Button onClick={() => void run(() => props.connection.connectSim())}>Simulator (dev)</Button>}
         <Button onClick={() => void run(() => props.connection.disconnect())} disabled={!current}>Disconnect</Button>
       </div>
+      <Note>With no KKL cable on the laptop the app reads the ECU through the CYD (its own K-line cable, over its USB-C); a KKL cable plugged in takes over.</Note>
       <Note>An OBD2 (ISO 9141-2) slow init takes about 3 s: keep hondalog in front while it connects (a hidden tab slows its timers and the init fails).</Note>
       {msg && <Note style={{ color: t.alarm }}>{msg}</Note>}
     </Card>

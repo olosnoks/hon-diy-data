@@ -78,6 +78,18 @@ describe('the handheld next to the KKL cable (test_hh_companion)', () => {
     expect(hh.gpsOk).toBe(false);
   });
 
+  it('silentS tells a quiet handheld from an ECU link that is down', async () => {
+    const fake = new FakeCyd();       // its hello says LINK_ERROR (no K-line cable)
+    const hh = new HandheldCompanion(fake, { clock: fake.clock });
+    expect(hh.silentS).toBe(0);
+    hh.start();
+    await until(() => hh.hello !== null && hh.state === 'no_reply', fake.clock);
+    expect(hh.silentS).toBeLessThan(1);        // "no_reply" here is the ECU link, the handheld talks
+    await hh.stop();
+    fake.clock.advance(5);
+    expect(hh.silentS).toBeGreaterThan(4);
+  });
+
   it('a record without a fix is not passed on (sats still counted)', async () => {
     const fake = new FakeCyd({ fix: false, sats: 3 });
     const fixes: Fix[] = [];

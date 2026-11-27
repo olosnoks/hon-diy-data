@@ -159,3 +159,25 @@ describe('F8 Setup screen', () => {
     expect(screen.getByText(/not part of this build yet/)).toBeTruthy();
   });
 });
+
+describe('Setup > Cable: the ECU source', () => {
+  it('shows which source is active and connects through the CYD', async () => {
+    let source: 'kkl' | 'cyd' | '' = '';
+    let cydClicks = 0;
+    const connection = {
+      connectPort: async () => { source = 'kkl'; },
+      connectSim: async () => undefined,
+      connectCyd: async () => { cydClicks += 1; source = 'cyd'; useSession.getState().setEcu({ state: 'connecting', detail: 'waiting for the CYD' }); },
+      disconnect: async () => { source = ''; },
+      current: () => (source === 'cyd' ? 'CYD COM22' : source === 'kkl' ? 'COM21' : ''),
+      source: () => source,
+    };
+    const picker = { list: async () => [], open: () => { throw new Error('no'); } };
+    render(<SetupScreen initialTab="cable" deps={{ mapText: TEST_MAP, connection, picker }} />);
+    expect(screen.getByTestId('connection-source').textContent).toBe('Source: not connected');
+    fireEvent.click(screen.getByText('Connect through the CYD'));
+    await waitFor(() => expect(screen.getByTestId('connection-source').textContent).toBe('Source: through the CYD'));
+    expect(cydClicks).toBe(1);
+    expect(screen.getByTestId('connection-state').textContent).toMatch(/^CYD COM22: connecting/);
+  });
+});

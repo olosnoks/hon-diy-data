@@ -16,6 +16,11 @@ export interface ConnectionControl {
   connectPort(port: PortInfo): Promise<void>;
   /** The built-in simulator (shown as SIMULATOR). */
   connectSim(): Promise<void>;
+  /** The CYD reads the ECU on its own K-line cable and streams it over its USB-C
+   *  (the browser's port chooser when no CYD port is granted yet). */
+  connectCyd?(): Promise<void>;
+  /** Which source is active: the KKL cable, through the CYD, the simulator, '' = none. */
+  source?(): 'kkl' | 'cyd' | 'sim' | '';
   disconnect(): Promise<void>;
   /** What is connected now: '' when nothing. */
   current(): string;

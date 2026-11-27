@@ -1,8 +1,8 @@
 /**
  * Start-up: the platform's file store and port picker into the
  * AppController, the screens' dependencies registered, and the first
- * connection (a granted KKL cable, else the simulator when Setup > Cable
- * says so). main.tsx calls startApp() once.
+ * connection (a granted KKL cable, else a granted CYD reading the ECU
+ * itself; nothing simulated). main.tsx calls startApp() once.
  */
 import { setExprCompiler } from '../core/analysis/filters';
 import { TransportPort } from '../core/cyd/port';
@@ -97,10 +97,19 @@ function registerDeps(app: AppController): void {
     afterDisconnect: () => app.resumeCompanion(),
   });
   const connection: ConnectionControl = {
-    connectPort: (port) => app.connect({ kind: 'port', port }),
-    connectSim: () => app.connect({ kind: 'sim' }),
-    disconnect: () => app.disconnect(),
-    current: () => (app.source ? (app.source.kind === 'sim' ? 'Simulator' : app.source.port.label) : ''),
+    connectPort: (port) => app.userConnect({ kind: 'port', port }),
+    connectSim: () => app.userConnect({ kind: 'sim' }),
+    connectCyd: async () => {
+      if (app.cydHeld) throw new Error('The CYD black box tab holds the CYD: disconnect it there first.');
+      if (!(await app.connectThroughCyd(true))) throw new Error('No CYD picked.');
+    },
+    disconnect: () => app.userDisconnect(),
+    current: () => {
+      const src = app.source;
+      if (!src) return '';
+      return src.kind === 'sim' ? 'Simulator' : src.kind === 'cyd' ? `CYD ${src.port.label}` : src.port.label;
+    },
+    source: () => app.sourceKind,
   };
   registerSetupDeps({
     alarms: app.pipeline?.alarms ? alarmSourceFromEngine(app.pipeline.alarms, () => performance.now() / 1000) : null,
@@ -117,22 +126,11 @@ function registerDeps(app: AppController): void {
   });
 }
 
-/** The first connection: a granted KKL cable, else the simulator (Setup > Cable > "No cable"). */
+/** The first connection: a granted KKL cable, else a granted CYD as the ECU source
+ *  (AppController.autoSource). No cable, no data: the screens stay empty until a
+ *  real cable answers (the simulator is only for tests and for ?sim on a dev build). */
 async function firstConnect(app: AppController): Promise<void> {
-  const picker = app.opts.picker;
-  const cable = cableSettings();
-  let port: PortInfo | undefined;
-  if (picker) {
-    try {
-      const ports = await picker.list();
-      port = ports.find((p) => p.id === cable.ecuPort) ?? ports.find((p) => p.guess === 'ecu');
-    } catch {
-      port = undefined;
-    }
-  }
-  // No cable, no data: the screens stay empty until a real cable answers
-  // (the simulator is only for tests and for ?sim on a dev build).
-  if (port) await app.connect({ kind: 'port', port });
+  await app.autoSource().catch((e: unknown) => { app.lastError = `connect: ${String(e)}`; });
 }
 
 /** Write hondalog.db (the writers' buffers included) when the page is hidden
@@ -156,7 +154,8 @@ export function flushOnHide(app: AppController, win: Window = window, doc: Docum
   };
 }
 
-/** Serial / USB plug events: a granted port coming back reconnects the CYD with no click. */
+/** Serial / USB plug events: a granted port coming back picks the source again (a KKL
+ *  cable plugged in takes over from the CYD) and reconnects the CYD, with no click. */
 function watchPlugs(app: AppController): void {
   if (typeof navigator === 'undefined') return;
   const plugged = () => { setTimeout(() => void app.portPlugged(), 500); };   // let the CH340 settle
@@ -178,6 +177,7 @@ export async function startApp(): Promise<AppController> {
     picker: getTransportPicker(),
     protocol: () => cableSettings().protocol,
     baud: () => cableSettings().baud,
+    ecuPort: () => cableSettings().ecuPort,
   });
   started = app;
   // The CYD tab and the port pickers need no drive store: if the store cannot

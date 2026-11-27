@@ -103,6 +103,9 @@ export class CydLink {
   }
 
   get damaged(): number { return this.deframer.bad; }
+  /** Seconds since the last good frame (0 before any). ``state`` says "no_reply" for a silent
+   *  handheld and for an ECU link that is down; this tells the two apart. */
+  get silentS(): number { return this.frames ? Math.max(0, this.clock.now() - this.lastGood) : 0; }
   get twoWay(): boolean { return this.hello !== null && P.twoWay(this.hello); }
 
   protected setReady(): void {

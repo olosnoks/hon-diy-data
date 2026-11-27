@@ -217,6 +217,8 @@ export const variantName = (h: Hello): string => VARIANTS[h.variant] ?? `variant
 export const builtinMap = (h: Hello): boolean => Boolean(h.flags & 1);
 /** The handheld's wall clock (unixUs) is held to the GPS pulse. */
 export const clockFromPps = (h: Hello): boolean => Boolean(h.flags & 16);
+/** HELLO flag 32: the handheld reads the ECU on its own K-line cable and ignores relay (SERIAL.md). */
+export const ownKline = (h: Hello): boolean => Boolean(h.flags & 32);
 
 export function helloText(h: Hello): string {
   const way = twoWay(h) ? 'two-way' : 'tx-only';

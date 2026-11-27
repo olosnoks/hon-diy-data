@@ -191,6 +191,8 @@ static void push_hello(hh_serial_t *s)
     h.variant = s->variant;
     h.caps = s->caps;
     if (!info.sd_ok) h.caps &= (uint16_t)~(HH_SER_CAP_FILES | HH_SER_CAP_PUT | HH_SER_CAP_MAPUP);
+    /* its own USB cable is open: the K-line is the handheld's; relay frames would be ignored, so do not offer them */
+    if (info.own_cable) h.caps &= (uint16_t)~HH_SER_CAP_RELAY;
     strncpy(h.fw, HH_FW_VERSION, sizeof(h.fw) - 1);
     memcpy(h.device, info.device, sizeof(h.device));
     memcpy(h.map_hash, info.map_hash, sizeof(h.map_hash));
@@ -209,7 +211,7 @@ static void push_hello(hh_serial_t *s)
         if (snap.unix_us) h.t_us = (uint64_t)snap.time_t_us;    /* the pair is for one instant */
     }
     h.flags = (uint8_t)((info.builtin_map ? 1 : 0) | (h.unix_us ? 2 : 0) | (info.time_valid ? 4 : 0) | (info.sd_ok ? 8 : 0)
-                        | (info.time_source == HH_TS_PPS ? 16 : 0));
+                        | (info.time_source == HH_TS_PPS ? 16 : 0) | (info.own_cable ? HH_SER_HF_OWN_CABLE : 0));
     h.hello_ms = (uint16_t)(HH_SER_HELLO_S * 1000);
     h.max_payload = HH_SER_MAX_PAYLOAD;
     hh_serial_push(s, HH_SF_HELLO, &h, sizeof(h), NULL, 0);

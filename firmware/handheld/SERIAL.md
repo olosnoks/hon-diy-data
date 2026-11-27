@@ -99,7 +99,7 @@ HELLO (96 bytes):
 | 0 | char[4] | `"HHSL"` |
 | 4 | u8 | link revision (1) |
 | 5 | u8 | variant: 0 default, 1 GPS on P1 |
-| 6 | u16 | capabilities: 1 commands are heard (two-way), 2 file list/read, 4 file push, 8 LOG frames, 16 map upload (MAPUP), 32 the HL text session, 64 RELAY frames understood. 2, 4 and 16 only with a working SD card |
+| 6 | u16 | capabilities: 1 commands are heard (two-way), 2 file list/read, 4 file push, 8 LOG frames, 16 map upload (MAPUP), 32 the HL text session, 64 RELAY frames understood. 2, 4 and 16 only with a working SD card; 64 not while the handheld's own K-line cable is open (flag 32 below) |
 | 8 | char[12] | firmware version |
 | 20 | char[12] | device name |
 | 32 | char[12] | address map hash (all 12 characters, no terminator): compare with the laptop map's `version_hash` |
@@ -108,7 +108,7 @@ HELLO (96 bytes):
 | 63 | u8 | link state (as LINK) |
 | 64 | u8, u8 | backend (0 USB KKL cable, 1 UART, 2 laptop: relay), link mode (1 = OBD2) |
 | 66 | u8 | channels in the handheld's map |
-| 67 | u8 | flags: 1 built-in map, 2 clock set, 4 clock from GPS, 8 SD card ok, 16 clock held to the GPS pulse (PPS) |
+| 67 | u8 | flags: 1 built-in map, 2 clock set, 4 clock from GPS, 8 SD card ok, 16 clock held to the GPS pulse (PPS), 32 own K-line cable open: the handheld polls the ECU itself and ignores RELAY frames (see "Relay") |
 | 68 | u32 | boot number |
 | 72 | u32 | baud rate |
 | 76 | u64 | `t_us` now |
@@ -185,11 +185,28 @@ heartbeat.
 
 On the handheld:
 
+- **One K-line, one master.** While the handheld's own USB KKL cable is open
+  (wired to GPIO19/20, HARDWARE.md plan A) the K-line is the handheld's: it
+  polls the ECU itself, whether the ECU answers or not, and every RELAY frame
+  is ignored. Its HELLO then **clears capability 64** and sets **flag 32**
+  ("own K-line cable"), so a laptop that checks the capability (as the
+  laptop's relay does, on every HELLO) stops relaying by itself; a laptop that
+  knows flag 32 can say why. Older laptops read the cleared capability as
+  "firmware too old for relay": harmless, it only means they do not relay.
+  When the cable is pulled (link state 4), capability 64 comes back with the
+  next HELLO (every 2 s) and relaying works as below. The UART back end
+  (plan B) cannot tell whether a transceiver is fitted, so it never counts as
+  an own cable: there the rule below alone applies. What the handheld cannot
+  do is stop a laptop that has a second cable on the same K-line from polling
+  it for itself: plug one cable into the bike, not two.
 - Relay mode starts with the first RELAY frame **while its own K-line link is
-  not up** (no cable on the handheld, or the ECU silent on it). Its own
-  K-line reads then stop (the ECU has one K-line and the laptop owns it); the
-  link state becomes 5 "via laptop" (LINK `state` 5; HELLO byte 63), the
-  backend 2 "laptop". Its own reads come back 3 s after the last RELAY frame.
+  not up and its own USB cable is not open** (no cable on the handheld; with
+  plan B also the ECU silent on it). Its own K-line handling then stops
+  entirely, the cable is not even looked for (the ECU has one K-line and the
+  laptop owns it); the link state becomes 5 "via laptop" (LINK `state` 5;
+  HELLO byte 63), the backend 2 "laptop". Its own K-line handling comes back
+  3 s after the last RELAY frame: a cable plugged into the handheld while the
+  laptop relays is opened then, never while the laptop is still polling.
 - RELAY_READ and RELAY_ISO go through exactly the path of the handheld's own
   reads and OBD2 replies: channel values, drive logging on the card (the
   record types of FORMAT.md, with the handheld's own `t_us` of arrival),
@@ -215,7 +232,9 @@ On the handheld:
   understood. The laptop only relays to a handheld that sets it. (32 is the
   HL text session, see below.)
 - Code: `components/hhcore/hh_relay.c` (the payloads), the relay section of
-  `hh_core.c` (`hh_core_relay_*`); tests `test/host/hhrelaytest.c`.
+  `hh_core.c` (`hh_core_relay_*`, `own_cable`), HELLO in `hh_serial.c`
+  (`HH_SER_HF_OWN_CABLE`); tests `test/host/hhrelaytest.c`
+  (`test_relay_own_cable` for the one-master rule).
 
 ### Map upload (files into the card's `MAP/` folder)
 

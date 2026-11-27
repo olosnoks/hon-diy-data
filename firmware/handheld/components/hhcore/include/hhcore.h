@@ -621,6 +621,7 @@ typedef struct {
     uint8_t link_state, backend, link_mode, builtin_map, time_valid, sd_ok, n_ch;
     uint32_t boot_no;
     uint8_t time_source;                /* HH_TS_* */
+    uint8_t own_cable;                  /* the handheld's own USB KKL cable is open: RELAY frames are ignored */
 } hh_core_info_t;
 
 typedef struct {
@@ -683,10 +684,13 @@ const hh_link_stats_t *hh_core_link_stats(const hh_core_t *c);
 const hh_plan_t *hh_core_plan(const hh_core_t *c);
 /* Relay (SERIAL.md "Relay"; hh_relay.c parses the frames): the laptop reads the ECU and forwards every reply, from the
  * serial task. They go through the path of the engine's own reads (values, drive file, stall rules, alarms, screen),
- * stamped with the handheld's clock at arrival. The first one while the engine's own link is not up starts relay mode
+ * stamped with the handheld's clock at arrival. The first one while the engine's own link is not up and its own USB
+ * cable is not open (no cable, or a UART backend with the ECU silent) starts relay mode
  * (link state HH_LINK_RELAY, backend HH_BACKEND_LAPTOP; the K-line is left alone); HH_RELAY_TIMEOUT_S after the last
  * one the engine goes back to its own K-line. READ / ISO / TICK of relayed data are not tapped (the laptop has them).
- * Each returns 0 taken, 1 ignored (own link up). */
+ * Each returns 0 taken, 1 ignored (own link up, or own USB cable open: HELLO then clears HH_SER_CAP_RELAY and sets
+ * flag HH_SER_HF_OWN_CABLE, so the laptop stops relaying). A cable that appears while relaying is used once the relay
+ * has stopped (HH_RELAY_TIMEOUT_S after the last frame): the K-line keeps one master throughout. */
 #define HH_RELAY_TIMEOUT_S 3.0
 int  hh_core_relay_read(hh_core_t *c, uint8_t addr, const uint8_t *data, uint8_t len, uint16_t latency_us);
 int  hh_core_relay_iso(hh_core_t *c, uint8_t mode, uint8_t pid, const uint8_t *data, uint8_t len);

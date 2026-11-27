@@ -82,12 +82,16 @@ typedef struct HH_PACKED {
     uint8_t  link_state;            /* HH_LINK_* */
     uint8_t  backend, link_mode;    /* as in a drive file's header */
     uint8_t  n_ch;
-    uint8_t  flags;                 /* 1 built-in map, 2 clock set, 4 clock from GPS, 8 card ok, 16 clock from the GPS pulse (PPS) */
+    uint8_t  flags;                 /* 1 built-in map, 2 clock set, 4 clock from GPS, 8 card ok, 16 clock from the GPS pulse (PPS),
+                                       32 (HH_SER_HF_OWN_CABLE) own K-line cable open: RELAY frames ignored */
     uint32_t boot_no, baud;
     uint64_t t_us;                  /* device time now */
     int64_t  unix_us;               /* wall clock now, 0 = not known */
     uint16_t hello_ms, max_payload;
 } hh_ser_hello_t;                   /* 96 bytes */
+/* HELLO flags 32: the handheld has its own K-line (its USB KKL cable is open) and polls it itself; RELAY frames are
+ * ignored, and HH_SER_CAP_RELAY is cleared in that HELLO, so a laptop that checks caps stops relaying by itself. */
+#define HH_SER_HF_OWN_CABLE 0x20
 
 #define HH_SER_ST_SD_OK     0x01
 #define HH_SER_ST_RECORDING 0x02

@@ -108,6 +108,7 @@ struct hh_core {
     hh_snapshot_t snap;
     /* relay: the laptop's ECU reads (hh_core_relay_*, under the lock) */
     uint8_t relay, relay_up, relay_state;   /* relay mode; the laptop's ECU answering; its LINK state */
+    uint8_t own_cable;                  /* the USB KKL cable is open: the K-line is the handheld's, RELAY frames are ignored */
     double relay_last, relay_down_next;     /* the last RELAY frame; the next "still down" while the laptop's ECU is silent */
 
     /* files, as queued (under the lock) */
@@ -653,6 +654,7 @@ static void port_lost(hh_core_t *c)
     c->reopen_wait = REOPEN_MIN_S;
     c->plat.transport->close(c->plat.transport->ctx);
     lock(c);
+    c->own_cable = 0;
     log_event(c, now(c), HH_EV_PORT_LOST, 0, 0, 0, 0, 0);
     unlock(c);
     emit_down(c);
@@ -712,12 +714,17 @@ static void link_up(hh_core_t *c)
     went_up(c, 0);
 }
 
-/* Open the cable and set the map's baud rate (the backends open at 9600). */
+/* Open the cable and set the map's baud rate (the backends open at 9600). A USB cable that opens is the handheld's
+ * own K-line from then on (own_cable) until it is lost: relay frames are ignored meanwhile. A UART always "opens"
+ * (nothing tells whether a transceiver is fitted), so it never counts as an own cable. */
 static int open_port(hh_core_t *c)
 {
     hh_transport_t *tr = c->plat.transport;
     if (tr->open(tr->ctx) < 0) return -1;
     if (tr->set_baud(tr->ctx, c->map->framing.baud) < 0) { tr->close(tr->ctx); return -1; }
+    lock(c);
+    c->own_cable = (uint8_t)(tr->backend == HH_BACKEND_USB);
+    unlock(c);
     return 0;
 }
 
@@ -1067,11 +1074,12 @@ static void relay_go_down(hh_core_t *c, double t)
     publish_state(c);
 }
 
-/* A RELAY frame arrived (lock held). 0: go on with it; 1: ignore it (the handheld's own link is up). */
+/* A RELAY frame arrived (lock held). 0: go on with it; 1: ignore it: the handheld's own link is up, or its own USB
+ * cable is open (one K-line, one master: the handheld polls its own cable, and HELLO tells the laptop so). */
 static int relay_enter(hh_core_t *c, double t)
 {
     if (!c->relay) {
-        if (c->down_since < 0 || c->dtc_busy) return 1;
+        if (c->own_cable || c->down_since < 0 || c->dtc_busy) return 1;
         c->relay = 1;
         c->relay_up = 0;
         c->relay_state = 1;
@@ -1414,6 +1422,7 @@ void hh_core_info(hh_core_t *c, hh_core_info_t *out)
     out->sd_ok = (uint8_t)(c->sd_ok && !c->sd_err);
     out->n_ch = (uint8_t)c->n_ch;
     out->boot_no = c->plat.boot_no;
+    out->own_cable = c->own_cable;
     unlock(c);
 }
 

@@ -52,5 +52,15 @@ CONFIG_LV_USE_THEME_DEFAULT=n
 CONFIG_LV_USE_THEME_SIMPLE=n
 CONFIG_LV_USE_THEME_MONO=n
 
+# Console: UART0 only (the CH340C on the USB-C; sdkconfig.gps_p1 turns it off).
+# GPIO19/20 are the S3's own USB pads and belong to the USB host port for the
+# KKL cable (K-line plan A, components/hhcore/port/hh_kline_usb.c), so no
+# console output may go to USB-Serial-JTAG, not even the secondary copy that
+# ESP-IDF 5.3 turns on by default. The USB host library (component "usb",
+# always built for the S3) switches the internal PHY to the OTG controller in
+# host mode when the K-line code first opens the cable.
+# An sdkconfig.esp32s3 made before this line keeps its old value: delete it.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
 # the chip's own brownout reset stays on (car supply)
 CONFIG_ESP_BROWNOUT_DET=y

@@ -2,7 +2,8 @@
  * section of hh_core.c): the laptop reads the ECU and forwards every reply as RELAY_* frames; the handheld, with no
  * K-line cable of its own, shows, alarms on, catches stalls in and logs them as if it had read them itself.
  * The "laptop" here builds its frames from the simulated ECU's memory (SIM.mem), so values can be checked against
- * what the handheld decodes. `make` runs it after hhsertest. */
+ * what the handheld decodes. With its own USB cable open the handheld ignores relay frames (test_relay_own_cable).
+ * `make` runs it after hhsertest. */
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -413,6 +414,65 @@ TEST(test_relay_timeout)
     hhhost_free(h);
 }
 
+static hh_ser_hello_t last_hello(void)
+{
+    hh_ser_hello_t hello;
+    memset(&hello, 0, sizeof(hello));
+    if (rx.last[HH_SF_HELLO].len == sizeof(hello)) memcpy(&hello, rx.last[HH_SF_HELLO].p, sizeof(hello));
+    return hello;
+}
+
+/* Its own USB cable open (the ECU silent: key off): one K-line, one master. RELAY frames are ignored and HELLO says
+ * so (no HH_SER_CAP_RELAY, flag 32), so the laptop stops relaying. Cable pulled: relay offered and taken again. A
+ * cable that comes back while the laptop relays is left closed until the relay stops. */
+TEST(test_relay_own_cable)
+{
+    hhsim_reset();
+    SIM.powered = 0;                                    /* the cable is there, the ECU does not answer */
+    const char *root = fresh_dir();
+    hhhost_t *h = hhhost_new(root, NULL, 0, "prealloc_mb = 0\n", hhsim_callbacks(), 7, 0);
+    hhhost_serial(h, 0, 0);
+    rx_reset();
+    host_t = 5000.0;
+    run(h, 2.5);
+    hh_snapshot_t snap;
+    hhhost_snapshot(h, &snap);
+    hh_ser_hello_t hello = last_hello();
+    CHECK(snap.link.state == HH_LINK_OFF && snap.link.backend == HH_BACKEND_USB);
+    CHECK(rx.count[HH_SF_HELLO] >= 1 && !(hello.caps & HH_SER_CAP_RELAY) && (hello.flags & HH_SER_HF_OWN_CABLE));
+    CHECK(hello.caps & HH_SER_CAP_HL);                  /* the rest of the caps as before */
+
+    uint32_t requests = SIM.requests;
+    relay_for(h, 2.0);
+    hhhost_snapshot(h, &snap);
+    CHECK(!hh_core_relaying(hhhost_core(h)) && snap.link.state == HH_LINK_OFF && snap.link.backend == HH_BACKEND_USB);
+    CHECK(SIM.requests > requests + 3);                 /* it keeps probing its own K-line */
+    CHECK(events(HH_EV_LINK_UP) == 0 && !snap.log.recording);
+
+    /* the cable pulled: relay is offered again and taken */
+    SIM.port_ok = 0;
+    run(h, SIM.now + 2.5);
+    hello = last_hello();
+    hhhost_snapshot(h, &snap);
+    CHECK(snap.link.state == HH_LINK_ERROR && (hello.caps & HH_SER_CAP_RELAY) && !(hello.flags & HH_SER_HF_OWN_CABLE));
+    relay_for(h, 2.0);
+    CHECK(hh_core_relaying(hhhost_core(h)));
+
+    /* the cable is back while the laptop relays: not opened, nothing sent on the K-line, until the relay stops */
+    SIM.port_ok = 1;
+    SIM.powered = 1;
+    uint32_t opens = SIM.opens;
+    requests = SIM.requests;
+    relay_for(h, 3.0);
+    CHECK(hh_core_relaying(hhhost_core(h)) && SIM.opens == opens && SIM.requests == requests);
+    run(h, SIM.now + 6.0);
+    hhhost_snapshot(h, &snap);
+    hello = last_hello();
+    CHECK(!hh_core_relaying(hhhost_core(h)) && snap.link.state == HH_LINK_OK && snap.link.backend == HH_BACKEND_USB);
+    CHECK(SIM.opens > opens && !(hello.caps & HH_SER_CAP_RELAY) && (hello.flags & HH_SER_HF_OWN_CABLE));
+    hhhost_free(h);
+}
+
 /* malformed RELAY frames are counted and change nothing */
 TEST(test_relay_malformed)
 {
@@ -438,6 +498,7 @@ int main(void)
     RUN(test_relay_drive_file);
     RUN(test_relay_stall);
     RUN(test_relay_timeout);
+    RUN(test_relay_own_cable);
     RUN(test_relay_malformed);
     printf("%d checks, %d failed (files left in %s)\n", checks, failures, TMP);
     return failures ? 1 : 0;

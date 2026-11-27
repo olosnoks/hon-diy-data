@@ -6,8 +6,9 @@ a 16-bit parallel RGB interface, no touch, microSD slot, USB-C through a
 CH340C. It reads the ECU over the K-line, logs to the SD card and takes
 position and time from a GPS.
 
-The aim is the least hardware. With plan A the only new part is a USB-A
-socket.
+The aim is the least hardware. With plan A no new part is needed: the KKL
+cable's USB plug is cut off and its four wires go straight to the headers
+(or, without cutting it, through a USB-A socket).
 
 **Status: nothing here has been built or tested.** The pinout comes from
 web sources that mostly agree; the USB driver facts come from reading the
@@ -29,8 +30,8 @@ in `include/board_pins.h`, one `#define` each, with the source beside it.
 | 43, 44 | UART0 TX, RX | CH340C and P1 | laptop link (SERIAL.md), console, flashing |
 | 17 | **free** → GPS PPS (second button only in the `--gps-p1` build) | P3, P4 | nothing on the board uses it |
 | 18 | **free on N** → GPS RX | P3, P4 | touch interrupt on the R board only |
-| 19 | **free on N** → USB D− (plan A) or K-line TX (plan B) | P3, P2 | touch SDA on the C board; see "pull-ups" below |
-| 20 | **free on N** → USB D+ (plan A) or K-line RX (plan B) | P3 | touch SCL on the C board |
+| 19 | **free on N** → USB D− (plan A) or K-line TX (plan B) | P3 pin 3 (silk "IO19", "USB"), P2 | touch SDA on the C board; see "pull-ups" below |
+| 20 | **free on N** → USB D+ (plan A) or K-line RX (plan B) | P3 pin 4 (silk "IO20", "USB") | touch SCL on the C board |
 | 38 | touch CS / reset on R and C | not on a header | leave alone |
 | 35, 36, 37 | octal PSRAM | inside the module | not available |
 
@@ -50,11 +51,18 @@ the silk and check GND and 5 V with a meter before plugging anything in.**
 |---|---|---|---|---|---|
 | P1 | 5 V | GPIO43 (TX0) | GPIO44 (RX0) | GND | JST 1.25 mm 4-pin [A] |
 | P2 | GPIO19 (silk says IO18 [C]) | GPIO11 (MOSI) | GPIO12 (SCK) | GPIO13 (MISO) | **[unverified]** |
-| P3 | GPIO17 | GPIO18 | GPIO19 | GPIO20 | JST 1.0 mm 4-pin [A] **[unverified]** |
+| P3 | GPIO17 | GPIO18 | GPIO19 | GPIO20 | JST 1.0 mm 4-pin [A]. **Pins verified** from the owner's photo of the silkscreen: "IO17 IO18" marked "UART1", "IO19 IO20" marked "USB". Plug type [unverified] |
 | P4 | GND | 3V3 | GPIO17 | GPIO18 | **[unverified]** |
 
 P3 and P4 share GPIO17 and 18. P2 pin 1 is GPIO19 again: with plan A, leave
 P2 pin 1 unconnected.
+
+P3's silkscreen (owner's photo) names every pin, so on P3 the pin-1 question
+is settled: go by the labels, IO17 and IO18 ("UART1") at one end, IO19 and
+IO20 ("USB") at the other. The silk confirms that GPIO19/20 are the S3's USB
+pads brought out for exactly this use. P1's order (5 V, TX0, RX0, GND) is
+still from the sources: check 5 V and GND with a meter before plugging the
+cable in.
 
 P1's 5 V pin is described as an **input**, switched onto the 5 V rail through
 a P-channel MOSFET (Q1, AO3401) [C]. Whether it also carries 5 V *out* when
@@ -91,26 +99,90 @@ test pattern shows red and blue exchanged, swap the two groups in
 ## K-line plan A: the KKL cable on USB host (recommended)
 
 The S3's own USB pads are GPIO19 (D−) and GPIO20 (D+). On this board the
-USB-C socket goes to the CH340C instead, so the pads are free and reach P3.
-Wire a USB-A socket to them, plug in the KKL cable you already own, and the
-S3 is the USB host. The cable does the 12 V side, as it does on the laptop.
+USB-C socket goes to the CH340C instead (UART0, GPIO43/44: the laptop link
+and flashing), so the pads are free and reach P3, whose silkscreen labels
+them "IO19 IO20 USB". The KKL cable's USB end is cut off and its four wires
+go straight to the board; the S3 is the USB host. The cable does the 12 V
+side, as it does on the laptop.
+
+**The owner's wiring** (KKL 409.1, FT232RL 0403:6001, USB plug cut off):
 
 ```
- USB-A female breakout                 ESP32-4827S043N
- ┌─────────────┐
- │ 1 VBUS (red)├───────────────────── 5 V   (see "Power" for where)
- │ 2 D−  (wht) ├───────────────────── GPIO19   P3 pin 3
- │ 3 D+  (grn) ├───────────────────── GPIO20   P3 pin 4
- │ 4 GND (blk) ├───────────────────── GND      P4 pin 1 or P1 pin 4
- └─────────────┘
-        ▲
-        └── KKL 409.1 cable (FT232RL, 0403:6001) ── OBD2 plug: K = pin 7,
+ KKL cable, cut USB end          owner's harness wire     ESP32-4827S043N
+ (USB colours: check them!)
+ ┌──────────────────┐
+ │ D−   (white)     ├──────────── blue  ─────────────── P3 pin 3  IO19 (USB D−)
+ │ D+   (green)     ├──────────── black ─────────────── P3 pin 4  IO20 (USB D+)
+ │ +5 V (red)       ├──────────── red   ─────────────── P1 pin 1  5 V
+ │ GND  (black)     ├──────────── green ─────────────── P1 pin 4  GND
+ └──────────────────┘
+        │
+        └── KKL 409.1 (FT232RL, 0403:6001) ── OBD2 plug: K = pin 7,
             +12 V = pin 16, GND = pins 4 and 5
+
+ P3 pins 1 and 2 (IO17, IO18, "UART1"): the GPS, PPS on IO17 and data on IO18,
+ as before. P1 pins 2 and 3 (harness black = TXD / GPIO43, yellow = RXD /
+ GPIO44): do NOT use. They are UART0, the CH340C's laptop link; insulate them.
 ```
 
-Keep the D−/D+ wires short (under 10 cm), the same length, and twisted
-together. Full speed (12 Mbit/s) tolerates this; long loose wires will not
-work.
+| cable wire | to | harness colour | board pin |
+|---|---|---|---|
+| D− (white in the USB colour code) | P3 pin 3, IO19 | blue | GPIO19 |
+| D+ (green) | P3 pin 4, IO20 | black | GPIO20 |
+| +5 V (red) | P1 pin 1, 5 V | red | 5 V rail |
+| GND (black) | P1 pin 4, GND | green | GND |
+| — | P1 pin 2, TXD (GPIO43) | black | **not used** (laptop link) |
+| — | P1 pin 3, RXD (GPIO44) | yellow | **not used** (laptop link) |
+
+Mind the blacks: on P3 the harness's black is **IO20 = D+**; on P1 the
+harness's black is **TXD, not used**; the cable's own black is GND and goes
+to P1's green.
+
+- **Check the cable's colours before soldering.** White = D−, green = D+ is
+  the USB convention, but cheap cables do not always keep it. Before cutting,
+  ring them out to the plug (USB-A pin 2 = D−, pin 3 = D+, pin 1 = 5 V,
+  pin 4 = GND); after cutting, to the FT232RL (pin 16 USBDM = D−, pin 15
+  USBDP = D+). D+ and D− swapped looks exactly like no cable at all: the
+  firmware says "K-line cable not found" and, after 10 s, logs a warning
+  naming this.
+- **VBUS is always on.** The cable takes 5 V straight from P1 pin 1; the
+  board cannot switch it and the firmware does not try (the USB host library
+  forces VBUS-valid in host mode). Whether P1 pin 1 gives 5 V *out* while
+  the board runs from USB-C is **[unverified]**: bring-up step 3. If the GPS
+  already takes its 5 V from P1 pin 1 and gets a fix, that settles it.
+- **P1's order** (pin 1 = 5 V, pin 4 = GND) is from the sources and
+  **[unverified]**: meter it before connecting the cable.
+- Keep the D−/D+ wires from the cut to P3 short (under 10 cm), the same
+  length, and twisted together. Full speed (12 Mbit/s) tolerates this; long
+  loose wires will not work. The cable's own lead from the cut to the
+  FT232RL is already a USB pair and can stay as long as it is.
+- Without cutting the cable: a USB-A socket wired the same way (socket pin 2
+  D− to IO19, pin 3 D+ to IO20, pin 1 to 5 V, pin 4 to GND).
+
+What the firmware does with it (`components/hhcore/port/hh_kline_usb.c`;
+`backend = auto` or `usb` in `HANDHELD.CFG`, auto being the default):
+
+- The console stays on UART0 (`sdkconfig.defaults`, including
+  `CONFIG_ESP_CONSOLE_SECONDARY_NONE=y`: nothing goes to USB-Serial-JTAG),
+  and the build stops with an error if the console is ever put on the S3's
+  USB. The USB host library takes the internal PHY (GPIO19/20) for the OTG
+  controller in host mode when the K-line code first opens the cable.
+  GPIO19/20 are never driven as GPIO in this mode (that is plan B, only
+  with `backend = uart`).
+- No cable: each open waits 0.5 s per product id (0403:6001, then 6015) and
+  the engine tries again every 0.25 to 2 s, forever. Link state 4, "K-line
+  cable not found". Every enumerated USB device is logged with its VID:PID
+  ("the FTDI KKL cable", or "not an FTDI ... not used"); after 10 s with no
+  device at all (then every 60 s) a warning names the usual causes: D+/D−
+  swapped, no 5 V or GND on P1, R3/R4 fitted.
+- Pulling the cable ends the handle (disconnect event); the link goes to
+  state 4 and the cable is reopened when it is plugged back in. No reboot.
+- After open: 9600 8N1, latency timer 1 ms (`usb_latency_ms`), DTR and RTS
+  raised (as pyserial and Web Serial do on the laptop), then the map's baud
+  (10400 for a stock P2P: 3 MHz / 288.5 = 10398.6 baud, −0.01 %) and the
+  wake-up bytes. Break (ISO 9141-2 5-baud init) is the FTDI SET_DATA request.
+- With its own cable open the handheld polls the ECU itself and ignores the
+  laptop's relay frames; HELLO tells the laptop (SERIAL.md, "Relay").
 
 ### Is anything else on GPIO19/20?
 
@@ -143,10 +215,10 @@ component (`espressif/usb`), pulled in automatically.
 
 | need | supported? | how |
 |---|---|---|
-| FT232R, 0403:6001 | **yes** | `ftdi_vcp_open(FT232_PID, 0, &cfg, &hdl)`. C API since 2.1.0; older versions need C++ with exceptions |
+| FT232R, 0403:6001 | **yes** | `ftdi_vcp_open(FTDI_PID_AUTO, 0, &cfg, &hdl)` (tries 0403:6001, then 6015). C API since 2.1.0; older versions need C++ with exceptions |
 | baud rate | **yes** | `cdc_acm_host_line_coding_set()`. The driver computes the FTDI divisor from 3 MHz; 9600 and 10400 are exact enough (divisor 312.5 and 288.5) |
 | 8N1 | **yes** | same call: `bDataBits = 8`, `bParityType = 0`, `bCharFormat = 0` |
-| DTR / RTS | yes | `cdc_acm_host_set_control_line_state()` |
+| DTR / RTS | yes | `cdc_acm_host_set_control_line_state()`; the firmware raises both after open, as the laptop does |
 | **break** | **not in the driver** | `send_break` is marked "Not implemented" for FTDI. Send the FTDI request yourself: see below |
 | **latency timer** | **not in the driver** | not mentioned anywhere in it. Send the FTDI request yourself: see below |
 | receive | yes | data callback; the driver strips FTDI's two status bytes per packet. `in_buffer_size` is forced to 0, so reassemble replies in the callback |
@@ -184,10 +256,10 @@ from this host, and that the pull-ups are absent.
 The cable's USB side is the FT232RL and an LED; the 12 V side takes its
 power from OBD2 pin 16. FTDI's datasheet gives 15 mA typical for the chip,
 so expect under 50 mA **[unverified for this cable]**. The 5 V rail carries
-that easily. No VBUS switch is needed: wire VBUS straight to 5 V. There is
-then no over-current protection on the socket; a 500 mA polyfuse in the
-VBUS wire is cheap insurance and optional. The host stack does not need to
-control or sense VBUS.
+that easily. No VBUS switch is needed: the cable's red wire goes straight to
+P1 pin 1 (5 V). There is then no over-current protection on it; a 500 mA
+polyfuse in that wire is cheap insurance and optional. The host stack does
+not need to control or sense VBUS, and the firmware never waits on it.
 
 ## K-line plan B: L9637D on a UART (fallback)
 
@@ -426,7 +498,7 @@ Stop at the first step that fails.
 | 6 | SD | mount, write 1 MB, read it back, time it | mounts at 20 MHz; note the write speed |
 | 7 | buttons | read GPIO0 and GPIO17 | 1 released, 0 pressed |
 | 8 | GPS | wire P4, print UART1 | `$GP...` lines at 9600; a fix within a few minutes outdoors |
-| 9 | USB host, bench | wire the socket; plug in the KKL cable, not in the car | the device enumerates as 0403:6001; `ftdi_vcp_open` returns OK |
+| 9 | USB host, bench | wire the cable (plan A table); KKL cable not in the car; watch the log frames on the laptop | `kline-usb: USB host up on GPIO19 (D-) / GPIO20 (D+)`, then `USB device 0403:6001 on GPIO19/20: the FTDI KKL cable`, then `KKL cable open`. No device line and, after 10 s, the "no USB device has connected" warning: D+/D− swapped, no 5 V on P1 pin 1, or R3/R4 fitted (step 2). Pull the cable at the cut (or the socket) and reconnect it: state 4, then open again, no reboot |
 | 10 | baud and latency | set 9600 8N1; send the latency request (1 ms) | both return `ESP_OK`. A stalled request means the chip is a clone that refuses it: note it and go on |
 | 11 | echo | cable in the car's OBD2 port, key off; send 5 bytes | the same 5 bytes come back (the cable's 12 V side is powered from pin 16) |
 | 12 | ECU | key on; send the wake-up bytes, then a read of a known address | a reply with a good checksum; then poll and count errors for 10 minutes |
@@ -441,6 +513,11 @@ battery voltage and RX at 3.3 V, then steps 11 and 12 on UART2.
 
 - Nothing has been built or run on a board. (The firmware compiles with
   ESP-IDF 5.3.1.)
+- **Plan A has never run on hardware**: USB host on the internal PHY with
+  the console on UART0 only, enumeration of the cut cable through P3, the
+  FTDI open, latency, DTR/RTS and break requests, unplug/replug recovery,
+  and the "no device" warning. Only P3's pin labels are verified (owner's
+  photo); the cable's wire colours, P1's order and P1's 5 V out are not.
 - **Whether R3/R4 (4.7 kΩ pull-ups on GPIO19/20) are fitted on the N
   board.** This decides whether plan A needs a soldering iron.
 - Whether P1 pin 1 gives 5 V out when the board is powered from USB-C.
