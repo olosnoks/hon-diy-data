@@ -19,12 +19,29 @@ from .engine import TriggerRule
 
 def stall_rules(rpm_channel: str = "rpm", pre_s: float = 30.0, post_s: float = 10.0,
                 rpm_run: float = 400.0, rpm_zero: float = 50.0,
-                link_down_s: float = 1.0) -> list[TriggerRule]:
-    """The 0.1.0 stall catcher as two rules.
+                link_down_s: float = 3.0, review_s: float = 60.0) -> list[TriggerRule]:
+    """The stall catcher as two rules.
 
     Both arm once RPM has been above ``rpm_run``.
       * "stall":      RPM reads below ``rpm_zero`` (ECU still answering)
       * "link_loss":  no valid reply for ``link_down_s`` (ECU lost power, cable out)
+
+    The link-loss rule is reviewed when the ECU answers again (for up to
+    ``review_s``): if the very first RPM reading after the silence is above
+    ``rpm_run`` and close to the last one before it (below 1.25 x that + 100
+    rpm), the engine never stopped. A dead ECU stops the engine; an ECU that
+    comes back after a power loss or a key cycle answers at key-on with RPM 0,
+    or, if the engine was restarted before the link came back (OBD2-only mode
+    needs a slow 5-baud init), in an after-start flare well above the idle it
+    had (2026-11-25 18:17: 670 before, 1,446 after). The capture is then filed
+    as kind "dropout" (label "LINK DROPOUT"), not as a stall, so it stays out
+    of the stall list but its data is kept.
+
+    ``link_down_s`` was 1.0 s until 2026-11-26. The stock P2P on the KKL cable
+    has short K-line dropouts with the engine running (96 in one 28-minute
+    idle, up to 1.5 s; one of 2.5 s on 2026-11-25), and one of them was filed
+    as a stall. A real power loss keeps the ECU silent until the restart, so
+    3 s costs nothing; the window still starts ``pre_s`` before the silence.
     """
     arm = f"{rpm_channel} > {rpm_run:g}"
     return [
@@ -32,9 +49,12 @@ def stall_rules(rpm_channel: str = "rpm", pre_s: float = 30.0, post_s: float = 1
                     pre_s=pre_s, post_s=post_s, label="STALL (rpm 0)",
                     message="rpm dropped to 0", kind="stall", reason="rpm", group="stall"),
         TriggerRule("link_loss", when="link == 0", arm_when=arm, hold_s=link_down_s,
-                    pre_s=pre_s, post_s=post_s, label="STALL (link lost)",
+                    pre_s=pre_s + link_down_s, post_s=post_s, label="STALL (link lost)",
                     message="link lost (no reply from ECU)", kind="stall", reason="link",
-                    group="stall"),
+                    group="stall", review_s=review_s, cancel_kind="dropout",
+                    cancel_when=f"{arm} and {rpm_channel} < before_{rpm_channel} * 1.25 + 100",
+                    cancel_label="LINK DROPOUT (engine running)",
+                    cancel_message="ECU silent, engine still running when it answered again"),
     ]
 
 

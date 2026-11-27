@@ -374,6 +374,40 @@ class DriveWriter:
             return ref, rows
         return self.store._call(job, wait=wait)
 
+    def relabel_capture(self, t_trigger: float, rule: str, *, kind: str, reason: str = "",
+                        label: str = "", message: str = "", severity: str = "",
+                        meta: Mapping[str, Any] | None = None, wait: bool = False) -> None:
+        """Re-file a saved capture (found by its rule and trigger time) under
+        another kind, e.g. a link-loss "stall" that review found to be a K-line
+        dropout. The drive's stall_count follows. Works after the drive ended."""
+        def job(conn: sqlite3.Connection) -> None:
+            self.store._write(conn)
+            row = conn.execute("SELECT id, kind, meta FROM captures WHERE drive_id=? AND rule=? "
+                               "AND abs(t_trigger - ?) < 0.0005 ORDER BY id DESC LIMIT 1",
+                               (self.id, rule, t_trigger)).fetchone()
+            if row is None:
+                return
+            cid, old_kind, old_meta = row
+            try:
+                items = json.loads(old_meta or "{}")
+            except ValueError:
+                items = {}
+            items.update(meta or {})
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute("UPDATE captures SET kind=?, reason=?, label=?, message=?, severity=?, meta=? "
+                             "WHERE id=?", (kind, reason, label, message, severity,
+                                            json.dumps(items, ensure_ascii=False, default=str), cid))
+                delta = (1 if kind == "stall" else 0) - (1 if old_kind == "stall" else 0)
+                if delta:
+                    conn.execute("UPDATE drives SET stall_count = max(0, stall_count + ?) WHERE id=?",
+                                 (delta, self.id))
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+        self.store._call(job, wait=wait)
+
     def end(self, status: str = "complete", reason: str = "stopped") -> None:
         """Flush, pack the black box tail, set the end time and the status."""
         with self._lock:

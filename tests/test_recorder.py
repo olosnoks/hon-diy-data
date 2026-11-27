@@ -199,7 +199,7 @@ def test_per_read_recording_keeps_raw_bytes_and_true_times(amap, tmp_path):
 
 
 def test_black_box_stream_shares_the_capture(amap, tmp_path):
-    rec = recorder(amap, tmp_path, post_s=1, pre_s=3)
+    rec = recorder(amap, tmp_path, post_s=1, pre_s=3, link_down_s=1.0)
     cols = [Column("ecu_b_min", units="V"), Column("ig1_min", units="V")]
     for i in range(1000):
         t = i * 0.01
@@ -732,3 +732,58 @@ def test_logtool(tmp_path, capsys, amap, monkeypatch):
     err = capsys.readouterr().err
     assert "no drive, capture or file 'drive_nope'" in err and "no database there" in err
     assert logtool.main(["--db", str(tmp_path / "nowhere"), "list"]) == 0
+
+
+def test_link_dropout_with_the_engine_running_is_filed_as_a_dropout(amap, tmp_path):
+    rec = recorder(amap, tmp_path, pre_s=5, post_s=2)
+    run(rec, 0, 20, rpm=700)
+    run(rec, 20, 23.5, link=False)                          # 3.5 s silence: fires at 23.0
+    run(rec, 23.5, 30, rpm=690)                             # the engine never stopped
+    rec.stop()
+    cap = rec.events.get_nowait()
+    assert cap.reason == "dropout" and cap.label.startswith("LINK DROPOUT")
+    conn = sqlite3.connect(rec.db)
+    assert conn.execute("SELECT kind, reason FROM captures").fetchall() == [("dropout", "dropout")]
+    assert conn.execute("SELECT stall_count, capture_count FROM drives").fetchone() == (0, 1)
+    assert conn.execute("SELECT count(*) FROM stalls").fetchone() == (0,)
+    texts = [r[0] for r in conn.execute("SELECT text FROM events WHERE kind='trigger' ORDER BY t")]
+    assert texts == ["STALL (link lost)", "LINK DROPOUT (engine running)"]
+
+
+def test_long_dropout_is_refiled_after_its_capture_was_saved(amap, tmp_path):
+    # 2026-11-25 22:18: 18 s without a reply, engine running all along
+    rec = recorder(amap, tmp_path, pre_s=5, post_s=2)
+    run(rec, 0, 20, rpm=700)
+    run(rec, 20, 38, link=False)                            # fires at 23, saved at 25
+    conn = sqlite3.connect(rec.db)
+    assert conn.execute("SELECT kind FROM captures").fetchall() == [("stall",)]
+    run(rec, 38, 45, rpm=700)
+    rec.stop()
+    row = conn.execute("SELECT kind, label, meta FROM captures").fetchone()
+    assert row[0] == "dropout" and row[1].startswith("LINK DROPOUT") and '"cancelled": true' in row[2]
+    assert conn.execute("SELECT stall_count, capture_count FROM drives").fetchone() == (0, 1)
+
+
+def test_power_loss_stays_a_stall(amap, tmp_path):
+    rec = recorder(amap, tmp_path, pre_s=5, post_s=2, drive_gap_s=None)
+    run(rec, 0, 20, rpm=800)
+    run(rec, 20, 40, link=False)                            # ECU and engine dead
+    run(rec, 40, 42, rpm=0)                                 # key on: the ECU answers at rpm 0
+    run(rec, 42, 50, rpm=1300)                              # restarted
+    rec.stop()
+    conn = sqlite3.connect(rec.db)
+    assert conn.execute("SELECT kind, reason FROM captures").fetchall() == [("stall", "link")]
+    assert conn.execute("SELECT stall_count FROM drives").fetchone() == (1,)
+
+
+def test_link_errors_are_logged_while_a_drive_is_open(amap, tmp_path):
+    rec = recorder(amap, tmp_path, drive_gap_s=2.0)
+    run(rec, 1, 3)
+    rec.feed_link_error(2.0, 0x12, 4, "BadFrame", 2, "no reply frame in 20 05")
+    run(rec, 3, 6, link=False)                              # key off: parked after 2 s
+    assert rec.parked
+    rec.feed_link_error(5.9, 0x10, 4, "NoReply", 1, "echo only")      # parked: not logged
+    rec.stop()
+    conn = sqlite3.connect(rec.db)
+    assert conn.execute("SELECT t, text FROM events WHERE kind='link_error'").fetchall() == [
+        (2.0, "BadFrame 12+4 #2")]

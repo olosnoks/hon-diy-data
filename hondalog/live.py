@@ -321,6 +321,8 @@ class LiveSession:
             before = getattr(poller, name, None)
             self._chained[name] = before if before is not None and getattr(before, "__self__", None) is not self else None
             setattr(poller, name, mine)
+        if hasattr(poller, "on_link_error"):     # every failed exchange goes into the drive
+            poller.on_link_error = self._on_link_error
         if hasattr(poller, "on_event"):          # the handheld: its GPS and its own events too
             poller.on_gps = self._on_cyd_gps
             poller.on_event = self._on_cyd_event
@@ -352,6 +354,8 @@ class LiveSession:
         self.stop_recording()
         if poller is not None:
             poller.on_block = poller.on_sample = None
+            if hasattr(poller, "on_link_error"):
+                poller.on_link_error = None
         self.poller = self.blackbox = None
 
     # ---- recording ----
@@ -478,6 +482,11 @@ class LiveSession:
             self.on_read(read)
         if self.block_listeners or self._chained.get("on_block"):
             self._notify(self.block_listeners, "on_block", read)
+
+    def _on_link_error(self, err: Any) -> None:
+        recorder = self.recorder
+        if recorder is not None:
+            recorder.feed_link_error(err.t, err.addr, err.length, err.kind, err.attempt, err.message)
 
     def _on_pid(self, t: float, pid: int, data: bytes) -> None:
         recorder = self.recorder

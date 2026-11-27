@@ -194,6 +194,83 @@ def test_load_rules_from_toml(tmp_path):
 def test_scan_a_finished_log():
     t = np.arange(0, 60, 0.1)
     rpm = np.where((t > 20) & (t < 25), 0.0, 850.0)
-    rpm[400:420] = np.nan                                   # link gap: unknown, not zero
+    rpm[400:420] = np.nan                                   # 2 s link gap: a dropout, not a stall
+    rpm[450:500] = np.nan                                   # 5 s link gap: unknown, not zero
     fired = scan(stall_rules(), t, {"rpm": rpm, "link": np.where(np.isnan(rpm), 0.0, 1.0)})
-    assert [(f.reason, round(f.t, 1)) for f in fired] == [("rpm", 20.1), ("link", 41.0)]
+    assert [(f.reason, round(f.t, 1)) for f in fired] == [("rpm", 20.1), ("link", 48.0)]
+
+
+# ---- link dropouts with the engine running (2026-11-26) ----
+
+def test_short_link_dropout_is_not_a_stall():
+    # drive 2026-11-26 20:45: 96 dropouts, the longest 1.5 s, engine idling throughout
+    eng = engine()
+    for i in range(100):
+        feed(eng, i * 0.1, 700)
+    t = 10.0
+    while t < 11.5:
+        assert feed(eng, t, None, link=False)[0] is None
+        t += 0.1
+    assert feed(eng, 11.6, 690)[0] is None and not eng.capturing
+
+
+def test_link_loss_with_the_engine_running_when_it_answers_is_revoked():
+    eng = engine(post_s=10, link_down_s=3.0)
+    revoked = []
+    eng.on_revoked = lambda f, t: revoked.append((f.reason, t))
+    for i in range(100):
+        feed(eng, i * 0.1, 700)
+    reasons = [feed(eng, 10.0 + i * 0.1, None, link=False)[0] for i in range(33)]
+    assert reasons[-3:].count("link") == 1 and eng.capturing and eng.reviewing()
+    assert eng.capture.t_start == pytest.approx(13.0 - 33.0, abs=0.11)   # 30 s before the silence
+    feed(eng, 13.6, 650)                                    # back, engine still at idle
+    assert revoked == [("link", 13.6)] and not eng.reviewing()
+    done = None
+    t = 13.7
+    while done is None:
+        _, done = feed(eng, t, 650)
+        t += 0.1
+    assert done.cancelled and done.first.rule.cancel_kind == "dropout"
+    assert eng.armed("stall") and eng.armed("link_loss")    # the stall hunt goes on
+
+
+def test_link_loss_then_key_on_at_rpm_zero_stands():
+    eng = engine(post_s=10, link_down_s=3.0)
+    eng.on_revoked = lambda f, t: pytest.fail("a dead ECU must stay a stall")
+    for i in range(100):
+        feed(eng, i * 0.1, 800)
+    t = 10.0
+    while t < 30.0:                                          # ECU dead (power loss), then key on
+        feed(eng, t, None, link=False)
+        t += 0.1
+    feed(eng, 30.0, 0)                                      # first answer: key on, engine stopped
+    feed(eng, 31.0, 250)                                    # cranking
+    feed(eng, 32.0, 1400)                                   # running again: too late to revoke
+    assert not eng.reviewing()
+
+
+def test_review_without_a_verdict_in_time_stands():
+    eng = engine(post_s=1, link_down_s=3.0, review_s=5.0)
+    eng.on_revoked = lambda f, t: pytest.fail("no verdict in time")
+    for i in range(100):
+        feed(eng, i * 0.1, 800)
+    t = 10.0
+    while t < 20.0:
+        feed(eng, t, None, link=False)
+        t += 0.1
+    feed(eng, 20.0, 800)                                    # 7 s after the firing
+
+
+def test_link_loss_answered_in_an_after_start_flare_stands():
+    # 2026-11-25 18:17 (OBD2-only mode): key off at 670 rpm, the slow ISO init
+    # reconnected only after the restart, at 1,446 rpm
+    eng = engine(post_s=10, link_down_s=3.0)
+    eng.on_revoked = lambda f, t: pytest.fail("a restart flare is not a running engine")
+    for i in range(100):
+        feed(eng, i * 0.1, 670)
+    t = 10.0
+    while t < 30.0:
+        feed(eng, t, None, link=False)
+        t += 0.1
+    feed(eng, 30.0, 1446)
+    assert not eng.reviewing()

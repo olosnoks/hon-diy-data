@@ -30,6 +30,22 @@ that must not produce a second capture.
 A value of None means "unknown" (ECU silent). A condition whose value is
 unknown counts as false, so ``rpm < 50`` cannot fire while the link is down.
 
+Review. A rule with ``cancel_when`` has its firing checked afterwards: the
+first time after the firing that every channel the condition names has been
+read again (is known and fresh), the condition is evaluated once. In it,
+``before_<name>`` is the last known value of a channel at the firing (the
+reading just before the ECU went silent, say). True: the
+firing was a false alarm; it is "revoked" (``on_revoked``), and a capture
+whose firings were all revoked is reported with ``Capture.cancelled`` so the
+caller can file it under the rule's ``cancel_kind`` instead. False: the
+firing stands. No verdict within ``review_s``: it stands. The capture
+window is not held open for the verdict: a verdict that comes after the
+window was saved reaches the caller through ``on_revoked`` only (the
+recorder then re-files the saved capture). The link-loss stall rule uses
+this: when the ECU
+answers again and the very first RPM reading is that of a running engine,
+the engine never stopped and the "stall" was a K-line dropout.
+
 Conditions are ``hondalog.expr`` expressions, the same language as math
 channels and alarms, including the functions with history: ``rate(rpm) <
 -1500``, ``avg(batt, 500) < 11``, ``held(tps > 80, 2000)``. Such a function
@@ -66,11 +82,16 @@ class TriggerRule:
     reason: str = ""                    # short code for the UI (defaults to the name)
     group: str = ""                     # rules in a group disarm together when one fires
     enabled: bool = True
+    cancel_when: str = ""               # checked once, at the first fresh reading after firing
+    review_s: float = 0.0               # longest wait for that reading
+    cancel_kind: str = ""               # capture kind for a revoked firing ("" = drop it)
+    cancel_label: str = ""
+    cancel_message: str = ""
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("a trigger rule needs a name")
-        for text in (self.when, self.arm_when, self.rearm_when):
+        for text in (self.when, self.arm_when, self.rearm_when, self.cancel_when):
             if text:
                 compile_expr(text)      # raises ExprError now, not in the car
         if not self.when:
@@ -78,7 +99,7 @@ class TriggerRule:
         unknown = [a for a in self.actions if a not in ACTIONS]
         if unknown:
             raise ValueError(f"rule {self.name!r}: unknown action {unknown[0]!r}")
-        if self.hold_s < 0 or self.pre_s < 0 or self.post_s < 0:
+        if self.hold_s < 0 or self.pre_s < 0 or self.post_s < 0 or self.review_s < 0:
             raise ValueError(f"rule {self.name!r}: times cannot be negative")
         object.__setattr__(self, "actions", tuple(self.actions))
         object.__setattr__(self, "label", self.label or self.name.upper())
@@ -119,6 +140,12 @@ class Capture:
     t_start: float
     t_end: float
     complete: bool = False              # False: cut short because recording stopped
+    revoked: list[Fired] = field(default_factory=list)     # firings found to be false alarms
+
+    @property
+    def cancelled(self) -> bool:
+        """Every firing in the window was revoked on review."""
+        return bool(self.fired) and all(any(f is r for r in self.revoked) for f in self.fired)
 
     @property
     def first(self) -> Fired:
@@ -148,6 +175,29 @@ class _Condition:
         return self.last
 
 
+class _Review:
+    """A firing waiting for its cancel_when verdict."""
+
+    __slots__ = ("fired", "expr", "deadline", "before")
+
+    def __init__(self, fired: Fired, known: Mapping[str, Any]):
+        self.fired = fired
+        self.expr = compile_expr(fired.rule.cancel_when)
+        self.deadline = fired.t + fired.rule.review_s
+        #: the last known value of every channel at the firing, as before_<name>
+        self.before = {f"before_{k}": v for k, v in known.items()}
+
+    def verdict(self, env: Mapping[str, Any], t: float, changed: Collection[str] | None) -> bool | None:
+        """True = false alarm, False = it stands, None = not known yet."""
+        deps = self.expr.deps
+        if t <= self.fired.t or changed is None or deps.isdisjoint(changed):
+            return None
+        env = {**env, **self.before}
+        if any(env.get(name) is None for name in deps):
+            return None
+        return bool(self.expr.test(env, t))
+
+
 class _RuleState:
     def __init__(self, rule: TriggerRule):
         self.rule = rule
@@ -169,6 +219,10 @@ class TriggerEngine:
         self.max_capture_s = max_capture_s
         self.on_fired: Callable[[Fired], None] | None = None
         self.on_capture: Callable[[Capture], None] | None = None
+        #: a firing that review found to be a false alarm, and the time of the verdict
+        self.on_revoked: Callable[[Fired, float], None] | None = None
+        self._reviews: list[_Review] = []
+        self._known: dict[str, Any] = {}        # last value that was not None, per channel
         for rule in rules:
             self.add(rule)
 
@@ -213,7 +267,10 @@ class TriggerEngine:
             self.values.update(values)
             if changed is None:
                 changed = values.keys()
+            self._known.update((k, v) for k, v in values.items() if v is not None)
         env = self.values
+        if self._reviews:
+            self._review(env, t, changed)
         fired: list[Fired] = []
         for state in self._states.values():
             rule = state.rule
@@ -244,6 +301,26 @@ class TriggerEngine:
         done = self._close_if_due(t)
         return fired, done
 
+    def _review(self, env: Mapping[str, Any], t: float, changed: Collection[str] | None) -> None:
+        keep: list[_Review] = []
+        for review in self._reviews:
+            if t > review.deadline:
+                continue                # no verdict in time: the firing stands
+            verdict = review.verdict(env, t, changed)
+            if verdict is None:
+                keep.append(review)
+                continue
+            if verdict:
+                if self.capture is not None and any(f is review.fired for f in self.capture.fired):
+                    self.capture.revoked.append(review.fired)
+                if self.on_revoked is not None:
+                    self.on_revoked(review.fired, t)
+        self._reviews = keep
+
+    def reviewing(self) -> bool:
+        """A firing is still waiting for its verdict."""
+        return bool(self._reviews)
+
     def fire(self, rule: TriggerRule | str, t: float) -> Fired:
         """Fire a rule by hand: a button, an alarm (W3), a black box trigger (W2).
 
@@ -263,6 +340,8 @@ class TriggerEngine:
         return capture
 
     def _opened(self, event: Fired) -> None:
+        if event.rule.cancel_when:
+            self._reviews.append(_Review(event, self._known))
         if self.on_fired is not None:
             self.on_fired(event)
         if "capture" not in event.rule.actions:

@@ -204,6 +204,9 @@ class Recorder:
         self._log: DriveWriter | None = None
         self._open_drive(self.started)
         self._engine = TriggerEngine(rule_list)
+        self._engine.on_revoked = self._revoked
+        #: saved captures still under review: (rule, trigger time) -> the drive it went into
+        self._under_review: dict[tuple[str, float], DriveWriter] = {}
         self._lock = threading.Lock()
         self._pending_markers: list[str] = []
         self._epoch: datetime | None = epoch    # wall time of session time 0
@@ -293,6 +296,18 @@ class Recorder:
         with self._lock:
             if self.active:
                 self._drive().event(self._last_t if t is None else t, kind, text, data)
+
+    def feed_link_error(self, t: float, addr: int, length: int, kind: str, attempt: int,
+                        message: str = "") -> None:
+        """One failed K-line exchange (retries included) while the link was
+        up: a "link_error" event, so drops can be told apart afterwards
+        (no reply, damaged echo, short reply, checksum). Only while a drive
+        is open: errors never start a drive."""
+        with self._lock:
+            if self.active and self._log is not None:
+                self._log.event(t, "link_error", f"{kind} {addr:02X}+{length} #{attempt}",
+                                {"addr": addr, "length": length, "kind": kind, "attempt": attempt,
+                                 "message": message[:120]})
 
     def trigger(self, rule: TriggerRule | str = MANUAL, t: float | None = None) -> None:
         """Start a capture by hand, from an alarm, or from a black box trigger."""
@@ -543,6 +558,25 @@ class Recorder:
             if "notify" in rule.actions:
                 self.notices.put(event)
 
+    def _revoked(self, fired: Fired, t: float) -> None:
+        """Review found a firing to be a false alarm (lock held: called from feed)."""
+        rule = fired.rule
+        if self._log is not None:
+            self._log.event(t, "trigger", rule.cancel_label or f"{rule.label} (cancelled)",
+                            {"rule": rule.name, "reason": rule.cancel_kind or "cancelled",
+                             "message": rule.cancel_message, "revokes_t": round(fired.t, 3),
+                             "severity": "info"})
+        log = self._under_review.pop((rule.name, fired.t), None)
+        if log is not None and rule.cancel_kind:     # already saved as a stall: re-file it
+            try:
+                log.relabel_capture(fired.t, rule.name, kind=rule.cancel_kind, reason=rule.cancel_kind,
+                                    label=rule.cancel_label or f"{rule.label} (cancelled)",
+                                    message=rule.cancel_message or rule.message, severity="info",
+                                    meta={"cancelled": True, "revoked_by": rule.cancel_when,
+                                          "revoked_at_s": f"{t:.3f}"}, wait=self.sync_captures)
+            except Exception as exc:
+                self._store.error = OSError(str(exc))
+
     def _wall(self, t: float) -> datetime:
         return (self._epoch or self.started) + timedelta(seconds=t)
 
@@ -551,6 +585,14 @@ class Recorder:
         there when this returns; otherwise the store's thread does it."""
         first = capture.first
         rule = first.rule
+        kind, reason, label, message, severity = rule.kind, rule.reason, rule.label, rule.message, rule.severity
+        if capture.cancelled:
+            if not rule.cancel_kind:
+                return                          # a false alarm, and the rule wants nothing kept
+            kind = reason = rule.cancel_kind
+            label = rule.cancel_label or f"{rule.label} (cancelled)"
+            message = rule.cancel_message or message
+            severity = "info"
         wall = self._wall(first.t)
         log = self._drive()
         t_start = capture.t_start if self._drive_t0 is None else max(capture.t_start, self._drive_t0)
@@ -570,17 +612,27 @@ class Recorder:
             "stall_wall_time": wall.isoformat(timespec="milliseconds"),
         }
 
+        if capture.cancelled:
+            meta["cancelled"] = True
+            meta["revoked_by"] = rule.cancel_when
+
         def saved(ref: DriveRef, rows: int) -> None:
-            self.events.put(CaptureEvent(ref, rule.reason, first.t, rows, rule.name, rule.label, rule.message))
+            self.events.put(CaptureEvent(ref, reason, first.t, rows, rule.name, label, message))
         try:
-            log.capture(rule.kind, first.t, t_start, capture.t_end, rule=rule.name, reason=rule.reason,
-                        label=rule.label, message=rule.message, severity=rule.severity, wall=wall,
+            log.capture(kind, first.t, t_start, capture.t_end, rule=rule.name, reason=reason,
+                        label=label, message=message, severity=severity, wall=wall,
                         complete=capture.complete, fired=fired, meta=meta, wait=wait,
                         on_saved=saved)
         except (OSError, ValueError) as exc:
             self._store.error = exc
+            return
         except Exception as exc:                # sqlite3.Error: the capture is lost, the recording goes on
             self._store.error = OSError(str(exc))
+            return
+        if rule.cancel_when and not capture.cancelled and self._engine.reviewing():
+            while len(self._under_review) >= 16:        # verdicts that never came
+                self._under_review.pop(next(iter(self._under_review)))
+            self._under_review[(rule.name, first.t)] = log
 
 
 # ---- reading (the shape the 0.1.0 replay tab uses) --------------------------
