@@ -90,10 +90,9 @@ def chip_icon(p: QPainter, kind: str, x: float, y: float, color: QColor,
     """ok / off / half / ring / rec / x, 14 px. Shape first, colour second."""
     p.setRenderHint(QPainter.Antialiasing, True)
     r = QRectF(x, y, size, size)
-    if kind == "ok":
-        p.setPen(Qt.NoPen)
-        p.setBrush(T.ok)
-        p.drawEllipse(r)
+    if kind == "ok":                        # a filled square: link up (the design's lamp)
+        p.setRenderHint(QPainter.Antialiasing, False)
+        p.fillRect(QRectF(x + 0.5, y + 0.5, size - 1, size - 1), T.ok)
     elif kind == "rec":
         if blink_on:
             p.setPen(Qt.NoPen)
@@ -219,11 +218,11 @@ def frame(p: QPainter, rect: QRectF, width: int = 2, color: QColor | None = None
 
 def track(p: QPainter, rect: QRectF, frac: float, fill: QColor | None = None,
           outline: QColor | None = None, ground: QColor | None = None) -> None:
-    """A linear bar: sunk track, 2 px outline, solid fill from the left."""
+    """A linear bar: sunk track, 2 px outline, solid fill (accent unless told) from the left."""
     p.fillRect(rect, ground if ground is not None else T.sunk)
     if frac > 0:
         p.fillRect(QRectF(rect.x(), rect.y(), rect.width() * min(1.0, frac), rect.height()),
-                   fill if fill is not None else T.fg)
+                   fill if fill is not None else T.accent)
     p.setPen(T.cpen(outline if outline is not None else T.rule2, 2))
     p.setBrush(Qt.NoBrush)
     p.drawRect(rect.adjusted(1, 1, -1, -1))
@@ -260,3 +259,10 @@ def paragraph(p: QPainter, x: float, y: float, width: float, text: str, font,
         p.drawText(QPointF(x, y + (line_h + m.ascent() - m.descent()) / 2.0), line)
         y += line_h
     return y
+
+
+def selected_row(p: QPainter, rect: QRectF) -> None:
+    """The selected row of a list: sunk ground and a 5 px accent bar on the
+    left, as the Events artboard (and the web app) draw it. Never a light fill."""
+    p.fillRect(rect, T.sunk)
+    p.fillRect(QRectF(rect.x(), rect.y(), 5, rect.height()), T.accent)

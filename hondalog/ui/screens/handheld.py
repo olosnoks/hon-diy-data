@@ -1,4 +1,5 @@
-"""F10, Handheld: manage the CYD handheld over its USB-C cable, from inside the app.
+"""The CYD black box (a page of F8 Setup; F10 before the redesign): manage the CYD handheld over its
+USB-C cable, from inside the app. On screen it is the "CYD black box": the CYD is the black box.
 
 One Connect button for the whole tab (the port stays open while you move between the sub-views):
 Status (ECU link, GPS, SD card, drive, clock), SD card (browse, download, upload, delete),
@@ -7,7 +8,7 @@ Console (the handheld's log, send a line, record to a file) and Install firmware
 chip check). The serial work runs on ``HlWorker``'s thread: nothing here waits for the port.
 
 Widgets are stock Qt styled from the theme tokens (2 px square borders, the same colours), so the tab
-looks like the rest of the app and stays high-contrast in Daylight and Night.
+looks like the rest of the app in Dracula and Darker.
 """
 
 from __future__ import annotations
@@ -233,7 +234,7 @@ class StatusView(_View):
         row = QHBoxLayout()
         self.mark_btn = Button("Drop a marker")
         self.time_btn = Button("Set clock from this PC")
-        self.reboot_btn = Button("Restart handheld")
+        self.reboot_btn = Button("Restart the CYD")
         for b in (self.mark_btn, self.time_btn, self.reboot_btn):
             row.addWidget(b)
         row.addStretch(1)
@@ -314,17 +315,17 @@ class StatusView(_View):
                           f"map #{hello.get('map', '?')} · refreshed {time.strftime('%H:%M:%S')}")
 
     def mark(self) -> None:
-        self.tab.run(lambda c, p: c.mark(), lambda r, e: self.tab.say(e or "Marker set on the handheld"))
+        self.tab.run(lambda c, p: c.mark(), lambda r, e: self.tab.say(e or "Marker set on the CYD"))
 
     def set_time(self) -> None:
         def done(r, e):
-            self.tab.say(e or ("Clock set from this PC" if r == "ok" else "The handheld keeps GPS time: clock not changed"))
+            self.tab.say(e or ("Clock set from this PC" if r == "ok" else "The CYD keeps GPS time: clock not changed"))
         self.tab.run(lambda c, p: c.set_time(), done)
 
     def reboot(self) -> None:
-        if QMessageBox.question(self, "Restart handheld", "Restart the handheld now?") != QMessageBox.Yes:
+        if QMessageBox.question(self, "Restart the CYD black box", "Restart the CYD now?") != QMessageBox.Yes:
             return
-        self.tab.run(lambda c, p: c.reboot(), lambda r, e: self.tab.say(e or "The handheld is restarting"))
+        self.tab.run(lambda c, p: c.reboot(), lambda r, e: self.tab.say(e or "The CYD is restarting"))
 
 
 class FilesView(_View):
@@ -455,7 +456,7 @@ class FilesView(_View):
         self.tab.run(work, done, progress=prog)
 
     def upload(self) -> None:
-        local, _ = QFileDialog.getOpenFileName(self, "Upload to the handheld")
+        local, _ = QFileDialog.getOpenFileName(self, "Upload to the CYD")
         if not local:
             return
         target, why = upload_target(local, self._parent_dir())
@@ -484,9 +485,9 @@ class FilesView(_View):
         path = it.data(0, Qt.UserRole)
         parts = H.split_path(path)
         if parts is None or not H.can_remove(parts):
-            self.tab.say("The handheld lets MAP/, DRIVES/ and the settings files be deleted, not this one.")
+            self.tab.say("The CYD lets MAP/, DRIVES/ and the settings files be deleted, not this one.")
             return
-        if QMessageBox.question(self, "Delete", f"Delete {path} from the handheld's SD card?") != QMessageBox.Yes:
+        if QMessageBox.question(self, "Delete", f"Delete {path} from the CYD's SD card?") != QMessageBox.Yes:
             return
 
         def done(r, e):
@@ -503,10 +504,10 @@ class ConfigView(_View):
         lay.setContentsMargins(12, 12, 12, 12)
         row = QHBoxLayout()
         self.mode = Segment([("form", "Form"), ("raw", "Raw text")])
-        self.read_btn = Button("Read from handheld")
-        self.write_btn = Button("Write to handheld", kind="primary")
+        self.read_btn = Button("Read from the CYD")
+        self.write_btn = Button("Write to the CYD", kind="primary")
         self.default_btn = Button("Defaults")
-        self.reboot_btn = Button("Restart handheld")
+        self.reboot_btn = Button("Restart the CYD")
         row.addWidget(self.mode)
         for b in (self.read_btn, self.write_btn, self.default_btn, self.reboot_btn):
             row.addWidget(b)
@@ -525,7 +526,7 @@ class ConfigView(_View):
         self.stack.addWidget(scroll)
         self.stack.addWidget(self.raw)
         lay.addWidget(self.stack, 1)
-        self.note = label("Read the file from the handheld, change it, write it back. The handheld checks the file "
+        self.note = label("Read the file from the CYD, change it, write it back. The CYD checks the file "
                           "(length and checksum) before it replaces the old one, which it keeps as HANDHELD.CBK. "
                           "Settings are used from the next power-up.", dim=True, wrap=True)
         lay.addWidget(self.note)
@@ -574,7 +575,7 @@ class ConfigView(_View):
         for e in cfgtext.parse(self.text):
             edit = QLineEdit(e.value)
             edit.setFont(T.font(14, 700, mono=True))
-            edit.setPlaceholderText("(not set: the handheld's own default)" if not e.enabled else "")
+            edit.setPlaceholderText("(not set: the CYD's own default)" if not e.enabled else "")
             if not e.enabled:
                 edit.setText("")
             edit.setToolTip(e.comment)
@@ -620,7 +621,7 @@ class ConfigView(_View):
 
     def write(self) -> None:
         bad = cfgtext.problems(self.text, KNOWN_KEYS)
-        if bad and QMessageBox.question(self, "Write anyway?", "The handheld will skip these lines:\n\n" + "\n".join(bad[:8])
+        if bad and QMessageBox.question(self, "Write anyway?", "The CYD will skip these lines:\n\n" + "\n".join(bad[:8])
                                         + "\n\nWrite the file anyway?") != QMessageBox.Yes:
             return
         data = self.text.encode("utf-8")
@@ -635,15 +636,15 @@ class ConfigView(_View):
                 self.prog.show_state("Failed: HANDHELD.CFG not changed", None, e, "err")
             else:
                 self.prog.show_state("Done: HANDHELD.CFG written", 100,
-                                     f"{r or 'accepted'}. Restart the handheld to use it.", "ok")
+                                     f"{r or 'accepted'}. Restart the CYD to use it.", "ok")
         self.tab.run(lambda c, p: c.cfg_put(data, lambda d, t: p(d, t, "cfg")), done, progress=prog)
 
     def defaults(self) -> None:
         self.set_text(DEFAULT_CFG)
 
     def reboot(self) -> None:
-        if QMessageBox.question(self, "Restart handheld", "Restart the handheld now?") == QMessageBox.Yes:
-            self.tab.run(lambda c, p: c.reboot(), lambda r, e: self.tab.say(e or "The handheld is restarting"))
+        if QMessageBox.question(self, "Restart the CYD black box", "Restart the CYD now?") == QMessageBox.Yes:
+            self.tab.run(lambda c, p: c.reboot(), lambda r, e: self.tab.say(e or "The CYD is restarting"))
 
     def on_connected(self, info) -> None:
         self.sync_enabled()
@@ -682,7 +683,7 @@ class MapView(_View):
         lay.addWidget(self.log)
         lay.addStretch(1)
         self.note = label("Sent over the fast binary link, each file is checked before it replaces the old one, and an "
-                          "interrupted upload carries on from what the handheld already holds when you press Upload "
+                          "interrupted upload carries on from what the CYD already holds when you press Upload "
                           "again. The Map screen reads the new map the next time it opens.", dim=True, wrap=True)
         lay.addWidget(self.note)
         self.files: list[tuple[str, bytes]] = []
@@ -966,7 +967,7 @@ class InstallView(_View):
     def install(self) -> None:
         if not (self.tab.connected and self.image_ok) or self.running:
             return
-        if QMessageBox.question(self, "Install firmware", "Write this image to the handheld now? Do not unplug it "
+        if QMessageBox.question(self, "Install firmware", "Write this image to the CYD now? Do not unplug it "
                                 "until it is done.") != QMessageBox.Yes:
             return
         self.running = True
@@ -1153,7 +1154,7 @@ class HandheldScreen(QWidget):
             for v in self.views:
                 v.on_disconnected()
             if detail:
-                self.say(f"Handheld: {detail}")
+                self.say(f"CYD black box: {detail}")
 
     def _hello(self, info: dict) -> None:
         self.info = info

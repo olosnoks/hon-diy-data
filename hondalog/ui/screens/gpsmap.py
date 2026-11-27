@@ -242,11 +242,11 @@ class StallList(Card):
             r = QRectF(x - 4, y + k * self.ROW, w + 8, self.ROW - 2)
             on = i == self.selected
             if on:
-                p.fillRect(r, T.fg)
+                p.fillRect(r, T.accent)
             elif k % 2:
                 p.fillRect(r, T.sunk)
             draw_pin(p, kind, r.x() + 16, r.center().y(), size=18)
-            ink = T.bg if on else T.fg
+            ink = T.on_accent if on else T.fg
             p.setFont(mono)
             p.setPen(ink)
             p.drawText(QRectF(r.x() + 34, r.y(), 150, r.height()), Qt.AlignVCenter | Qt.AlignLeft, when)
@@ -295,8 +295,10 @@ class MapScreen(QWidget):
         self.at.dot = True
         self.info = ReadoutCard("Track", self)
         self.fit_btn = Button("Fit", "F", parent=self)
-        self.gpx_btn = Button("GPX", "G", parent=self)
-        self.kml_btn = Button("KML", "K", parent=self)
+        self.gpx_btn = Button("GPX", parent=self)           # four in a row: the keys are in the tooltips
+        self.kml_btn = Button("KML", parent=self)
+        self.gpx_btn.setToolTip("The drive as GPX (G)")
+        self.kml_btn.setToolTip("The drive as KML, coloured by the channel (K)")
         self.since_seg = Segment(list(SINCE), "all", parent=self)
         self.reason_btn = Button("Stalls, any reason", "R", parent=self)
         self.reading = TextCard("Where they happen", border=4, px=15, weight=700)
@@ -304,6 +306,29 @@ class MapScreen(QWidget):
         self.list = StallList(self)
         self.json_btn = Button("GeoJSON", "G", parent=self)
         self.open_btn = Button("Open in Replay", "↵", parent=self)
+        # the drive as GeoJSON too (the web app has GPX, KML and GeoJSON)
+        self.drive_json_btn = Button("GeoJSON", parent=self)
+        self.drive_json_btn.setToolTip("The drive as GeoJSON (J)")
+        self.drive_json_btn.clicked.connect(lambda: self.export("geojson"))
+        # map tiles, on the screen itself: download on / off, the server, the cache
+        self.tiles_btn = Button("Download tiles", height=36, parent=self)
+        self.tiles_btn.setCheckable(True)
+        self.tiles_btn.px = 13
+        self.tiles_btn.setToolTip("Download the map tiles the map shows (off: only what is cached)")
+        self.server_btn = Button("Tile server…", height=36, parent=self)
+        self.server_btn.px = 13
+        self.clear_btn = Button("Clear cache", height=36, parent=self)
+        self.clear_btn.px = 13
+        self.tiles_btn.clicked.connect(lambda: self.set_tiles_online(self.tiles_btn.isChecked()))
+        self.server_btn.clicked.connect(self._ask_server)
+        self.clear_btn.clicked.connect(self._clear_cache)
+        # zoom buttons over the map (the keys are + and -)
+        self.zoom_in = Button("+", height=36, parent=self)
+        self.zoom_out = Button("−", height=36, parent=self)
+        for b, step, tip in ((self.zoom_in, 1, "Zoom in (+)"), (self.zoom_out, -1, "Zoom out (-)")):
+            b.px = 18
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, n=step: self.canvas.zoom_by(n))
         self.view_seg.picked.connect(self.set_mode)
         self.col_seg.picked.connect(self.set_colour)
         self.chan_btn.clicked.connect(self.channel_menu)
@@ -348,6 +373,8 @@ class MapScreen(QWidget):
         if old is not None and old.source == source and old.cache.cap == int(cfg["cap_mb"] * 1e6):
             old.set_online(cfg["online"])
             self.canvas._layout()
+            if hasattr(self, "tiles_btn"):
+                self._sync_tiles()
             return
         if old is not None:
             old.close()
@@ -355,6 +382,8 @@ class MapScreen(QWidget):
         if self.tiles is not None:
             self.canvas.max_zoom = min(proj.MAX_ZOOM, source.max_zoom)
         self.canvas.set_tiles(self.tiles)
+        if hasattr(self, "tiles_btn"):
+            self._sync_tiles()
 
     def use_tiles(self, layer: TileLayer | None) -> None:
         """Draw with another tile layer (tests, screenshots, the benchmark)."""
@@ -368,6 +397,40 @@ class MapScreen(QWidget):
     def close_tiles(self) -> None:
         if self.tiles is not None:
             self.tiles.close()
+
+    def set_tiles_online(self, on: bool) -> None:
+        """The screen's "Download tiles": through the shell (it tells Replay's pane too)."""
+        hook = getattr(self.window(), "_set_tiles", None)
+        if callable(hook):
+            hook(online=on)
+        else:
+            if self.settings is not None:
+                self.settings.setValue("map/online", "true" if on else "false")
+            self.configure_tiles()
+        self._sync_tiles()
+
+    def _ask_server(self) -> None:
+        hook = getattr(self.window(), "ask_tile_server", None)
+        if callable(hook):
+            hook()
+            self._sync_tiles()
+
+    def _clear_cache(self) -> None:
+        hook = getattr(self.window(), "clear_tile_cache", None)
+        if callable(hook):
+            hook()
+        elif self.tiles is not None:
+            self.tiles.clear_cache()
+        self._sync_tiles()
+
+    def _sync_tiles(self) -> None:
+        cfg = tile_settings(self.settings)
+        self.tiles_btn.setChecked(cfg["online"])
+        forced = cfg["online"] and self.tiles is not None and not self.tiles.online   # HONDALOG_TILES=offline
+        self.tiles_btn.set_text("Map tiles: offline" if forced else
+                                "Map tiles: on" if cfg["online"] else "Map tiles: off")
+        self.server_btn.setVisible(callable(getattr(self.window(), "ask_tile_server", None)))
+        self.clear_btn.setEnabled(self.tiles is not None)
 
     # ---- modes ----
 
@@ -385,7 +448,8 @@ class MapScreen(QWidget):
 
     def _apply_mode(self) -> None:
         drive = self.mode == "drive"
-        for widget in (self.col_seg, self.chan_btn, self.legend, self.at, self.info, self.gpx_btn, self.kml_btn):
+        for widget in (self.col_seg, self.chan_btn, self.legend, self.at, self.info, self.gpx_btn, self.kml_btn,
+                       self.drive_json_btn):
             widget.setVisible(drive)
         for widget in (self.since_seg, self.reason_btn, self.reading, self.list, self.json_btn, self.open_btn):
             widget.setVisible(not drive)
@@ -806,14 +870,15 @@ class MapScreen(QWidget):
 
     def default_path(self, ext: str) -> Path:
         from ...data import files_dir
-        name = "stalls" if ext == "geojson" else (getattr(self._view, "title", "") or "drive")
+        name = "stalls" if self.mode == "stalls" else (getattr(self._view, "title", "") or "drive")
         return files_dir() / f"{Path(str(name)).stem}.{ext}"
 
     def export(self, fmt: str, path: str | os.PathLike | None = None) -> str:
-        """GPX / KML of the drive, or GeoJSON of the stalls. Without ``path``
-        a save dialog asks. Returns a line for the user ('' when cancelled)."""
+        """GPX / KML / GeoJSON of the drive, or GeoJSON of the stalls (in the
+        All stalls view). Without ``path`` a save dialog asks. Returns a line
+        for the user ('' when cancelled)."""
         fmt = fmt.lower()
-        if fmt == "geojson" or self.mode == "stalls":
+        if self.mode == "stalls":
             if not self.stall_pins:
                 return self._say("No stalls to export")
             if path is None:
@@ -828,7 +893,7 @@ class MapScreen(QWidget):
         if view is None or view.live or log is None or self.track is None or self.track.empty:
             return self._say("Open a recorded drive with GPS first (O)")
         if path is None:
-            what = "GPX (*.gpx)" if fmt == "gpx" else "KML (*.kml)"
+            what = {"gpx": "GPX (*.gpx)", "kml": "KML (*.kml)"}.get(fmt, "GeoJSON (*.geojson *.json)")
             path, _ = QFileDialog.getSaveFileName(self, f"Export {fmt.upper()}", str(self.default_path(fmt)), what)
             if not path:
                 return ""
@@ -907,6 +972,8 @@ class MapScreen(QWidget):
         elif k == Qt.Key_K:
             if self.mode == "drive":
                 self.export("kml")
+        elif k == Qt.Key_J:
+            self.export("geojson")
         elif k == Qt.Key_R:
             if self.mode == "stalls":
                 self.reason_menu()
@@ -935,15 +1002,25 @@ class MapScreen(QWidget):
         self._caps = [("View", sx, 8)]
         self.view_seg.setGeometry(sx, 25, SIDE, 44)
         bottom = h - 8 - 44
+        # map tiles: a row of their own above the buttons, in both views
+        ty = bottom - 8 - 36
+        sw = self.server_btn.sizeHint().width() if self.server_btn.isVisibleTo(self) else 0
+        cw = self.clear_btn.sizeHint().width()
+        tw = SIDE - cw - 8 - (sw + 8 if sw else 0)
+        self.tiles_btn.setGeometry(sx, ty, tw, 36)
+        if sw:
+            self.server_btn.setGeometry(sx + tw + 8, ty, sw, 36)
+        self.clear_btn.setGeometry(sx + SIDE - cw, ty, cw, 36)
+        bottom_card = ty - 8
         if self.mode == "drive":
             self._caps.append(("Colour by", sx, 77))
             self.col_seg.setGeometry(sx, 94, SIDE, 44)
             self.chan_btn.setGeometry(sx, 146, SIDE, 44)
             self.legend.setGeometry(sx, 198, SIDE, 128)
             self.at.setGeometry(sx, 334, SIDE, 138)
-            self.info.setGeometry(sx, 480, SIDE, max(60, bottom - 8 - 480))
-            bw = (SIDE - 16) / 3
-            for i, btn in enumerate((self.fit_btn, self.gpx_btn, self.kml_btn)):
+            self.info.setGeometry(sx, 480, SIDE, max(60, bottom_card - 480))
+            bw = (SIDE - 24) / 4
+            for i, btn in enumerate((self.fit_btn, self.gpx_btn, self.kml_btn, self.drive_json_btn)):
                 btn.setGeometry(int(sx + i * (bw + 8)), bottom, int(bw), 44)
         else:
             self._caps.append(("Since", sx, 77))
@@ -951,7 +1028,7 @@ class MapScreen(QWidget):
             self._caps.append(("Trigger", sx, 146))
             self.reason_btn.setGeometry(sx, 163, SIDE, 44)
             self.reading.setGeometry(sx, 215, SIDE, 128)
-            self.list.setGeometry(sx, 351, SIDE, max(80, bottom - 8 - 351))
+            self.list.setGeometry(sx, 351, SIDE, max(80, bottom_card - 351))
             ow = self.open_btn.sizeHint().width()
             fw = (SIDE - 16 - ow) / 2
             self.fit_btn.setGeometry(sx, bottom, int(fw), 44)
@@ -960,7 +1037,12 @@ class MapScreen(QWidget):
 
     def resizeEvent(self, _event) -> None:
         w, h = self.width(), self.height()
-        self.canvas.setGeometry(8, 8, w - 8 - SIDE - 16, h - 16)
+        cw = w - 8 - SIDE - 16
+        self.canvas.setGeometry(8, 8, cw, h - 16)
+        for i, b in enumerate((self.zoom_in, self.zoom_out)):   # top right of the map
+            b.setGeometry(8 + cw - 10 - 40, 18 + i * 40, 40, 36)
+            b.raise_()
+        self._sync_tiles()
         self._layout_side()
 
     def retheme(self) -> None:

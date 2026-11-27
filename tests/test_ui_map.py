@@ -1,8 +1,9 @@
-"""The Map screen (F8) offscreen: the track of Replay's drive, click to move
+"""The Map screen (F6 GPS map) offscreen: the track of Replay's drive, click to move
 Replay's cursor and the dot that follows it, colouring, the All stalls
 view on a real database, exports, the live position, tiles (fixture tiles,
-the night version, the grid without any) and the paint budget for an hour."""
+both dark themes, the grid without any) and the paint budget for an hour."""
 
+import json
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -25,6 +26,11 @@ import fixture_tiles  # noqa: E402
 
 
 def show_map(shell, app):
+    # these tests are written around the demo stall capture; the demo Replay opens on a simulated drive
+    view = shell.replay.view
+    if view is not None and view.title.startswith("demo_drive"):
+        from hondalog.ui.backends import demo_stall_view
+        shell.replay.show_view(demo_stall_view())
     shell.show_screen(mw.MAP)
     spin(app, shell, 3)
     return shell.map
@@ -176,7 +182,14 @@ def test_exports_from_the_screen(shell, app, stall_db, tmp_path):
     m.export("kml", tmp_path / "d.kml")
     desc = ET.parse(tmp_path / "d.kml").getroot()[0].find("{http://www.opengis.net/kml/2.2}description").text
     assert "rpm" in desc
+    # the drive as GeoJSON (the web app's three formats)
+    assert m.drive_json_btn.isVisible() and m.export("geojson", tmp_path / "d.geojson").startswith("Wrote")
+    doc = json.loads((tmp_path / "d.geojson").read_text(encoding="utf-8"))
+    kinds = [f["properties"]["kind"] for f in doc["features"]]
+    assert doc["type"] == "FeatureCollection" and kinds[0] == "track"
+    assert doc["features"][0]["geometry"]["type"] == "LineString" and "rpm" in doc["features"][0]["properties"]
     m.set_mode("stalls")
+    assert not m.drive_json_btn.isVisible()
     assert "4 stalls" in m.export("geojson", tmp_path / "s.geojson")
     assert (tmp_path / "s.geojson").stat().st_size > 200
 
@@ -212,7 +225,7 @@ def wait_tiles(app, shell, layer, timeout=10.0):
     spin(app, shell, 1)
 
 
-def test_fixture_tiles_by_day_and_by_night(shell, app, tmp_path):
+def test_fixture_tiles_dark_in_both_themes(shell, app, tmp_path):
     m = show_map(shell, app)
     fixture_tiles.requests.clear()
     layer = fixture_tiles.fixture_layer(tmp_path / "tiles")
@@ -224,10 +237,10 @@ def test_fixture_tiles_by_day_and_by_night(shell, app, tmp_path):
     assert fixture_tiles.requests and all(h["User-Agent"].startswith("hondalog/") for _, h in fixture_tiles.requests)
     assert "fixture tiles" in m.canvas._texts["attr"]
     key = next(iter(layer._raw))
-    day = layer.pixmap(key, "daylight").toImage().pixelColor(5, 5)
-    night = layer.pixmap(key, "night").toImage().pixelColor(5, 5)
-    assert day.lightness() > 200 and night.lightness() < 60                 # washed by day, dark at night
-    theme.T.set("night")
+    dracula = layer.pixmap(key, "dracula").toImage().pixelColor(5, 5)
+    darker = layer.pixmap(key, "darker").toImage().pixelColor(5, 5)
+    assert dracula.lightness() < 80 and darker.lightness() < dracula.lightness()     # never a light map
+    theme.T.set("darker")
     spin(app, shell)
     assert m.stats()["tiles"] > 0
     # the disk cache answers the next time, without the "server"

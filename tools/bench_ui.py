@@ -50,7 +50,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--seconds", type=float, default=8.0, help="per scenario (default 8)")
     ap.add_argument("--onscreen", action="store_true", help="use the real display")
-    ap.add_argument("--theme", choices=("daylight", "night"), default="daylight")
+    ap.add_argument("--theme", choices=("dracula", "darker", "daylight", "night"), default="dracula")
     ap.add_argument("--only", nargs="*", choices=SCENARIOS, help="run just these")
     ap.add_argument("--json", metavar="FILE", help="also write the results as JSON")
     ap.add_argument("--check", action="store_true", help="exit 1 if a target is missed")

@@ -1,4 +1,5 @@
-"""F2, driving view: six huge readouts, the stall catcher, MARK (HANDOFF 5.2)."""
+"""F2, driving view: six huge readouts, the rpm against the ECU's idle target
+and the launch margin under them, the stall catcher, MARK (HANDOFF 5.2)."""
 
 from __future__ import annotations
 
@@ -10,7 +11,10 @@ from .. import paint
 from ..controls import Card
 from ..session import DRIVE_DEFAULT
 from ..theme import T
-from ..tiles import DRIVE, Tile
+from ..tiles import DRIVE, DRIVE_COMPACT, IdleBar, Tile, metrics_height
+
+BARS_PAD = 12                   # inside the frame round each idle bar
+BARS_H = IdleBar.preferred_height(big=True) + 2 * BARS_PAD
 
 STATE_WORD = {"off": "OFF", "standby": "STANDBY", "armed": "ARMED", "saving": "SAVING",
               "triggered": "TRIGGERED"}
@@ -193,9 +197,13 @@ class DriveScreen(QWidget):
     markRequested = Signal()
     menuRequested = Signal(int, QPoint)     # slot index
 
-    def __init__(self, session, settings=None, parent=None):
+    #: what a slot shows instead of a USB black-box channel while that box is hidden (no --bb)
+    STAND_INS = ("map", "tps", "ltft", "iat", "idle_target", "gps_speed")
+
+    def __init__(self, session, settings=None, parent=None, show_bb: bool | None = None):
         super().__init__(parent)
         self.session = session
+        self.show_bb = show_bb
         self.settings = settings
         saved = settings.value("drive/slots", "") if settings is not None else ""
         self.slots = [s for s in str(saved).split(",") if s] or list(DRIVE_DEFAULT)
@@ -207,13 +215,26 @@ class DriveScreen(QWidget):
         self.card = StallCard(self)
         self.mark = MarkPad(self)
         self.mark.clicked.connect(self.markRequested)
+        self.idle_bar = IdleBar("idle", big=True, parent=self)
+        self.launch_bar = IdleBar("launch", big=True, parent=self)
+        self._bars_rects: list = []
         self._version = -1
 
     def _bind(self) -> None:
         self._version = self.session.bus.version
         bus = self.session.bus
+        show_bb = (self.show_bb if self.show_bb is not None
+                   else bool(getattr(self.session, "show_bb", False)))
+        taken = set(self.slots)
         for tile, cid in zip(self.tiles, self.slots + [""] * 6):
-            tile.bind(bus.channel(cid))
+            state = bus.channel(cid)
+            if state is not None and state.spec.source == "BB" and not show_bb:
+                # the separate black box is hidden: the slot shows a stand-in (not saved)
+                spare = next((c for c in self.STAND_INS if c not in taken and bus.channel(c)), "")
+                taken.add(spare)
+                state = bus.channel(spare)
+            if state is not tile.state:
+                tile.bind(state)
         self._layout()
 
     def pin(self, channel_id: str, slot: int | None = None) -> int:
@@ -246,19 +267,41 @@ class DriveScreen(QWidget):
         left_w = w - 8 - side - 8 - 8
         cols = 2 if self.four_up else 3
         tw = (left_w - (cols - 1) * 8) / cols
-        th = (h - 16 - 8) // 2
+        # the idle bars along the bottom of the left side, when the tiles still
+        # get the compact drive layout above them
+        bars = (h - 16 - 8 - BARS_H - 8) // 2 >= metrics_height(DRIVE_COMPACT)
+        th = (h - 16 - 8 - ((BARS_H + 8) if bars else 0)) // 2
+        metrics = DRIVE if th >= metrics_height(DRIVE) else DRIVE_COMPACT
         for i, tile in enumerate(self.tiles):
             if i >= cols * 2:
                 tile.hide()
                 continue
             r, c = divmod(i, cols)
             x0, x1 = round(8 + c * (tw + 8)), round(8 + c * (tw + 8) + tw)
+            if tile.m is not metrics:
+                tile.m = metrics
+                tile._value_font = None
             tile.setGeometry(x0, 8 + r * (th + 8), x1 - x0, th)
             tile.show()
+        self._bars_rects = []
+        if bars:
+            by = 8 + 2 * th + 8 + 8
+            bw = (left_w - 8) / 2
+            for k, bar in enumerate((self.idle_bar, self.launch_bar)):
+                x0 = round(8 + k * (bw + 8))
+                rect = QRectF(x0, by, round(bw), BARS_H)
+                self._bars_rects.append(rect)
+                bar.setGeometry(int(rect.x()) + BARS_PAD, int(rect.y()) + BARS_PAD,
+                                int(rect.width()) - 2 * BARS_PAD, BARS_H - 2 * BARS_PAD)
+                bar.show()
+        else:
+            self.idle_bar.hide()
+            self.launch_bar.hide()
         sx = w - 8 - side
         card_h = 268
         self.card.setGeometry(sx, 8, side, card_h)
         self.mark.setGeometry(sx, 8 + card_h + 8, side, h - 16 - card_h - 8)
+        self.update()
 
     def resizeEvent(self, _event) -> None:
         self._layout()
@@ -266,6 +309,7 @@ class DriveScreen(QWidget):
     def retheme(self) -> None:
         for tile in self.tiles:
             tile._value_font = None
+        self.update()
 
     def refresh(self, now: float) -> None:
         if self.session.bus.version != self._version:
@@ -276,6 +320,12 @@ class DriveScreen(QWidget):
                 tile.sync(now, self.session.alarms, blink)
         self.card.sync(self.session.stall)
         self.mark.sync(self.session.recording)
+        bus = self.session.bus
+        rpm, target = bus.channel("rpm"), bus.channel("idle_target")
+        r = rpm.value if rpm is not None and not rpm.stale(now) else None
+        t = target.value if target is not None and not target.stale(now) else None
+        for bar in (self.idle_bar, self.launch_bar):
+            bar.set_values(r, t, target is not None)
 
     def key(self, _event) -> bool:
         return False
@@ -283,4 +333,6 @@ class DriveScreen(QWidget):
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.fillRect(self.rect(), T.bg)
+        for rect in self._bars_rects:
+            paint.frame(p, rect, 2, T.rule)
         p.end()

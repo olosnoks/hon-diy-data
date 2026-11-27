@@ -11,8 +11,9 @@ import numpy as np
 
 #: sequential: values, samples (cividis-like, colour-blind safe, monotonic lightness)
 SEQ_RAMP = ("#00224E", "#35456C", "#666970", "#948E77", "#C8B866", "#FEE838")
-#: diverging: fuel trim (blue = rich / ECU pulling fuel, orange = lean / ECU adding)
-DIV_RAMP = ("#053061", "#2166AC", "#F7F7F7", "#E08214", "#7F3B08")
+#: diverging: fuel trim (cyan = rich / ECU pulling fuel, orange = lean / ECU adding).
+#: Dracula colours with a mid-dark neutral (Dracula "comment"): never a white middle
+DIV_RAMP = ("#8BE9FD", "#6272A4", "#FFB86C")
 
 
 def stops(hexes) -> np.ndarray:

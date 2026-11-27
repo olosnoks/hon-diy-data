@@ -302,7 +302,19 @@ DEMO_ECU = (
     ChannelSpec("fan", "Rad fan", kind="flag"),
     ChannelSpec("fuel_pump", "Fuel pump", kind="flag"),
     ChannelSpec("mil", "MIL", kind="flag"),
+    # idle control, the second O2 and the switches the grouped Live screen shows
+    ChannelSpec("idle_target", "Idle target", "rpm", 0, 0, 2000),
+    ChannelSpec("iac_cmd", "IAC command", "", 0, 0, 255),
+    ChannelSpec("iac_learn", "IAC learn", "", 0, 0, 255),
+    ChannelSpec("o2_2", "O2 rear", "V", 2, 0, 1.2),
+    ChannelSpec("fuel_status", "Fuel status", "", 0, 0, 8),
+    ChannelSpec("vtec_psw", "VTEC press. sw", kind="flag"),
+    ChannelSpec("starter", "Starter", kind="flag"),
+    ChannelSpec("psp", "Steering load", kind="flag"),
+    ChannelSpec("o2_heater", "O2 heater?", kind="flag"),
 )
+#: once a minute the demo car rolls to a stop and nearly stalls (the web demo's dip)
+DEMO_STOP = (52.0, 58.0)
 
 
 def demo_values(t: float, mark_t: float = -1e9) -> dict:
@@ -313,7 +325,7 @@ def demo_values(t: float, mark_t: float = -1e9) -> dict:
     rpm = 1400 + 2600 * u + n(1, 3.1) * 18
     inj = 2.2 + 4.6 * u + n(4, 2.2) * 0.04
     dip = 29 < t % 34 < 31.5
-    return {
+    out = {
         "rpm": rpm, "vss": 18 + 62 * u + n(2, 0.9) * 0.4,
         "map": 30 + 55 * u ** 1.2 + n(3, 2.3) * 0.8, "tps": 8 + 30 * u + n(5, 1.7) * 0.5,
         "inj": inj, "ign": 34 - 16 * u + n(6, 2.9) * 0.4,
@@ -330,6 +342,23 @@ def demo_values(t: float, mark_t: float = -1e9) -> dict:
         "ig1": 13.84 + n(19, 2.2) * 0.04, "tach": rpm / 30, "igt": rpm / 30,
         "injp": inj + 0.06, "bbmark": 1.0 if 0 <= t - mark_t < 1 else 0.0,
     }
+    ect = out["ect"]
+    target = 824.0 + max(0.0, 80.0 - ect) * 4.0         # warmer engine, lower target
+    out.update({
+        "idle_target": target, "iac_cmd": 89 + n(20, 0.7) * 3, "iac_learn": 3.0,
+        "o2_2": 0.62 + n(21, 0.3) * 0.04, "fuel_status": 2.0, "vtec_psw": out["vtec"],
+        "starter": 0.0, "psp": 0.0, "o2_heater": 1.0,
+    })
+    k = t % 60.0
+    if DEMO_STOP[0] <= k < DEMO_STOP[1]:
+        # stopped at idle: rpm a little under the target, then a dip toward a stall that recovers
+        s = k - DEMO_STOP[0]
+        dip = 250.0 * math.exp(-((s - 3.5) / 0.45) ** 2)
+        idle = target - 12.0 + n(22, 3.3) * 6.0 - dip
+        out.update({"rpm": idle, "vss": 0.0, "tps": 0.0, "map": 30.0 + dip / 25.0, "inj": 2.4,
+                    "ign": 12.0, "iacv": 6.0 + dip / 40.0, "iac_cmd": 89 + dip / 6.0, "vtec": 0.0,
+                    "vtec_psw": 0.0, "tach": idle / 30, "igt": idle / 30, "injp": 2.46})
+    return out
 
 
 class DemoSource(_Ticker):

@@ -85,7 +85,7 @@ def shell(app, settings):
     win.close()
     win.deleteLater()
     app.processEvents()
-    theme.T.set("daylight")
+    theme.T.set("dracula")
     units.U.set(None)                       # back to "as the address map has them"
 
 
