@@ -21,19 +21,19 @@ shows a `?` until you verify it. What is still unproven is
 
 ## Screens
 
-The app at the ThinkPad T430's 1366x768, on demo data, beside the design
-mockup it was built from. Daylight theme by default (black on white, for a
-TN panel in sun), Night on F9.
+The app at the ThinkPad T430's 1366x768, on demo data: the original
+frames on the left, the same screens in today's Dracula theme on the right
+(a darker variant is on F9).
 
-| App | Design mockup |
+| App (original frames) | Dracula theme |
 |---|---|
-| ![Sensors](docs/screenshots/sensors-daylight.png) | ![mockup](docs/mockups/sensors-daylight.png) |
-| ![Drive, night](docs/screenshots/drive-night.png) | ![mockup](docs/mockups/drive-night.png) |
-| ![Map 3D, night](docs/screenshots/map3d-night.png) | ![mockup](docs/mockups/map3d-night.png) |
-| ![Replay](docs/screenshots/replay-daylight.png) | ![mockup](docs/mockups/replay-stall-forensics.png) |
-| ![Raw tools](docs/screenshots/rawtools-daylight.png) | ![mockup](docs/mockups/raw-tools-mapper.png) |
-| ![Tune](docs/screenshots/tune-daylight.png) | ![mockup](docs/mockups/tune-table-p28.png) |
-| ![Alarms](docs/screenshots/alarms-daylight.png) | ![mockup](docs/mockups/alarms-states.png) |
+| ![Sensors](docs/screenshots/sensors-daylight.png) | ![F1 Live, Dracula](docs/screenshots/redesign/F1-live-dracula.png) |
+| ![Drive, night](docs/screenshots/drive-night.png) | ![F2 Drive, Dracula](docs/screenshots/redesign/F2-drive-dracula.png) |
+| ![Map 3D, night](docs/screenshots/map3d-night.png) | ![Power › Time in cell, Dracula](docs/screenshots/redesign/power-timeincell-map3d-dracula.png) |
+| ![Replay](docs/screenshots/replay-daylight.png) | ![F4 Replay, Dracula](docs/screenshots/redesign/F4-replay-dracula.png) |
+| ![Raw tools](docs/screenshots/rawtools-daylight.png) | ![F7 Bytes, Dracula](docs/screenshots/redesign/F7-bytes-dracula.png) |
+| ![Tune](docs/screenshots/tune-daylight.png) | ![Tune, Dracula](docs/screenshots/redesign/tune-dracula.png) |
+| ![Alarms](docs/screenshots/alarms-daylight.png) | ![Setup › Alarms, Dracula](docs/screenshots/redesign/setup-alarms-dracula.png) |
 
 A stall caught on the simulated ECU, and the capture opened in Replay:
 
