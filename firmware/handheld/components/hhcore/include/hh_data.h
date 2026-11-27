@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define HH_MAX_CH 48
+#define HH_MAX_CH 64
 
 typedef struct {
     char name[16];              /* address map name: "rpm", "ect", ... */

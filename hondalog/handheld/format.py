@@ -20,7 +20,7 @@ MAP_ALARM = struct.Struct("<16s24shBBB3s8f6H")          # 92
 MAP_STALL = struct.Struct("<5fhH")                      # 24
 MS_INFO, MS_PROTO, MS_CONST, MS_CHAN, MS_PROG, MS_ALARM, MS_STALL = 1, 2, 3, 4, 5, 6, 7
 
-MAX_CH = 48
+MAX_CH = 64
 MAX_ALARMS = 24
 MAX_CONST = 256
 MAX_SLOPES = 4
