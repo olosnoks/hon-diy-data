@@ -26,9 +26,21 @@ New-Item -ItemType Directory -Force (Join-Path $env:USERPROFILE '.bubblewrap') |
 
 New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item (Join-Path $here 'twa-manifest.json') (Join-Path $out 'twa-manifest.json') -Force
+# Bubblewrap runs a bare `gradlew.bat` through cmd: that needs cmd to look in the
+# current folder, which this setting (inherited from some shells) turns off.
+Remove-Item Env:NoDefaultCurrentDirectoryInExePath -ErrorAction SilentlyContinue
 Push-Location $out
 try {
   npx -y @bubblewrap/cli@1 update --skipVersionUpgrade
-  npx -y @bubblewrap/cli@1 build --skipPwaValidation
-  Write-Host "APK: $out\app-release-signed.apk"
+  if ($LASTEXITCODE) { throw "bubblewrap update failed ($LASTEXITCODE)" }
+  # Bubblewrap signs by putting the password on apksigner's command line (and
+  # echoes it in its error text), so build unsigned here and sign with
+  # scripts\release\sign-apk.ps1, which passes it as env:HONDALOG_KS_PASS.
+  $unsigned = Join-Path $out 'app-release-unsigned-aligned.apk'
+  Remove-Item $unsigned -ErrorAction SilentlyContinue
+  npx -y @bubblewrap/cli@1 build --skipPwaValidation --skipSigning
+  if ($LASTEXITCODE -or -not (Test-Path $unsigned)) { throw "bubblewrap build failed: no $unsigned" }
+  $apk = Join-Path $out 'app-release-signed.apk'
+  & (Join-Path $here '..\..\scripts\release\sign-apk.ps1') -Apk $unsigned -Out $apk
+  Write-Host "APK: $apk"
 } finally { Pop-Location }

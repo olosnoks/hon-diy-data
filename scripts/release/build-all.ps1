@@ -187,9 +187,7 @@ function Build-Android {
             if ($m -match '"appVersionName"\s*:\s*"([^"]+)"' -and $Matches[1] -ne $Version) {
                 Write-Warn2 "twa-manifest.json appVersionName is $($Matches[1]), not $Version (bump it and appVersionCode)"
             }
-            # Bubblewrap reads its signing passwords from these (PKCS12: key = store password)
-            $env:BUBBLEWRAP_KEYSTORE_PASSWORD = $env:HONDALOG_KS_PASS
-            $env:BUBBLEWRAP_KEY_PASSWORD = $env:HONDALOG_KS_PASS
+            # build-apk.ps1 builds unsigned and signs with sign-apk.ps1 (HONDALOG_KS_PASS)
             Remove-Item $TwaApk -ErrorAction SilentlyContinue
             $shell = if (Test-Command "pwsh") { "pwsh" } else { "powershell" }
             Invoke-Native $shell @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $TwaScript) "build-apk.ps1"
@@ -206,7 +204,6 @@ function Build-Android {
             & (Join-Path $PSScriptRoot "sign-apk.ps1") -Apk $unsigned.FullName -Out $apkOut
         }
     } finally {
-        Remove-Item Env:\BUBBLEWRAP_KEYSTORE_PASSWORD, Env:\BUBBLEWRAP_KEY_PASSWORD -ErrorAction SilentlyContinue
         if ($setHere) { Remove-Item Env:\HONDALOG_KS_PASS -ErrorAction SilentlyContinue }
     }
     Write-Ok (Split-Path -Leaf $apkOut)
