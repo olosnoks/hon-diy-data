@@ -112,6 +112,9 @@ class Faults:
     slow_reply: float = 0.0      # the reply comes slow_reply_s late
     slow_reply_s: float = 0.15
     drop_echo: float = 0.0       # one byte of our own echo goes missing
+    garble: float = 0.0          # our request is damaged on the wire: bad echo, no reply
+    deaf: float = 0.0            # the ECU stops listening for deaf_s (per request)
+    deaf_s: float = 0.3
     seed: int = 1
 
     _ALIASES = {"drop": "drop_byte", "cksum": "bad_checksum", "slow": "slow_reply",
@@ -131,6 +134,25 @@ class Faults:
         return cls(**values)
 
     @classmethod
+    def named(cls, text: str, seed: int = 1) -> "Faults":
+        """'flaky', 'p2p', or a spec for ``parse``."""
+        if text == "flaky":
+            return cls.flaky(seed)
+        if text == "p2p":
+            return cls.p2p(seed)
+        faults = cls.parse(text)
+        return faults
+
+    @classmethod
+    def p2p(cls, seed: int = 1) -> "Faults":
+        """The stock P2P on the KKL 409.1 cable at idle, fitted to drive
+        2026-11-26 20:45 (docs/analysis/2026-11-26/link-dropouts.md): 1.7 %
+        of requests come back with a damaged echo and no reply, 0.4 % are
+        ignored, and 0.15 % start a stretch of ~0.3 s in which the ECU
+        ignores everything. Never a bad checksum."""
+        return cls(garble=0.017, no_reply=0.004, deaf=0.0015, deaf_s=0.3, seed=seed)
+
+    @classmethod
     def flaky(cls, seed: int = 1) -> "Faults":
         """A poor cable: about 3% of exchanges go wrong one way or another."""
         return cls(drop_byte=0.008, bad_checksum=0.008, junk=0.006, no_reply=0.004,
@@ -138,7 +160,7 @@ class Faults:
 
     def any(self) -> bool:
         return any((self.drop_byte, self.bad_checksum, self.junk, self.no_reply,
-                    self.slow_reply, self.drop_echo))
+                    self.slow_reply, self.drop_echo, self.garble, self.deaf))
 
 
 @dataclass
@@ -213,6 +235,8 @@ class EcuModel:
         self._unplugged_until = 0.0
         self._unplug_window = (0.0, 0.0)
         self._rxbuf = bytearray()
+        self._garbled = False                  # the request now on the wire was damaged
+        self._deaf_until = float("-inf")
         self._last_rx = float("-inf")
         self._last_activity = float("-inf")
         self._lows: list[tuple[float, float]] = []
@@ -397,6 +421,13 @@ class EcuModel:
 
     def echo_of(self, data: bytes) -> bytes:
         """What the tester hears of its own transmission."""
+        self._garbled = False
+        if len(data) == 5 and self._hit("garble"):
+            # a bit flipped on the wire: the tester hears it, the ECU ignores the frame
+            rng = self.fault_rng
+            i = rng.randrange(len(data))
+            self._garbled = True
+            return data[:i] + bytes([data[i] ^ (1 << rng.randrange(8))]) + data[i + 1:]
         if len(data) > 1 and self._hit("drop_echo"):
             i = self.fault_rng.randrange(len(data))
             return data[:i] + data[i + 1:]
@@ -505,6 +536,15 @@ class EcuModel:
             return self._iso_bytes(data, now)
         if gap > 0.05:
             self._rxbuf.clear()                 # stale partial request
+        if self._garbled:
+            self._garbled = False
+            return []                           # the ECU got a damaged frame
+        if self.faults.deaf and len(data) == 5 and data[0] == self.framing.cmd_read:
+            if now < self._deaf_until:
+                return []
+            if self._hit("deaf"):
+                self._deaf_until = now + self.faults.deaf_s
+                return []
         self._rxbuf += data
         self._wake_in(self._rxbuf)
         chunks: list[Chunk] = []
@@ -856,7 +896,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="skip the true byte timing (bytes go out at once)")
     ap.add_argument("--faults", default="", metavar="SPEC",
                     help="line faults, e.g. 'drop=0.01,cksum=0.01,junk=0.01,slow=0.005,silent=0.005,"
-                         "echo=0.005' or 'flaky'")
+                         "echo=0.005,garble=0.01,deaf=0.001,deaf_s=0.3' or 'flaky' or 'p2p'")
     ap.add_argument("--seed", type=int, default=1, help="seed for engine noise and faults (runs repeat)")
     ap.add_argument("--turnaround-ms", type=float, default=2.0,
                     help="ECU think time between request and reply (default 2)")
@@ -873,7 +913,7 @@ def main(argv: list[str] | None = None) -> int:
                          "the 2000 Civic EX. P2T: kerpz's test ECU, Honda reads at 9600 baud")
     ap.add_argument("--run-for", type=float, default=None, help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
-    faults = Faults.flaky(args.seed) if args.faults == "flaky" else Faults.parse(args.faults)
+    faults = Faults.named(args.faults, args.seed)
     faults.seed = args.seed
     model = EcuModel(framing=P2P_FRAMING if args.ecu == "P2P" else P2T_FRAMING,
                      warmup_s=args.warmup, rev_every_s=args.rev_every,

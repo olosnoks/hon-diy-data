@@ -6,6 +6,7 @@ scheduler, against the simulated ECU at true 9600-baud byte timing.
     python3 tools/bench_link.py --realtime -s 10   # same on the wall clock
     python3 tools/bench_link.py --turnaround-ms 8 --usb-latency-ms 16
     python3 tools/bench_link.py --faults flaky
+    python3 tools/bench_link.py --faults p2p --usb-latency-ms 16   # the car on 2026-11-26
 
 "before" is the v0.1.0 strategy, reproduced here line for line: sweep every
 block of the greedy plan in turn, flush, write, read in 20 ms slices, sleep
@@ -41,10 +42,11 @@ from hondalog.transport import Link, LoopbackTransport        # noqa: E402
 
 def make_rig(args: argparse.Namespace, amap: addressmap.AddressMap) -> tuple[Clock, EcuModel, LoopbackTransport]:
     clock: Clock = REAL if args.realtime else VirtualClock()
-    faults = Faults.flaky(args.seed) if args.faults == "flaky" else Faults.parse(args.faults)
+    faults = Faults.named(args.faults, args.seed)
     faults.seed = args.seed
     model = EcuModel(framing=amap.framing, clock=clock.now, rev_every_s=5, seed=args.seed,
-                     faults=faults, turnaround_s=args.turnaround_ms / 1000)
+                     faults=faults, turnaround_s=args.turnaround_ms / 1000,
+                     need_wake=False)   # the P2P map runs at 10400; the wake frame is not what is measured
     transport = LoopbackTransport(model, clock, byte_timing=True,
                                   usb_latency_s=args.usb_latency_ms / 1000)
     return clock, model, transport
@@ -117,7 +119,8 @@ def run_after(args: argparse.Namespace, amap: addressmap.AddressMap) -> dict:
     poller.stop()
     elapsed = clock.now() - t0
     samples = [s for s in poller.samples if s.link]
-    return {"blocks": poller.blocks, "reads": poller.reads, "errors": poller.errors,
+    drops = sum(1 for a, b in zip(poller.samples, list(poller.samples)[1:]) if a.link and not b.link)
+    return {"drops": drops, "blocks": poller.blocks, "reads": poller.reads, "errors": poller.errors,
             "elapsed": elapsed,
             "hz": {n: len(ts) / elapsed for n, ts in stamps.items()},
             # worst gap once running (the first second is the priming pass)
@@ -180,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--realtime", action="store_true", help="run on the wall clock instead of virtual time")
     ap.add_argument("--turnaround-ms", type=float, default=2.0, help="ECU think time per request (default 2)")
     ap.add_argument("--usb-latency-ms", type=float, default=1.0, help="FTDI latency timer (default 1)")
-    ap.add_argument("--faults", default="", help="fault spec for the simulator, or 'flaky'")
+    ap.add_argument("--faults", default="", help="fault spec for the simulator, or 'flaky' / 'p2p'")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--map", help="address map to use (default: the shipped one)")
     ap.add_argument("--json", action="store_true", help="print the results as JSON")
@@ -234,7 +237,9 @@ def main(argv: list[str] | None = None) -> int:
     s = after["stats"]
     print(f"after, counters   timeouts {s['timeouts']}  checksum {s['checksum_failures']}  "
           f"bad frames {s['bad_frames']}  echo mismatches {s['echo_mismatches']}  "
-          f"resyncs {s['resyncs']}  retries {s['retries']}")
+          f"resyncs {s['resyncs']}  retries {s['retries']}  wakes {s['wakes']}")
+    print(f"after, link drops {after['drops']} (link reported down), "
+          f"worst rpm gap {after['worst_gap'].get('rpm', 0) * 1000:.0f} ms")
     t = after["timing"]
     print(f"after, timing     response timeout {t['response_timeout_ms']:.0f} ms  "
           f"inter-byte timeout {t['inter_byte_timeout_ms']:.1f} ms  gap {t['gap_ms']:.1f} ms")

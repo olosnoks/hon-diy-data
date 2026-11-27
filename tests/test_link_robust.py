@@ -366,7 +366,10 @@ def test_key_off_then_key_on_recovers_without_restart():
     samples = list(poller.samples)
     down = [s for s in samples if not s.link]
     assert down and all(s.values == {} for s in down)
-    assert 3.0 <= down[0].t < 3.4                            # noticed within 0.4 s
+    # noticed within ~1 s: two block reads must fail (each retried) and the line
+    # stay silent for 0.6 s, so a P2P that skips a request or two at idle does
+    # not drop the link (docs/analysis/2026-11-26/link-dropouts.md)
+    assert 3.0 <= down[0].t < 4.1
     gaps = [b.t - a.t for a, b in zip(down, down[1:])]
     assert max(gaps) < 0.9                                   # link-down samples keep coming
     back = [s for s in samples if s.link and s.t > 7.0]
@@ -485,3 +488,100 @@ def test_transport_base_refuses_break_and_baud():
         Transport().set_break(True)
     with pytest.raises(TransportError):
         Transport().set_baud(10400)
+
+
+# ---- short ECU deafness and damaged requests (the P2P on the car, 2026-11-26) ----
+
+def test_short_ecu_deafness_does_not_drop_the_link():
+    # The stock P2P ignores everything for ~0.2-0.45 s about three times a
+    # minute at idle. That used to drop the link (values blanked, wake bytes,
+    # a "link 0" for the stall catcher); now the poller just reads on.
+    clock, model, poller = start_poller(faults=Faults(deaf=1e-12, deaf_s=0.0))
+    reads, deaf = [], {}
+
+    def on_block(r):                                        # on the poller thread: exact timing
+        reads.append(r.t)
+        if r.t > 3.0 and not deaf:
+            deaf["t"], deaf["wakes"] = r.t, poller.link.stats.wakes
+            model._deaf_until = clock.now() + 0.4
+    poller.on_block = on_block
+    try:
+        run_until(clock, 8)
+    finally:
+        poller.stop()
+    t_deaf = deaf["t"]
+    assert not [s for s in poller.samples if not s.link]
+    assert poller.link.stats.wakes == deaf["wakes"] and poller.link.stats.timeouts >= 2
+    back = min(t for t in reads if t > t_deaf)              # first answer after the deaf stretch
+    assert 0.4 < back - t_deaf < 0.9 and poller.error_kinds["NoReply"] >= 2
+
+
+def test_p2p_fault_preset_keeps_the_link_up():
+    clock, model, poller = start_poller(faults=Faults.p2p(seed=3))
+    try:
+        run_until(clock, 120, wall=60)
+    finally:
+        poller.stop()
+    s = poller.link.stats
+    assert s.bad_frames > 20 and s.echo_mismatches >= s.bad_frames and s.checksum_failures <= 2
+    assert model.fault_counts.get("deaf", 0) >= 3
+    drops = sum(1 for a, b in zip(poller.samples, list(poller.samples)[1:]) if a.link and not b.link)
+    assert drops <= 1
+
+
+def test_every_failed_attempt_is_reported():
+    clock, model, link = rig()
+    link.read_block(0, 4)
+    seen = []
+    link.on_error = lambda addr, n, exc, attempt, t: seen.append((addr, n, type(exc).__name__, attempt))
+    model.faults = Faults(no_reply=1.0)
+    with pytest.raises(protocol.NoReply):
+        link.read_block(0x10, 4)
+    assert seen == [(0x10, 4, "NoReply", 1), (0x10, 4, "NoReply", 2)]
+
+
+class _FakeSerial:
+    """Enough of pyserial's Windows Serial: no fileno, and every change of
+    ``timeout`` counted (on Windows each one reprograms the adapter)."""
+
+    def __init__(self, chunks):
+        self._timeout = 0.2
+        self.sets = 0
+        self.buf = bytearray()
+        self.chunks = list(chunks)              # bytes that "arrive" on each read call
+
+    @property
+    def timeout(self):
+        return self._timeout
+
+    @timeout.setter
+    def timeout(self, value):
+        self.sets += 1
+        self._timeout = value
+
+    @property
+    def in_waiting(self):
+        return len(self.buf)
+
+    def read(self, n):
+        if not self.buf and self.chunks:
+            self.buf += self.chunks.pop(0)
+        out = bytes(self.buf[:n])
+        del self.buf[:n]
+        return out
+
+
+def test_windows_read_some_does_not_reprogram_the_port_per_byte():
+    from hondalog.transport import SerialTransport
+    tr = SerialTransport("COM99", 10400)
+    reply = bytes.fromhex("20 05 00 03 d8 00 06 0e 94 00 58")
+    tr._ser = _FakeSerial([reply[i:i + 1] for i in range(len(reply))] + [b""] * 5)
+    tr._fd = -1
+    tr._timeout = 0.2
+    got = bytearray()
+    for _ in range(40):
+        got += tr.read_some(64, 0.05)
+        if len(got) == len(reply):
+            break
+    assert bytes(got) == reply
+    assert tr._ser.sets == 1                    # set once to the poll slice, never again

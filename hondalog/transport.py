@@ -16,8 +16,9 @@ import errno
 import os
 import select
 import sys
+import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from . import protocol
 from .link.clock import REAL, Clock
@@ -32,11 +33,19 @@ UDEV_SYMLINK = "/dev/hondalog"
 SIM_SYMLINK = "/tmp/hondalog-sim"
 BUILTIN_SIM = "sim:"
 BUILTIN_SIM_FLAKY = "sim:flaky"
+BUILTIN_SIM_CAR = "sim:p2p-car"     # the stock P2P's link faults as seen on the car (Faults.p2p)
 BUILTIN_SIM_ISO = "sim:iso"
 BUILTIN_SIM_P2T = "sim:p2t"
 
 DEFAULT_USB_LATENCY_S = 0.016      # FTDI default latency_timer when we could not lower it
 LOW_USB_LATENCY_S = 0.001
+#: Where the port has no file descriptor to select() on (Windows), read_some
+#: waits for the first byte in slices of this length with a timeout that is
+#: set once. pyserial reprograms the whole port (SetCommTimeouts and
+#: SetCommState, i.e. USB control requests to the FTDI) on every change of
+#: ``Serial.timeout``; the old read_some changed it for every byte, while
+#: our own request was still being shifted out.
+POLL_SLICE_S = 0.002
 
 
 class TransportError(Exception):
@@ -84,6 +93,7 @@ class SerialTransport(Transport):
         self.usb_latency_s = DEFAULT_USB_LATENCY_S
         self._ser: Any = None
         self._fd = -1
+        self._timeout: float | None = None      # what Serial.timeout was last set to
         self._usb_id: tuple[int, int, str | None] | None = None
 
     def open(self) -> None:
@@ -96,6 +106,7 @@ class SerialTransport(Transport):
                                       stopbits=1, timeout=0.2, write_timeout=1.0)
         except (serial.SerialException, OSError, ValueError) as exc:
             raise TransportError(str(exc)) from exc
+        self._timeout = 0.2
         try:
             self._fd = self._ser.fileno()
         except Exception:
@@ -145,6 +156,7 @@ class SerialTransport(Transport):
                 pass
             self._ser = None
             self._fd = -1
+            self._timeout = None
 
     def write(self, data: bytes) -> None:
         import serial
@@ -153,19 +165,52 @@ class SerialTransport(Transport):
         except (serial.SerialException, OSError, AttributeError) as exc:
             raise TransportError(str(exc)) from exc
 
+    def _set_timeout(self, timeout: float) -> None:
+        """Set Serial.timeout only when it really changes (see POLL_SLICE_S).
+        Windows counts it in whole milliseconds, so compare at that grain."""
+        timeout = max(0.0, timeout)
+        old = self._timeout
+        if old is None or round(old * 1000) != round(timeout * 1000):
+            self._ser.timeout = timeout
+            self._timeout = timeout
+
     def read(self, size: int, timeout: float) -> bytes:
         import serial
         try:
-            self._ser.timeout = max(0.0, timeout)
+            self._set_timeout(timeout)
             return bytes(self._ser.read(size))
+        except (serial.SerialException, OSError, AttributeError, TypeError) as exc:
+            raise TransportError(str(exc)) from exc
+
+    def _read_some_polled(self, size: int, timeout: float) -> bytes:
+        """read_some without select(): whatever is waiting, else the first
+        byte(s) to arrive within ``timeout``. The port's timeout stays at
+        POLL_SLICE_S, so nothing reprograms the adapter mid-exchange."""
+        import serial
+        ser = self._ser
+        end = time.perf_counter() + max(0.0, timeout)
+        try:
+            while True:
+                waiting = ser.in_waiting
+                if waiting:
+                    return bytes(ser.read(min(size, waiting)))
+                self._set_timeout(POLL_SLICE_S)
+                data = bytes(ser.read(1))
+                if data:
+                    if size > 1:
+                        more = ser.in_waiting
+                        if more:
+                            data += bytes(ser.read(min(size - 1, more)))
+                    return data
+                if time.perf_counter() >= end:
+                    return b""
         except (serial.SerialException, OSError, AttributeError, TypeError) as exc:
             raise TransportError(str(exc)) from exc
 
     def read_some(self, size: int, timeout: float) -> bytes:
         fd = self._fd
         if fd < 0:
-            data = self.read(1, timeout)
-            return data
+            return self._read_some_polled(size, timeout)
         try:
             ready, _, _ = select.select([fd], [], [], max(0.0, timeout))
             if not ready:
@@ -443,7 +488,8 @@ def default_port() -> str:
 def make_transport(port: str, framing: Framing = protocol.DEFAULT) -> Transport:
     if port.startswith(BUILTIN_SIM):
         from .sim import P2P_FRAMING, P2T_FRAMING, EcuModel, Faults
-        faults = Faults.flaky() if port == BUILTIN_SIM_FLAKY else None
+        faults = (Faults.flaky() if port == BUILTIN_SIM_FLAKY
+                  else Faults.p2p() if port == BUILTIN_SIM_CAR else None)
         # The simulated ECU is a stock P2P, whatever the map says: Honda reads
         # at 10400 baud after the wake frame, like the car. A map that asks
         # for 9600 gets no Honda replies here either. sim:p2t is kerpz's ECU.
@@ -495,6 +541,9 @@ class Link:
         self.read_only = True
         #: every non-read frame sent after an unlock, for the log header
         self.unlocked_frames: list[bytes] = []
+        #: called for every failed attempt, retries included:
+        #: on_error(addr, length, error, attempt, t_request). Must not raise.
+        self.on_error: Callable[[int, int, protocol.ProtocolError, int, float], None] | None = None
 
     # -- housekeeping --
 
@@ -598,6 +647,11 @@ class Link:
             except protocol.ProtocolError as exc:
                 error = exc
                 self.resync()
+            if self.on_error is not None:
+                try:
+                    self.on_error(addr, length, error, attempt, self._last_tx_end)
+                except Exception:
+                    pass
             if attempt >= attempts:
                 raise error
             self.stats.retries += 1

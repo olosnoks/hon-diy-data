@@ -20,6 +20,13 @@ Recovery
   thread probes with one short read and a growing pause, re-sends the wake-up
   bytes before every second probe (a P2P answers nothing after key-on until
   it has had them), and carries on by itself when the ECU is back.
+  The link is only declared down when reads have failed for a while
+  (``_SILENT_DOWN_S``, or ``_FAILS_TO_NO_REPLY`` block reads in a row): a
+  stock P2P running at idle ignores a request or two now and then, and on
+  2026-11-26 that used to drop the link (and every value) ~3 times a minute.
+  The wake bytes are held back for the first ``_WAKE_GRACE_S`` of an outage
+  that began with the ECU answering: they cost 0.35 s of silence on the line
+  and a running ECU does not need them.
 * Port dies (cable pulled): state PORT_LOST, the thread reopens the port every
   0.25-2 s (the cable may come back under another ttyUSB number) and then goes
   through the same probing.
@@ -67,6 +74,8 @@ CONNECTING, OK, NO_REPLY, PORT_LOST, STOPPED = "connecting", "ok", "no reply", "
 HONDA, OBD2 = "honda", "obd2"
 
 _FAILS_TO_NO_REPLY = 3         # failed block reads in a row (each already retried)
+_SILENT_DOWN_S = 0.6           # ... or no good read for this long, with 2 failed block reads
+_WAKE_GRACE_S = 1.0            # no wake bytes this early in an outage of a running link
 _PROBE_MIN_S, _PROBE_MAX_S = 0.05, 0.25
 _REOPEN_MIN_S, _REOPEN_MAX_S = 0.25, 2.0
 _REPORT_EVERY_S = 0.5
@@ -98,6 +107,18 @@ class Sample:
 
 
 @dataclass(frozen=True)
+class LinkError:
+    """One failed exchange (``Poller.on_link_error``), retries included."""
+
+    t: float                        # seconds since connect, when the request went out
+    addr: int
+    length: int
+    kind: str                       # NoReply, ShortReply, BadChecksum, BadFrame
+    attempt: int                    # 1 = first try, 2 = the retry, ...
+    message: str
+
+
+@dataclass(frozen=True)
 class BlockRead:
     """One block read, for per-read logging (``Poller.on_block``)."""
 
@@ -120,6 +141,11 @@ class Poller(threading.Thread):
         self.link = Link(transport, amap.framing, clock)
         self.on_sample = on_sample                  # called on this thread
         self.on_block: Callable[[BlockRead], None] | None = None
+        #: every failed exchange, on this thread (the recorder logs them)
+        self.on_link_error: Callable[[LinkError], None] | None = None
+        #: failed exchanges by kind since connect
+        self.error_kinds: collections.Counter[str] = collections.Counter()
+        self.link.on_error = self._link_error
         #: OBD2-only mode: (seconds since connect, PID, data bytes) for every reply
         self.on_pid: Callable[[float, int, bytes], None] | None = None
         self.iso_fallback = iso_fallback
@@ -160,6 +186,8 @@ class Poller(threading.Thread):
         self._unread: set[int] = set(range(len(self.plan)))
         self._pending: set[int] = set(self._sched.top)
         self._fails = 0
+        self._last_ok = clock.now()
+        self._wake_after = 0.0                      # no wake bytes before this (clock time)
         self._probes = 0
         self._probe_wait = _PROBE_MIN_S
         self._reopen_wait = _REOPEN_MIN_S
@@ -371,12 +399,16 @@ class Poller(threading.Thread):
         except ProtocolError as exc:
             self.errors += 1
             self.last_error = f"{block.addr:02X}+{block.length}: {exc}"
-            sched.failed(index, clock.now())
-            # Silence that outlasted the retry means the ECU is gone; damaged
-            # frames mean a bad line, which gets a few more chances.
-            self._fails += _FAILS_TO_NO_REPLY if isinstance(exc, NoReply) else 1
-            if self._fails >= _FAILS_TO_NO_REPLY:
+            now = clock.now()
+            sched.failed(index, now)
+            # One block that went unanswered twice is not a dead ECU: a stock
+            # P2P skips requests now and then while running. Gone means
+            # several block reads in a row, or silence for _SILENT_DOWN_S.
+            self._fails += 1
+            silent = isinstance(exc, NoReply) and self._fails >= 2                 and now - self._last_ok >= _SILENT_DOWN_S
+            if self._fails >= _FAILS_TO_NO_REPLY or silent:
                 self._link_down()
+                self._wake_after = now + _WAKE_GRACE_S
                 self._emit_down()           # tell the stall catcher now, not a probe later
             return
         except TransportError as exc:
@@ -384,7 +416,7 @@ class Poller(threading.Thread):
             return
         self.reads += 1
         self._fails = 0
-        t_done = result.t_done
+        t_done = self._last_ok = result.t_done
         sched.done(index, t_done)
 
         # decode just this block
@@ -484,9 +516,19 @@ class Poller(threading.Thread):
 
     # -- link down / recovery --
 
+    def _link_error(self, addr: int, length: int, error: Exception, attempt: int, t_req: float) -> None:
+        kind = type(error).__name__
+        self.error_kinds[kind] += 1
+        if self.on_link_error is not None and self.state == OK:     # not the probes of an outage
+            try:
+                self.on_link_error(LinkError(t_req - self.t0, addr, length, kind, attempt, str(error)))
+            except Exception as exc:        # a logging problem must not kill polling
+                self.last_error = f"on_link_error: {exc!r}"
+
     def _link_down(self) -> None:
         self.state = NO_REPLY
         self._fails = 0
+        self._wake_after = 0.0
         self._probes = 0
         self._probe_wait = _PROBE_MIN_S
         self._burst = None
@@ -498,6 +540,7 @@ class Poller(threading.Thread):
     def _link_up(self) -> None:
         self.state = OK
         self._fails = 0
+        self._last_ok = self.clock.now()
         self._quiet_until = 0.0
         self.link.timing.relax()
         self._sched.restart()
@@ -512,7 +555,7 @@ class Poller(threading.Thread):
         quiet = self.clock.now() < self._quiet_until
         try:
             self._probes += 1
-            if self._probes % 2 == 0:
+            if self._probes % 2 == 0 and self.clock.now() >= self._wake_after:
                 self.link.wake()            # just powered up? a P2P needs the wake frame
             try:
                 self._read(block.addr, block.length)
