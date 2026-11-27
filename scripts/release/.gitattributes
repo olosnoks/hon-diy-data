@@ -1,0 +1,2 @@
+# bash scripts run in WSL from this Windows checkout: keep LF even with core.autocrlf=true
+*.sh text eol=lf

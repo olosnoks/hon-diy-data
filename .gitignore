@@ -22,5 +22,5 @@ docs/analysis/*/work-*/track_*.png
 docs/analysis/*/work-manual/img/
 docs/analysis/*/work-manual/manual.txt
 docs/analysis/*/work-*/manual*.txt
-release/
+/release/
 firmware-out/
