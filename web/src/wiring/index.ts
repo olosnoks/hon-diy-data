@@ -104,7 +104,7 @@ function registerDeps(app: AppController): void {
   registerSetupDeps({
     alarms: app.pipeline?.alarms ? alarmSourceFromEngine(app.pipeline.alarms, () => performance.now() / 1000) : null,
     cyd,
-    store: storeForSetup(app),
+    store: app.store ? storeForSetup(app) : null,
     picker,
     mapText: app.mapText,
     saveMap,
@@ -167,7 +167,14 @@ export async function startApp(): Promise<AppController> {
     baud: () => cableSettings().baud,
   });
   started = app;
-  await app.init();
+  // The CYD tab and the port pickers need no drive store: if the store cannot
+  // open (storage blocked, another tab holding it), still register them.
+  try {
+    await app.init();
+  } catch (e) {
+    app.lastError = `start: ${(e as Error).message}`;
+    console.error('hondalog: drive store did not open', e);
+  }
   // Event notes kept on the device before they went into hondalog.db: moved once.
   const store = app.store;
   if (store) await migrateLocalNotes(store, globalThis.localStorage,

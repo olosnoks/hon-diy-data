@@ -38,10 +38,23 @@ export interface SetupDeps {
 }
 
 let registered: Partial<SetupDeps> = {};
+let version = 0;
+const listeners = new Set<() => void>();
 export function registerSetupDeps(deps: Partial<SetupDeps>): void {
   registered = { ...registered, ...deps };
+  version++;
+  for (const f of listeners) f();   // a Setup screen already open picks them up (start-up finishes after the first draw)
 }
 
 export function registeredSetupDeps(): Partial<SetupDeps> {
   return registered;
+}
+
+/** For useSyncExternalStore: re-read the deps when they are (re)registered. */
+export function subscribeSetupDeps(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => { listeners.delete(fn); };
+}
+export function setupDepsVersion(): number {
+  return version;
 }

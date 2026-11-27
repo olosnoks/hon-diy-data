@@ -8,7 +8,7 @@
  * drive store, map store); everything has a safe default.
  */
 
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { DriveStore, PortInfo, TransportPicker } from '../../core/types';
 import { useSession } from '../../core/session';
 import { DARKER, DRACULA, FONTS, type Theme } from '../theme';
@@ -21,7 +21,7 @@ import { AlarmsTab, type AlarmSource } from './AlarmsTab';
 import type { CydClient } from './cyd/client';
 import { CydTab, type Confirm } from './cyd/CydTab';
 import { useCable, type Protocol } from './settings';
-import { registeredSetupDeps, type ConnectionControl, type PlatformFacts, type SetupDeps } from './deps';
+import { registeredSetupDeps, setupDepsVersion, subscribeSetupDeps, type ConnectionControl, type PlatformFacts, type SetupDeps } from './deps';
 import pkg from '../../../package.json';
 
 export type SetupTab = 'alarms' | 'cyd' | 'units' | 'cable' | 'files' | 'theme' | 'about';
@@ -264,7 +264,9 @@ export interface SetupScreenProps { deps?: Partial<SetupDeps>; theme?: Theme; in
 export default function SetupScreen(props: SetupScreenProps) {
   const sessionTheme = useShellTheme();
   const theme = props.theme ?? sessionTheme;
-  const deps = useMemo<SetupDeps>(() => ({ ...defaultSetupDeps(), ...registeredSetupDeps(), ...props.deps }), [props.deps]);
+  const depsVersion = useSyncExternalStore(subscribeSetupDeps, setupDepsVersion);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const deps = useMemo<SetupDeps>(() => ({ ...defaultSetupDeps(), ...registeredSetupDeps(), ...props.deps }), [props.deps, depsVersion]);
   const [tab, setTab] = useState<SetupTab>(props.initialTab ?? 'alarms');
   const [mapText, setMapText] = useState(deps.mapText);
   const saveMap = deps.saveMap ? async (t: string) => { await deps.saveMap!(t); setMapText(t); } : null;
