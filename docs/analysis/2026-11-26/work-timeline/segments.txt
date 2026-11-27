@@ -1,0 +1,71 @@
+=== drive A 13 segments
+22:24:37   700s idle/parked  v 0.0-0.0 mean 0.0 rpm 721.25-875.75 gears                        at start point S -> at start point S 0.00km
+22:36:17    55s no ECU data  v None-None mean None rpm None-None gears                        at start point S -> at start point S 0.00km
+22:37:12   156s idle/parked  v 0.0-0.0 mean 0.0 rpm 546.0-899.25 gears                        at start point S -> at start point S 0.00km
+22:39:48    15s launch       v 4.0-11.0 mean 7 rpm 630.25-1496.25 gears 1:33%                  at start point S -> at start point S 0.03km
+22:40:03    67s city         v 6.0-44.0 mean 26 rpm 839.5-2461.5 gears 3:44% 2:20% 1:17%      at start point S -> 0.39 km E of S 0.48km
+22:41:10    12s decel        v 5.0-39.0 mean 24 rpm 1077.25-1786.0 gears                        0.40 km E of S -> 0.49 km E of S 0.07km
+22:41:22    22s stop         v 0.0-0.0 mean 0.0 rpm 791.75-1103.25 gears                        0.49 km E of S -> 0.49 km E of S 0.00km
+22:41:44     6s launch       v 6.0-22.0 mean 15 rpm 824.75-2658.5 gears 1:50% 2:16%            0.49 km E of S -> 0.50 km E of S 0.02km
+22:41:50    50s arterial     v 26.0-69.0 mean 60 rpm 1065.0-3253.75 gears 5:48% 4:24% 3:14%      0.50 km E of S -> 1.01 km NNE of S 0.82km
+22:42:40    28s city         v 9.0-44.0 mean 20 rpm 1016.75-2159.625 gears 3:17%                  1.02 km NNE of S -> 1.11 km NNE of S 0.14km
+22:43:08     5s decel        v 3.0-9.0 mean 6 rpm 1065.5-1090.125 gears                        1.12 km NNE of S -> 1.12 km NNE of S 0.01km
+22:43:13   132s idle/parked  v 0.0-0.0 mean 0.0 rpm 810.5-1075.5 gears                        1.12 km NNE of S -> 1.12 km NNE of S 0.00km
+22:45:25     1s no ECU data  v None-None mean None rpm None-None gears                        1.12 km NNE of S -> 1.12 km NNE of S 0.00km
+=== drive B 56 segments
+22:51:09   129s idle/parked  v 0.0-0.0 mean 0.0 rpm 0.0-1778.375 gears                        1.13 km NNE of S -> 1.13 km NNE of S 0.00km
+22:53:18    15s launch       v 7.0-16.0 mean 14 rpm 949.75-2142.0 gears 2:53% 1:33%            1.13 km NNE of S -> 1.10 km NNE of S 0.06km
+22:53:33    35s city         v 4.0-21.0 mean 12 rpm 875.75-1880.0 gears 1:42% 2:22%            1.10 km NNE of S -> 1.07 km NNE of S 0.11km
+22:54:08     7s decel        v 4.0-21.0 mean 12 rpm 1017.25-1329.625 gears                        1.07 km NNE of S -> 1.09 km NNE of S 0.02km
+22:54:15     7s stop         v 0.0-0.0 mean 0.0 rpm 669.75-1143.5 gears                        1.09 km NNE of S -> 1.09 km NNE of S 0.00km
+22:54:22     6s launch       v 7.5-24.0 mean 17 rpm 978.5-3049.75 gears 1:66% 2:16%            1.09 km NNE of S -> 1.08 km NNE of S 0.03km
+22:54:28    78s arterial     v 26.0-78.0 mean 67 rpm 1058.75-4832.25 gears 5:70% 4:12% 2:11%      1.08 km NNE of S -> 0.77 km SE of S 1.45km
+22:55:46   123s city         v 7.0-44.0 mean 27 rpm 883.25-2452.0 gears 3:51% 2:21% 1:13%      0.78 km SE of S -> 0.47 km E of S 0.92km
+22:57:49     7s decel        v 4.0-25.0 mean 15 rpm 1176.5-1499.0 gears 3:14% 1:14%            0.48 km E of S -> 0.51 km E of S 0.02km
+22:57:56     9s stop         v 0.0-0.0 mean 0.0 rpm 779.0-1333.625 gears                        0.52 km E of S -> 0.51 km E of S 0.00km
+22:58:05     6s launch       v 4.5-23.0 mean 16 rpm 701.75-2858.75 gears 1:66%                  0.51 km E of S -> 0.53 km E of S 0.02km
+22:58:11   267s city         v 5.0-57.0 mean 27 rpm 779.25-3282.0 gears 2:55% 3:19%            0.53 km E of S -> 0.41 km NE of S 1.98km
+23:02:38    18s decel        v 4.0-49.0 mean 28 rpm 1055.75-2412.25 gears 3:22%                  0.42 km NE of S -> 0.55 km ENE of S 0.13km
+23:02:56     6s stop         v 0.0-0.0 mean 0.0 rpm 906.5-1254.5 gears                        0.55 km ENE of S -> 0.55 km ENE of S 0.00km
+23:03:02     3s launch       v 9.5-21.0 mean 15 rpm 1208.0-2931.75 gears 1:66%                  0.55 km ENE of S -> 0.55 km ENE of S 0.01km
+23:03:05   121s arterial     v 27.0-76.0 mean 57 rpm 1077.0-5199.125 gears 4:37% 5:31% 3:14%      0.55 km ENE of S -> 0.74 km S of S 1.92km
+23:05:06    43s city         v 4.0-44.0 mean 29 rpm 736.25-2287.0 gears 3:39% 2:16%            0.74 km S of S -> 0.72 km SSW of S 0.33km
+23:05:49    94s arterial     v 45.0-57.0 mean 52 rpm 1108.5-2625.0 gears 4:77% 3:19%            0.73 km SSW of S -> 1.69 km WSW of S 1.36km
+23:07:23    56s city         v 7.0-49.0 mean 30 rpm 903.5-3308.375 gears 3:37% 2:16%            1.70 km WSW of S -> 1.67 km W of S 0.45km
+23:08:19   118s arterial     v 50.5-76.0 mean 61 rpm 946.5-3764.75 gears 4:95%                  1.65 km W of S -> 0.46 km S of S 1.99km
+23:10:17     5s city         v 26.0-44.0 mean 33 rpm 986.0-1454.25 gears 3:40% 4:20%            0.47 km S of S -> 0.51 km S of S 0.03km
+23:10:22     3s no ECU data  v None-None mean None rpm None-None gears                        0.51 km S of S -> 0.52 km S of S 0.02km
+23:10:25    26s city         v 20.0-42.0 mean 34 rpm 906.5-3218.0 gears 3:61% 2:26%            0.53 km S of S -> 0.73 km S of S 0.24km
+23:10:51    35s arterial     v 46.0-65.0 mean 58 rpm 900.5-3618.625 gears 4:82% 3:11%            0.73 km S of S -> 1.10 km SSE of S 0.55km
+23:11:26    26s city         v 4.0-42.0 mean 24 rpm 941.0-2766.25 gears 2:15% 3:11%            1.11 km SSE of S -> 1.15 km SSE of S 0.16km
+23:11:52    20s arterial     v 45.0-64.0 mean 56 rpm 2157.5-3152.25 gears 3:100%                 1.14 km SSE of S -> 0.92 km SE of S 0.30km
+23:12:12    16s decel        v 5.5-53.0 mean 31 rpm 826.25-2594.5 gears 3:56%                  0.91 km SE of S -> 0.85 km SE of S 0.12km
+23:12:28    11s stop         v 0.0-0.0 mean 0.0 rpm 553.5-1508.875 gears                        0.85 km SE of S -> 0.85 km SE of S 0.00km
+23:12:39     5s launch       v 8.5-24.5 mean 18 rpm 1207.25-2545.5 gears 1:40% 2:20%            0.85 km SE of S -> 0.85 km SE of S 0.02km
+23:12:44    14s arterial     v 31.0-78.0 mean 64 rpm 1896.0-4486.875 gears 2:35% 5:21% 3:21% 4:21% 0.85 km SE of S -> 0.68 km ESE of S 0.24km
+23:12:58     4s no ECU data  v None-None mean None rpm None-None gears                        0.67 km ESE of S -> 0.63 km ESE of S 0.06km
+23:13:02    12s arterial     v 46.0-73.0 mean 64 rpm 1104.25-2022.125 gears 5:75%                  0.62 km ESE of S -> 0.53 km E of S 0.19km
+23:13:14    98s city         v 9.0-42.5 mean 27 rpm 1066.25-3035.75 gears 3:38% 2:23% 1:13%      0.52 km E of S -> 0.51 km ENE of S 0.72km
+23:14:52    70s arterial     v 42.0-69.0 mean 56 rpm 1095.5-2899.0 gears 4:90%                  0.51 km E of S -> 1.11 km SSE of S 1.08km
+23:16:02    24s city         v 26.0-44.0 mean 36 rpm 1278.5-2071.375 gears 3:100%                 1.12 km SSE of S -> 1.04 km SSE of S 0.23km
+23:16:26     7s no ECU data  v None-None mean None rpm None-None gears                        1.03 km SSE of S -> 0.95 km SSE of S 0.09km
+23:16:33    20s arterial     v 46.0-59.0 mean 54 rpm 1119.25-2930.75 gears 4:60% 3:15% 5:10%      0.94 km SSE of S -> 0.74 km S of S 0.28km
+23:16:53    36s city         v 2.0-44.0 mean 22 rpm 735.25-2549.25 gears 2:22% 3:16% 1:11%      0.73 km S of S -> 0.71 km S of S 0.21km
+23:17:29    96s arterial     v 46.0-68.0 mean 55 rpm 1107.25-2976.0 gears 3:67% 4:22%            0.71 km S of S -> 1.67 km WSW of S 1.47km
+23:19:05   114s city         v 4.0-78.5 mean 33 rpm 799.0-4606.75 gears 3:37% 2:21%            1.67 km WSW of S -> 2.18 km W of S 1.03km
+23:20:59   144s interstate   v 81.0-107.0 mean 95 rpm 2210.25-4626.75 gears 5:93%                  2.17 km W of S -> 1.23 km N of S 3.77km
+23:23:23    23s arterial     v 44.0-79.0 mean 61 rpm 1052.0-2399.375 gears 5:69% 3:21%            1.24 km N of S -> 1.20 km NNE of S 0.37km
+23:23:46     1s no ECU data  v None-None mean None rpm None-None gears                        1.20 km NNE of S -> 1.20 km NNE of S 0.00km
+23:23:47    15s arterial     v 50.0-78.0 mean 68 rpm 1795.5-3736.75 gears 5:46% 3:40% 4:13%      1.20 km NNE of S -> 1.00 km NNE of S 0.27km
+23:24:02     1s no ECU data  v None-None mean None rpm None-None gears                        0.99 km NNE of S -> 0.99 km NNE of S 0.00km
+23:24:03     9s arterial     v 67.0-69.0 mean 68 rpm 1855.75-1928.0 gears 5:100%                 0.97 km NNE of S -> 0.85 km NE of S 0.15km
+23:24:12     1s no ECU data  v None-None mean None rpm None-None gears                        0.84 km NE of S -> 0.84 km NE of S 0.00km
+23:24:13    37s arterial     v 19.0-73.0 mean 59 rpm 1080.75-2448.5 gears 5:70% 2:10%            0.82 km NE of S -> 0.49 km E of S 0.59km
+23:24:50    53s city         v 17.0-49.0 mean 36 rpm 1116.0-2749.0 gears 4:58% 2:16%            0.49 km E of S -> at start point S 0.52km
+23:25:43    10s decel        v 4.0-22.0 mean 14 rpm 1246.25-1384.0 gears 1:10% 2:10%            at start point S -> at start point S 0.03km
+23:25:53    11s stop         v 0.0-0.0 mean 0.0 rpm 519.25-1232.875 gears                        at start point S -> at start point S 0.00km
+23:26:04     4s launch       v 4.0-5.0 mean 4 rpm 819.0-1031.0 gears                        at start point S -> at start point S 0.00km
+23:26:08     4s stop         v 0.0-0.0 mean 0.0 rpm 702.75-1129.0 gears                        at start point S -> at start point S 0.00km
+23:26:12     5s launch       v 3.0-5.0 mean 4 rpm 495.25-1283.625 gears                        at start point S -> at start point S 0.01km
+23:26:17    42s stop         v 0.0-3.0 mean 0 rpm 439.5-1339.25 gears                        at start point S -> at start point S 0.00km
+23:26:59     1s no ECU data  v None-None mean None rpm None-None gears                        at start point S -> at start point S 0.00km

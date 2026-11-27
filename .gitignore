@@ -12,3 +12,9 @@ packaging/windows/entry/
 docs/analysis/*/work-*/*.db*
 docs/analysis/*/work-*/venv/
 docs/analysis/*/work-*/*.pkl
+poke-runs/
+# GPS: positions and route shapes start at the owner's home
+docs/analysis/*/work-*/*.gpx
+docs/analysis/*/work-*/*.npz
+docs/analysis/*/work-*/*.npy
+docs/analysis/*/work-*/track_*.png
