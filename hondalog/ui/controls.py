@@ -61,7 +61,7 @@ class Button(QAbstractButton):
             if self.kind == "primary":
                 fill, ink, edge = T.accent, T.on_accent, T.accent
             elif self.isChecked() or self.isDown():
-                fill, ink, edge = T.fg, T.bg, T.fg
+                fill, ink, edge = T.accent, T.on_accent, T.accent
             else:
                 fill, ink, edge = T.panel, T.fg, T.rule
             paint.frame(p, r, 2, edge, fill)
@@ -166,9 +166,9 @@ class Segment(QWidget):
             p.drawText(r, Qt.AlignCenter, paint.elide(font, label, r.width() - 10))
         if on_cell is not None:             # drawn last: its border wins the overlap
             r, label = on_cell
-            p.fillRect(r, T.fg)
+            p.fillRect(r, T.accent)
             p.setFont(font)
-            p.setPen(T.bg)
+            p.setPen(T.on_accent)
             p.drawText(r, Qt.AlignCenter, paint.elide(font, label, r.width() - 10))
         p.end()
 

@@ -32,10 +32,15 @@ from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from hondalog.ui import scene3d, theme  # noqa: E402
+from hondalog.ui import main_window as mw  # noqa: E402
 from hondalog.ui.main_window import Shell  # noqa: E402
 from hondalog.ui.session import build_session  # noqa: E402
 
-NAMES = ("sensors", "drive", "map3d", "replay", "rawtools", "tune", "alarms")
+#: (screen id, file name): the eight tabs in key order, then Tune and the screens hosted in Power / Setup
+NAMES = ((mw.LIVE, "live"), (mw.DRIVE, "drive"), (mw.EVENTS, "events"), (mw.REPLAY, "replay"),
+         (mw.POWER, "power"), (mw.MAP, "gpsmap"), (mw.BYTES, "bytes"), (mw.SETUP, "setup"),
+         (mw.TUNE, "tune"), (mw.MAP3D, "map3d"), (mw.ALARMS, "alarms"), (mw.HANDHELD, "handheld"))
+THEMES = ("dracula", "darker")
 
 
 def main(out: Path) -> int:
@@ -82,9 +87,9 @@ def main(out: Path) -> int:
         image.save(str(path))
         saved.append(path.name)
 
-    for name in ("daylight", "night"):
+    for name in THEMES:
         theme.T.set(name)
-        for i, screen in enumerate(NAMES):
+        for i, screen in NAMES:
             win.show_screen(i)
             shot(f"{screen}-{name}")
             if screen == "map3d":
@@ -117,7 +122,7 @@ def extras(win, session, shot, settle, clock) -> None:
     for cid in other.data:                          # the same failure, 2.5 s later
         if cid != "fuel_pump":
             other.data[cid] = np.roll(other.data[cid], 25)
-    win.show_screen(3)
+    win.show_screen(mw.REPLAY)
     replay.set_overlay(other)
     replay.block.set_cursor(replay.forensics.loss[0].t)
     replay.toggle_cursor_b()
@@ -138,22 +143,22 @@ def extras(win, session, shot, settle, clock) -> None:
     rom.write_bytes(build_demo_rom())
     session.tables = win.tune.tm = tables
     win.tune.open_rom(rom)
-    win.show_screen(5)
+    win.show_screen(mw.TUNE)
     for _ in range(45):                             # 9 s of driving: a trail on the table and the surface
         clock[0] += 0.2
         settle(1)
     win.tune.grid.cur = win.tune.grid.anchor = (3, 4)
     win.tune.bump(3)
 
-    for name in ("daylight", "night"):
+    for name in THEMES:
         theme.T.set(name)
-        for index, screen in ((3, "replay-compare"), (4, "rawtools-rank"), (5, "tune-rom")):
+        for index, screen in ((mw.REPLAY, "replay-compare"), (mw.BYTES, "bytes-rank"), (mw.TUNE, "tune-rom")):
             win.show_screen(index)
             shot(f"{screen}-{name}")
 
 
 def map_shots(win, session, shot, settle) -> None:
-    """F8 on real drives: four around the Pearl loop, three stalls on one rough stretch."""
+    """F6 GPS map on real drives: four around the Pearl loop, three stalls on one rough stretch."""
     from datetime import datetime
 
     import fixture_tiles
@@ -185,7 +190,7 @@ def map_shots(win, session, shot, settle) -> None:
         win.map.canvas.finish_render()
         settle(3)
 
-    for name in ("daylight", "night"):
+    for name in THEMES:
         theme.T.set(name)
         win.map.set_mode("drive")
         win.map.move_cursor(win.replay.block.span[0] + 610.0)
@@ -196,12 +201,12 @@ def map_shots(win, session, shot, settle) -> None:
         tiles_in()
         shot(f"map-stalls-{name}")
     # no tiles at all (offline, nothing cached): the plain grid; the track draws anyway
-    theme.T.set("daylight")
+    theme.T.set("dracula")
     win.map.use_tiles(TileLayer(gt.TileSource(), online=False, root=TMP / "empty-cache"))
     win.map.set_mode("drive")
     win.map.move_cursor(win.replay.block.span[0] + 610.0)
     tiles_in()
-    shot("map-offline-daylight")
+    shot("map-offline-dracula")
 
 
 if __name__ == "__main__":

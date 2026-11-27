@@ -12,8 +12,11 @@ from . import paint
 from .controls import Button
 from .theme import T
 
-TABS = (("F1", "Sensors"), ("F2", "Drive"), ("F3", "Map 3D"), ("F4", "Replay"),
-        ("F5", "Raw tools"), ("F6", "Tune"), ("F7", "Alarms"), ("F8", "Map"), ("F10", "Handheld"))
+#: the eight screens, in the order of their keys (the Main artboard)
+TABS = (("F1", "Live"), ("F2", "Drive"), ("F3", "Events"), ("F4", "Replay"),
+        ("F5", "Power"), ("F6", "GPS map"), ("F7", "Bytes"), ("F8", "Setup"))
+#: shown after them only while a ROM is open (--rom): no key of its own
+TUNE_TAB = ("ROM", "Tune")
 
 
 def _mmss(seconds: float) -> str:
@@ -59,6 +62,24 @@ def stall_chip(st: ad.StallStatus) -> tuple:
     return ("", "off", "", "STALL CATCHER off", ())
 
 
+def cyd_chip(st) -> tuple:
+    """The CYD black box: link, its SD log, whether it runs this map."""
+    link = getattr(st, "link", "off")
+    if link == "off":
+        return ("cyd", "off", "", "CYD BLACK BOX off", ())
+    if link == "connecting":
+        return ("cyd", "half", "", "CYD BLACK BOX connecting", ())
+    if link == "lost":
+        return ("cyd", "x", "bad", "CYD BLACK BOX LOST", ())
+    words = {"usb": "USB", "relay": "RELAY", "kline": "K-LINE", "demo": "SIM"}
+    sd = {"rec": f"SD REC #{st.drive_no}" if st.drive_no else "SD REC", "ok": "SD idle",
+          "none": "NO SD"}.get(st.sd, "")
+    map_ = {True: "map ok", False: "MAP DIFFERS", None: ""}[st.map_ok]
+    bad = st.sd == "none" or st.map_ok is False
+    monos = tuple(x for x in (words.get(link, link.upper()), sd, map_) if x)
+    return ("cyd", "x" if bad else "ok", "caution" if bad else "", "CYD BLACK BOX", monos)
+
+
 def chip_width(chip: tuple) -> float:
     _, _, _, text, monos = chip
     w = 10 + 14 + 8 + paint.text_w(T.font(13, 700), text) + 10
@@ -97,15 +118,18 @@ def draw_chip(p: QPainter, x: float, y: float, chip: tuple, blink_on: bool = Tru
 
 
 class StatusBar(QWidget):
-    """Wordmark, chips (ECU, BLACK BOX, REC, STALL CATCHER), theme, MARK."""
+    """Wordmark, chips (ECU, REC, STALL CATCHER, CYD BLACK BOX; the separate
+    ESP32 black box only with ``show_bb``), theme, MARK."""
 
     connectionMenu = Signal(QPoint)
     recordClicked = Signal()
+    cydClicked = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, show_bb: bool = False):
         super().__init__(parent)
         self.setFixedHeight(44)
-        self.theme_btn = Button("DAYLIGHT", "F9", icon="half", height=36, parent=self)
+        self.show_bb = show_bb
+        self.theme_btn = Button(T.label, "F9", icon="half", height=36, parent=self)
         self.mark_btn = Button("MARK", "Space", kind="primary", height=36, parent=self)
         self.mark_btn.setMinimumWidth(150)
         self.theme_btn.clicked.connect(T.toggle)
@@ -115,7 +139,7 @@ class StatusBar(QWidget):
         self.retheme()
 
     def retheme(self) -> None:
-        self.theme_btn.set_text("NIGHT" if T.night else "DAYLIGHT")
+        self.theme_btn.set_text(T.label)
         self._place()
 
     def _place(self) -> None:
@@ -129,9 +153,10 @@ class StatusBar(QWidget):
 
     def sync(self, session, now: float) -> None:
         chips = (source_chip("ECU", session.ecu_status, "ecu"),
-                 source_chip("BLACK BOX", session.bb_status),
+                 *((source_chip("BLACK BOX", session.bb_status),) if self.show_bb else ()),
                  rec_chip(session.recording.active, session.recording.elapsed_s()),
-                 stall_chip(session.stall))
+                 stall_chip(session.stall),
+                 cyd_chip(getattr(session, "cyd", None)))
         blink = (now % 1.2) < 0.6
         if chips != self._chips or (blink != self._blink and session.recording.active):
             self._chips, self._blink = chips, blink
@@ -144,6 +169,8 @@ class StatusBar(QWidget):
                     self.connectionMenu.emit(self.mapToGlobal(rect.bottomLeft().toPoint()))
                 elif key == "rec":
                     self.recordClicked.emit()
+                elif key == "cyd":
+                    self.cydClicked.emit()
 
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
@@ -168,15 +195,24 @@ class StatusBar(QWidget):
 
 
 class TabBar(QWidget):
+    """The screen keys. The current one is filled with the accent."""
+
     picked = Signal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, tabs=TABS):
         super().__init__(parent)
         self.setFixedHeight(44)
+        self.tabs: tuple = tuple(tabs)
         self.current = 0
         self.info = ""
         self._rects: list[QRectF] = []
         self.setCursor(Qt.PointingHandCursor)
+
+    def set_tabs(self, tabs) -> None:
+        tabs = tuple(tabs)
+        if tabs != self.tabs:
+            self.tabs = tabs
+            self.update()
 
     def set_current(self, index: int) -> None:
         if index != self.current:
@@ -196,31 +232,29 @@ class TabBar(QWidget):
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         w = self.width()
-        p.fillRect(self.rect(), T.sunk)
+        p.fillRect(self.rect(), T.panel)
         font = T.font(15, 700)
-        x = 8.0
-        p.fillRect(QRectF(x, 0, 2, 42), T.rule)
-        x += 2
+        x = 0.0
         self._rects = []
-        for i, (key, name) in enumerate(TABS):
-            tw = 15 + paint.keycap_w(key) + 8 + paint.text_w(font, name) + 15
+        for i, (key, name) in enumerate(self.tabs):
+            tw = 14 + paint.keycap_w(key) + 8 + paint.text_w(font, name) + 14
             r = QRectF(x, 0, tw, 42)
             on = i == self.current
             if on:
-                p.fillRect(r, T.fg)
-            ink = T.bg if on else T.fg
+                p.fillRect(r, T.accent)
+            ink = T.on_accent if on else T.fg
             p.setPen(ink)
-            kw = paint.keycap(p, x + 15, 21, key, ink)
+            kw = paint.keycap(p, x + 14, 21, key, ink)
             p.setFont(font)
             p.setPen(ink)
-            p.drawText(QRectF(x + 15 + kw + 8, 0, tw, 42), Qt.AlignVCenter | Qt.AlignLeft, name)
+            p.drawText(QRectF(x + 14 + kw + 8, 0, tw, 42), Qt.AlignVCenter | Qt.AlignLeft, name)
             x += tw
-            p.fillRect(QRectF(x, 0, 2, 42), T.rule)
-            x += 2
+            p.fillRect(QRectF(x, 0, 1, 42), T.line)
+            x += 1
             self._rects.append(r)
         mono = T.font(13, 500, mono=True)
         p.setFont(mono)
-        p.setPen(T.fg)
+        p.setPen(T.fg2)
         p.drawText(QRectF(x + 8, 0, w - x - 16, 42), Qt.AlignVCenter | Qt.AlignRight,
                    paint.elide(mono, self.info, w - x - 16))
         p.fillRect(QRectF(0, 42, w, 2), T.rule)
@@ -285,7 +319,7 @@ def paint_banner(p: QPainter, r: QRectF, title: str, cause: str, owner=None) -> 
                paint.elide(cfont, cause, open_.x() - x - 10))
     # "Open in replay": panel ground, so it is the obvious next step
     paint.frame(p, open_, 2, T.panel, T.panel)
-    tone = T.fg if T.night else T.alarm
+    tone = T.alarm
     p.setFont(bfont)
     p.setPen(tone)
     p.drawText(QRectF(open_.x() + 14, open_.y(), ow, 36), Qt.AlignVCenter | Qt.AlignLeft,
@@ -306,7 +340,7 @@ def paint_banner(p: QPainter, r: QRectF, title: str, cause: str, owner=None) -> 
 class AlarmStrip(QWidget):
     """Bottom 32 px: the worst active alarm and warning, or 'No active alarms'."""
 
-    HINTS = "Space mark · F1–F8, F10 screens · F9 theme · Esc acknowledge"
+    HINTS = "Space mark · F1–F8 screens · F9 theme · Esc acknowledge"
 
     def __init__(self, parent=None):
         super().__init__(parent)

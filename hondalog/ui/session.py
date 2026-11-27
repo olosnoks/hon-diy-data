@@ -21,9 +21,71 @@ from .bus import ChannelBus
 ECU_ORDER = ("rpm", "vss", "map", "tps", "inj", "ign", "o2", "o2_post", "stft", "ltft", "ect", "iat",
              "baro", "batt", "alt_fr", "eld", "iacv", "knock", "ign_limit", "closed_loop",
              "vtec", "ac_sw", "fan", "fuel_pump", "mil")
-DRIVE_DEFAULT = ("rpm", "vss", "ect", "batt", "fpv", "stft")
+DRIVE_DEFAULT = ("rpm", "vss", "ect", "batt", "map", "stft")      # ECU only: the ESP32 black box is hidden
 #: math channels that OBD2-only mode fills straight from a PID (load: PID 04)
 OBD2_MATH = ("load",)
+
+
+@dataclass(frozen=True)
+class CydState:
+    """The CYD handheld, which is the black box: its link, its own SD log and
+    whether it runs this laptop's address map (the status bar's CYD chip)."""
+    link: str = "off"           # off / connecting / usb (next to the laptop cable) / relay / kline (it owns the K-line) / lost / demo
+    sd: str = ""                # rec / ok / none / "" (not known)
+    drive_no: int = 0
+    map_ok: bool | None = None  # None: not known
+    detail: str = ""
+
+
+def cyd_state(ecu, demo: bool = False) -> CydState:
+    """Read the handheld's state off the ECU source without importing a
+    backend (every attribute through getattr: the demo and older sources
+    have none of them)."""
+    if demo:
+        return CydState("demo", "rec", 41, True, "simulated")
+    own = getattr(ecu, "cyd_state", None)
+    if callable(own):
+        try:
+            return own()
+        except Exception:               # a source's own report must never stop the frame
+            pass
+    try:
+        poller = getattr(ecu, "poller", None)
+        if poller is not None and getattr(ecu, "is_cyd", False):
+            hello = getattr(poller, "hello", None)
+            if hello is None:
+                return CydState("connecting")
+            return CydState("kline", *_sd(getattr(poller, "device", None)),
+                            map_ok=not getattr(poller, "map_mismatch", False),
+                            detail=f"{hello.device} fw {hello.fw}")
+        live = getattr(ecu, "live", None)
+        companion = getattr(live, "handheld", None) if poller is not None else None
+        if companion is None:
+            return CydState()
+        hello = getattr(companion, "hello", None)
+        if hello is None:
+            lost = getattr(companion, "state", "") == "lost" or bool(getattr(companion, "last_error", ""))
+            return CydState("lost" if lost else "connecting")
+        relay = getattr(live, "relay", None)
+        status = getattr(relay, "status", "") if relay is not None else ""
+        from ..handheld.relay import MAP_DIFFERS
+        map_ok = (False if status == MAP_DIFFERS
+                  else hello.map_hash == ecu.amap.version_hash if hasattr(ecu, "amap") else None)
+        link = "relay" if relay is not None and getattr(relay, "active", False) else "usb"
+        return CydState(link, *_sd(getattr(companion, "device", None)), map_ok=map_ok,
+                        detail=f"{hello.device} fw {hello.fw}")
+    except Exception:
+        return CydState()
+
+
+def _sd(device) -> tuple[str, int]:
+    if not isinstance(device, dict) or not device:
+        return "", 0
+    from ..handheld import serial_proto as P
+    flags = device.get("flags", 0)
+    if flags & P.ST_RECORDING:
+        return "rec", int(device.get("drive_no", 0))
+    return ("ok" if flags & P.ST_SD_OK else "none"), 0
 
 
 @dataclass
@@ -52,6 +114,9 @@ class Session:
         self.ecu_status = ad.SourceStatus()
         self.bb_status = ad.SourceStatus()
         self.stall = ad.StallStatus()
+        self.cyd = CydState()
+        #: the ROM image the Tune screen edits (None: no ROM, Tune stays hidden)
+        self.rom = None
         self.banner: ad.StallCapture | None = None      # stall waiting to be dismissed
         self.banner_cause = ""
         self._status_t = -1.0
@@ -213,6 +278,7 @@ class Session:
             self._status_t = now
             self.ecu_status = self.ecu.status()
             self.bb_status = self.blackbox.status()
+            self.cyd = cyd_state(self.ecu, self.demo)
             self._mark_obd2(self.ecu_status.link == "OBD2")
             self.stall = self.recording.stall()
             if self.banner is not None and self.stall.state != "saving":
@@ -273,6 +339,7 @@ def build_session(demo: bool = False, log_dir=None, writable_tables: bool = Fals
                           be.DemoMapper(ecu), be.DemoTableModel(writable=True), demo=True,
                           extra_sources=[be.DemoGps(demo_clock)])
         session.logs = be.CsvLogReader(_lookup(session), log_dir)
+        session.rom = rom or None           # the demo keeps its sample tables; the Tune tab shows
         return session
 
     from . import wired
@@ -285,6 +352,7 @@ def build_session(demo: bool = False, log_dir=None, writable_tables: bool = Fals
                       wired.LiveRecording(ecu, log_dir), None, wired.LogHistogramMap(tables),
                       wired.MappingSession(ecu), tables, extra_sources=[wired.MathSource(ecu), wired.LaptopGpsSource(ecu)])
     session.logs = wired.DriveReader(_lookup(session), log_dir)
+    session.rom = rom or None
     return session
 
 

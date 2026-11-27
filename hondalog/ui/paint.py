@@ -219,11 +219,11 @@ def frame(p: QPainter, rect: QRectF, width: int = 2, color: QColor | None = None
 
 def track(p: QPainter, rect: QRectF, frac: float, fill: QColor | None = None,
           outline: QColor | None = None, ground: QColor | None = None) -> None:
-    """A linear bar: sunk track, 2 px outline, solid fill from the left."""
+    """A linear bar: sunk track, 2 px outline, solid fill (accent unless told) from the left."""
     p.fillRect(rect, ground if ground is not None else T.sunk)
     if frac > 0:
         p.fillRect(QRectF(rect.x(), rect.y(), rect.width() * min(1.0, frac), rect.height()),
-                   fill if fill is not None else T.fg)
+                   fill if fill is not None else T.accent)
     p.setPen(T.cpen(outline if outline is not None else T.rule2, 2))
     p.setBrush(Qt.NoBrush)
     p.drawRect(rect.adjusted(1, 1, -1, -1))

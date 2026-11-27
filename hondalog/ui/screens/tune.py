@@ -67,6 +67,8 @@ class TableGrid(QWidget):
         nr, nc = v.shape
         self._heat = [[QColor(int(rgb[r, c, 0]), int(rgb[r, c, 1]), int(rgb[r, c, 2]))
                        for c in range(nc)] for r in range(nr)]
+        # the heat runs dark to bright: light text on the dark cells, dark on the bright
+        self._ink = [[T.heat_ink(col) for col in row] for row in self._heat]
         self._text = [[f"{v[r, c]:.{self.decimals}f}".replace("-", "−")
                        for c in range(nc)] for r in range(nr)]
         self._changed = np.abs(v - self.base) > 1e-6
@@ -155,9 +157,10 @@ class TableGrid(QWidget):
         trail = self.trail if self.trail is not None and self.trail.shape == (nr, nc) else None
         p.setFont(cell)
         for r in range(r_lo, r_hi + 1):
-            heat, text, changed = self._heat[r], self._text[r], self._changed[r]
+            heat, text, changed, inks = self._heat[r], self._text[r], self._changed[r], self._ink[r]
             for c in range(c_lo, c_hi + 1):
                 rect = self._rect(r, c)
+                ink = inks[c]
                 p.fillRect(rect, heat[c])
                 if trail is not None and trail[r, c] > 0:
                     # the trail: a bar along the bottom that shortens as the visit ages
@@ -181,11 +184,11 @@ class TableGrid(QWidget):
         p.fillRect(QRectF(HEAD_W, 0, 2, self.height()), T.rule)
         p.fillRect(QRectF(0, HEAD_H, self.width(), 2), T.rule)
         if self.live is not None and self.live[0] < nr and self.live[1] < nc:
-            p.setPen(T.cpen(T.on_heat, 3))
+            p.setPen(T.cpen(self._ink[self.live[0]][self.live[1]], 3))
             p.drawRect(self._rect(*self.live).adjusted(1.5, 1.5, -1.5, -1.5))
         (r0, c0), (r1, c1) = self.anchor, self.cur
         box = self._rect(min(r0, r1), min(c0, c1)).united(self._rect(max(r0, r1), max(c0, c1)))
-        p.setPen(T.cpen(T.accent if not T.night else T.accent, 3, Qt.FlatCap, dash=(2.0, 1.4)))
+        p.setPen(T.cpen(T.accent, 3, Qt.FlatCap, dash=(2.0, 1.4)))
         p.drawRect(box.adjusted(1.5, 1.5, -1.5, -1.5))
         paint.frame(p, QRectF(self.rect()), 2, T.rule)
         p.end()

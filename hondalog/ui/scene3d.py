@@ -922,9 +922,9 @@ class _FlatView(QWidget):
                 p.fillRect(r, QColor(int(c[0]), int(c[1]), int(c[2])))
                 if known[j, i] and model.mode != "stall" and cw >= 38:
                     lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
-                    p.setPen(QColor("#000000") if lum > 140 else QColor("#FFFFFF"))
+                    p.setPen(T.bg if lum > 140 else T.fg)
                     p.drawText(r, Qt.AlignCenter, f"{values[j, i]:.{decimals}f}")
-        p.setPen(T.pen("fg", 2))
+        p.setPen(T.pen("bg", 2))          # the cells are separated by the ground, as in the Tune table
         for i in range(nx + 1):
             x = g.x() + i * cw
             p.drawLine(QPointF(x, g.y()), QPointF(x, g.bottom()))

@@ -242,11 +242,11 @@ class StallList(Card):
             r = QRectF(x - 4, y + k * self.ROW, w + 8, self.ROW - 2)
             on = i == self.selected
             if on:
-                p.fillRect(r, T.fg)
+                p.fillRect(r, T.accent)
             elif k % 2:
                 p.fillRect(r, T.sunk)
             draw_pin(p, kind, r.x() + 16, r.center().y(), size=18)
-            ink = T.bg if on else T.fg
+            ink = T.on_accent if on else T.fg
             p.setFont(mono)
             p.setPen(ink)
             p.drawText(QRectF(r.x() + 34, r.y(), 150, r.height()), Qt.AlignVCenter | Qt.AlignLeft, when)

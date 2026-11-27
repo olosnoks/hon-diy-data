@@ -10,15 +10,15 @@ import sys
 from . import __version__
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="hondalog", description="Honda K-line data logger")
     ap.add_argument("--port", help="serial port, e.g. /dev/hondalog, /tmp/hondalog-sim or sim:")
     ap.add_argument("--connect", action="store_true", help="connect on start")
     ap.add_argument("--open", metavar="DRIVE", help="open a drive or capture by name (see hondalog-log "
                                                     "list), a log file (.csv .msl .mlg) or a black box "
                                                     "capture (.bbx) in the replay screen")
-    ap.add_argument("--bb", metavar="PORT", help="black box port (default: /dev/hondalog-bb if "
-                                                 "present; the simulator next to a simulated ECU)")
+    ap.add_argument("--bb", metavar="PORT", help="the separate ESP32 black box: its port, and show it in "
+                                                 "the app (hidden without --bb: the CYD is the black box)")
     ap.add_argument("--handheld", metavar="PORT|auto|off",
                     help="the handheld (CYD) on USB next to the laptop's own K-line cable: its GPS "
                          "beats the laptop's location. auto (default) finds a CH340 1a86:7523 "
@@ -32,14 +32,19 @@ def main(argv=None) -> int:
                     help="ROM definition for --rom (.toml or TunerPro .xdf)")
     ap.add_argument("--demo", action="store_true",
                     help="simulated car and black box, no cable needed (nothing is recorded)")
-    ap.add_argument("--theme", choices=("daylight", "night"), help="start in this theme")
+    ap.add_argument("--theme", choices=("dracula", "darker", "daylight", "night"), metavar="dracula|darker",
+                    help="start in this theme (F9 toggles; daylight / night are old names for them)")
     ap.add_argument("--profile", action="store_true",
                     help="show frame time, CPU and latency in the bottom bar and print a "
                          "summary on exit (run this on the T430)")
     ap.add_argument("--no-gl", action="store_true",
                     help="never create an OpenGL view: Map 3D and Tune use the 2D heat map")
     ap.add_argument("--version", action="version", version=f"hondalog {__version__}")
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
 
     if args.no_gl:
         import os
@@ -63,7 +68,7 @@ def main(argv=None) -> int:
     problem = getattr(session.tables, "problem", "")
     if problem:
         print(f"hondalog: {problem}; showing the sample tables", file=sys.stderr)
-    win = Shell(session, profile=args.profile)
+    win = Shell(session, profile=args.profile, show_bb=args.bb is not None)
     if args.theme:
         theme.T.set(args.theme)
     screen = app.primaryScreen().availableGeometry()

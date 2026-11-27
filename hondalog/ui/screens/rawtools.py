@@ -1,8 +1,14 @@
-"""F5, raw tools and the memory mapper (HANDOFF 5.5): hex grid with change
-heat, byte inspector, hex console, the host for the guided wizard, and the
-"Rank addresses" panel: W3's correlation finder on the sweep history (which
-addresses followed a channel, or moved steadily one way), with the result
-assigned to a channel through the map editor."""
+"""F7, Bytes: the raw tools and the address map together.
+
+``BytesScreen`` is the tab: four pages under a tab row.
+
+- **Memory**: ``RawScreen``, the memory scanner (HANDOFF 5.5): hex grid with
+  change heat, byte inspector, hex console, the host for the guided wizard,
+  and the "Rank addresses" panel: W3's correlation finder on the sweep
+  history (which addresses followed a channel, or moved steadily one way),
+  with the result assigned to a channel through the map editor.
+- **Address map**, **Unknown bytes** and **Poke test**: ``bytesmap.py``.
+"""
 
 from __future__ import annotations
 
@@ -31,7 +37,15 @@ class HexGrid(QWidget):
         self.mapper = mapper
         self.sel = 0x14
         self.guess = np.zeros(256, dtype=bool)      # in the map, not verified
+        self.row_h = ROW_H
         self.setFixedHeight(COL_HEAD + 16 * ROW_H + 4)
+
+    def set_row_h(self, row_h: int) -> None:
+        """Rows shrink a little when the screen is short (the Bytes tab row takes room)."""
+        if row_h != self.row_h:
+            self.row_h = row_h
+            self.setFixedHeight(COL_HEAD + 16 * row_h + 4)
+            self.update()
         self.setCursor(Qt.PointingHandCursor)
 
     def cell_w(self) -> float:
@@ -46,7 +60,7 @@ class HexGrid(QWidget):
 
     def mousePressEvent(self, event) -> None:
         col = int((event.position().x() - ROW_HEAD - 2) // self.cell_w())
-        row = int((event.position().y() - COL_HEAD - 2) // ROW_H)
+        row = int((event.position().y() - COL_HEAD - 2) // self.row_h)
         if 0 <= col < 16 and 0 <= row < 16:
             self.select(row * 16 + col)
 
@@ -56,6 +70,7 @@ class HexGrid(QWidget):
         w = self.width()
         p.fillRect(self.rect(), T.panel)
         cw = self.cell_w()
+        rh = self.row_h
         x0, y0 = ROW_HEAD + 2.0, COL_HEAD + 2.0
         head = T.font(13, 700, mono=True)
         p.setFont(head)
@@ -63,15 +78,15 @@ class HexGrid(QWidget):
         for c in range(16):
             p.drawText(QRectF(x0 + c * cw, 2, cw, COL_HEAD), Qt.AlignCenter, f"x{c:X}")
         for r in range(16):
-            p.drawText(QRectF(2, y0 + r * ROW_H, ROW_HEAD - 6, ROW_H),
+            p.drawText(QRectF(2, y0 + r * rh, ROW_HEAD - 6, rh),
                        Qt.AlignVCenter | Qt.AlignRight, f"0x{r:X}0")
         static, old, now = (T.font(14, 500, mono=True), T.font(14, 700, mono=True),
                             T.font(14, 800, mono=True))
         cur, fresh, changes, guess = m.cur, m.fresh, m.changes, self.guess
         for a in range(256):
             r, c = divmod(a, 16)
-            rect = QRectF(round(x0 + c * cw), y0 + r * ROW_H,
-                          round(x0 + (c + 1) * cw) - round(x0 + c * cw), ROW_H)
+            rect = QRectF(round(x0 + c * cw), y0 + r * rh,
+                          round(x0 + (c + 1) * cw) - round(x0 + c * cw), rh)
             v = int(cur[a])
             if fresh[a]:
                 p.fillRect(rect, T.warn)
@@ -94,12 +109,12 @@ class HexGrid(QWidget):
         p.setPen(T.pen("sunk", 2))
         for c in range(17):
             x = round(x0 + c * cw)
-            p.drawLine(QPointF(x, y0), QPointF(x, y0 + 16 * ROW_H))
+            p.drawLine(QPointF(x, y0), QPointF(x, y0 + 16 * rh))
         for r in range(17):
-            y = y0 + r * ROW_H
+            y = y0 + r * rh
             p.drawLine(QPointF(x0, y), QPointF(w - 2, y))
         r, c = divmod(self.sel, 16)
-        rect = QRectF(round(x0 + c * cw), y0 + r * ROW_H, cw, ROW_H)
+        rect = QRectF(round(x0 + c * cw), y0 + r * rh, cw, rh)
         p.setPen(T.cpen(T.fg, 3))
         p.setBrush(Qt.NoBrush)
         p.drawRect(rect.adjusted(1.5, 1.5, -1.5, -1.5))
@@ -779,6 +794,8 @@ class RawScreen(QWidget):
         self._status_x = x
         ew = self.export_btn.sizeHint().width()
         self.export_btn.setGeometry(8 + left - ew, 8, ew, 44)
+        # the hex rows give way first when the screen is short (the Bytes tab row is above it)
+        self.grid.set_row_h(max(18, min(ROW_H, int((h - 58 - 38 - 96 - COL_HEAD - 4) // 16))))
         self.grid.setGeometry(8, 58, left, self.grid.height())
         gy = 58 + self.grid.height()
         self._legend_y = gy + 4
@@ -841,4 +858,100 @@ class RawScreen(QWidget):
             p.setPen(T.fg)
             p.drawText(QRectF(x + 42, y, 300, 26), Qt.AlignVCenter | Qt.AlignLeft, text)
             x += 42 + paint.text_w(body, text) + 18
+        p.end()
+
+
+# ---- F7 Bytes: the tab that holds the memory scanner and the map tools ------
+
+BYTES_PAGES = (("memory", "Memory · scanner"), ("map", "Address map"), ("unknown", "Unknown bytes"),
+               ("poke", "Poke test"))
+
+
+class BytesScreen(QWidget):
+    """F7: the memory scanner (``self.raw``), the address-map editor, the
+    unknown-bytes list and the poke-test launcher, one page at a time. Tab
+    moves to the next page; the memory page keeps all of its keys."""
+
+    message = Signal(str)
+
+    def __init__(self, session, settings=None, parent=None):
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QStackedWidget
+
+        from .bytesmap import MapPage, PokePage, UnknownPage
+        from .common import TabStrip, restyle
+        super().__init__(parent)
+        self._restyle = restyle
+        self.setObjectName("bytesroot")
+        self.session = session
+        self.settings = settings if settings is not None else QSettings("hondalog", "hondalog")
+        self.tabs = TabStrip(BYTES_PAGES, "memory", self)
+        self.stack = QStackedWidget(self)
+        self.raw = RawScreen(session)
+        self.map_page = MapPage(session)
+        self.unknown = UnknownPage(session, self.settings)
+        self.poke = PokePage(session, self.settings)
+        self.pages = {"memory": self.raw, "map": self.map_page, "unknown": self.unknown, "poke": self.poke}
+        for page in self.pages.values():
+            self.stack.addWidget(page)
+        for page in (self.map_page, self.poke):
+            page.message.connect(self.message)
+        self.map_page.saved.connect(self._map_saved)
+        self.unknown.rankRequested.connect(self.rank_byte)
+        self.tabs.picked.connect(self.show_page)
+        self.page = "memory"
+        self.retheme()
+
+    def show_page(self, name: str) -> None:
+        if name not in self.pages:
+            return
+        self.page = name
+        self.tabs.set_current(name)
+        self.stack.setCurrentWidget(self.pages[name])
+        if name == "unknown":
+            self.unknown.fill()                     # "in the map as" may have changed
+
+    def rank_byte(self, addr: int) -> None:
+        """From the unknown list: the memory page at that byte, the correlation finder open."""
+        self.show_page("memory")
+        self.raw.grid.select(addr)
+        self.raw.inspector.set_addr(addr)
+        self.raw.show_rank(True)
+
+    def _map_saved(self) -> None:
+        self.raw._map_version = None                # the grid's "in the map" marks again
+        rank = self.raw.rank
+        if rank is not None:
+            rank.reload()
+
+    def refresh(self, now: float) -> None:
+        if self.page == "memory":
+            self.raw.refresh(now)
+
+    def retheme(self) -> None:
+        self._restyle(self, "bytesroot")
+        self.raw.retheme()
+        self.update()
+
+    def key(self, event) -> bool:
+        if event.key() == Qt.Key_Tab:
+            self.tabs.step(1)
+            return True
+        if self.page == "memory":
+            return bool(self.raw.key(event))
+        return False
+
+    def shutdown(self) -> None:
+        self.poke.shutdown()
+
+    def resizeEvent(self, _event) -> None:
+        from .common import TAB_H
+        w, h = self.width(), self.height()
+        self.tabs.setGeometry(8, 8, w - 16, TAB_H)
+        top = 8 + TAB_H + 6
+        self.stack.setGeometry(0, top, w, h - top)
+
+    def paintEvent(self, _event) -> None:
+        p = QPainter(self)
+        p.fillRect(self.rect(), T.bg)
         p.end()

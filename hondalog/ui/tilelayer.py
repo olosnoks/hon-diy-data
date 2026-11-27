@@ -4,10 +4,10 @@ The fetcher's worker threads decode each PNG and make both themed versions
 of it there (QImage is safe off the GUI thread), so the UI thread only turns
 an image into a pixmap:
 
-- Daylight: the tile washed 30 % toward white, so the coloured track, the
-  pins and the black casing stand out of a busy street map.
-- Night: inverted, hue turned back (water stays blue-ish, parks green-ish)
-  and dimmed to about 60 %, so the map does not glare in a dark car.
+- Dracula: inverted, hue turned back (water stays blue-ish, parks green-ish),
+  dimmed and tinted toward the theme's ground, so the map is never a white
+  sheet and the coloured track and pins stand out.
+- Darker: the same, dimmed further for the deeper ground.
 
 Settings (QSettings, the Map tiles menu): ``map/tile_url``,
 ``map/tile_attribution``, ``map/online`` (download tiles at all),
@@ -36,8 +36,9 @@ PARENT_LEVELS = 5
 _HUE180 = np.array([[-0.574, 1.430, 0.144],
                     [0.426, 0.430, 0.144],
                     [0.426, 1.430, -0.856]], dtype=np.float32)
-NIGHT_GAIN, NIGHT_LIFT = 0.58, 8.0
-DAY_WASH = 0.30
+#: (gain, lift as R, G, B) per theme: the lift is about the theme's ground colour
+THEMED = {"dracula": (0.62, (30.0, 31.0, 42.0)), "darker": (0.52, (16.0, 17.0, 24.0))}
+THEME_NAMES = tuple(THEMED)
 
 
 def _pixels(img: QImage) -> np.ndarray:
@@ -54,15 +55,15 @@ def _from_pixels(bgra: np.ndarray) -> QImage:
 
 
 def themed(img: QImage) -> dict[str, QImage]:
-    """{"daylight": washed, "night": inverted and dimmed} of one tile."""
+    """{"dracula": ..., "darker": ...}: the tile inverted, hue turned back and
+    dimmed onto the theme's ground (never a light map)."""
     rgb32 = img.convertToFormat(QImage.Format_RGB32)
     px = _pixels(rgb32).astype(np.float32)
     rgb = px[..., 2::-1]                                    # R, G, B
-    day = rgb * (1.0 - DAY_WASH) + 255.0 * DAY_WASH
-    night = (255.0 - rgb) @ _HUE180.T
-    night = np.clip(night, 0.0, 255.0) * NIGHT_GAIN + NIGHT_LIFT
+    inv = np.clip((255.0 - rgb) @ _HUE180.T, 0.0, 255.0)
     out = {}
-    for name, colour in (("daylight", day), ("night", night)):
+    for name, (gain, lift) in THEMED.items():
+        colour = inv * gain + np.array(lift, dtype=np.float32)
         bgra = np.empty(px.shape, dtype=np.uint8)
         bgra[..., 2::-1] = np.clip(colour, 0.0, 255.0).astype(np.uint8)
         bgra[..., 3] = 255
@@ -93,7 +94,7 @@ class TileLayer:
         self._own_get = get is not None
         self.fetcher = gt.TileFetcher(self.cache, decode=decode, get=get,
                                       online=online and (self._own_get or not env_offline()))
-        self._raw: collections.OrderedDict = collections.OrderedDict()     # key -> {"daylight": QImage, ...}
+        self._raw: collections.OrderedDict = collections.OrderedDict()     # key -> {"dracula": QImage, ...}
         self._pix: collections.OrderedDict = collections.OrderedDict()     # (key, theme) -> QPixmap
         self._missing: set = set()
         self.arrived = 0                    # tiles that came in (disk or network)
@@ -130,12 +131,12 @@ class TileLayer:
             self._missing.discard(res.key)
             self._raw[res.key] = res.image
             self._raw.move_to_end(res.key)
-            for theme in ("daylight", "night"):
+            for theme in THEME_NAMES:
                 self._pix.pop((res.key, theme), None)
             while len(self._raw) > RAW_KEEP:
                 old, _ = self._raw.popitem(last=False)
                 self.fetcher.forget(old)
-                for theme in ("daylight", "night"):
+                for theme in THEME_NAMES:
                     self._pix.pop((old, theme), None)
         return changed
 
@@ -154,7 +155,7 @@ class TileLayer:
         if pair is None:
             return None
         self._raw.move_to_end(key)
-        pm = QPixmap.fromImage(pair[theme])
+        pm = QPixmap.fromImage(pair.get(theme) or pair[THEME_NAMES[0]])
         self._pix[(key, theme)] = pm
         while len(self._pix) > PIX_KEEP:
             self._pix.popitem(last=False)

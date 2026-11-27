@@ -1,5 +1,7 @@
-"""Replay drawn from hondalog.analysis.ReplaySession: envelopes, two cursors,
-zoom and pan, event jumps, a second drive laid over the first."""
+"""F4 Replay drawn from hondalog.analysis.ReplaySession: envelopes, two cursors,
+zoom and pan, event jumps, a second drive laid over the first; the playback
+transport, the GPS pane, the g-g plot, the pull, the calculated readouts and
+every sensor at the cursor."""
 
 from datetime import datetime
 
@@ -12,11 +14,11 @@ from PySide6.QtTest import QTest
 from conftest import spin
 from hondalog.analysis import ReplaySession
 from hondalog.data import Column, new_drive
-from hondalog.ui import adapters as ad
 from hondalog.ui import main_window as mw
 from hondalog.ui import wired
 from hondalog.ui.backends import demo_stall_view
-from hondalog.ui.replaymodel import ReplayModel
+from hondalog.ui.replaymodel import (DEMO_ORIGIN, ReplayModel, analyse, analysis_channels, demo_drive_view,
+                                     view_epoch)
 
 
 def make_drives(tmp_path):
@@ -135,6 +137,40 @@ def test_a_view_without_a_log_gets_a_session_of_its_own():
     assert not reduced and len(x) == 401 and model.readouts(["fpv"])["fpv"].value < 14
 
 
+def test_calculated_channels_and_events_join_the_model():
+    view = demo_drive_view()
+    lat = view.data["gps_lat"]
+    assert abs(float(np.mean(lat)) - DEMO_ORIGIN[0]) < 0.05        # laid out around open ocean, not a road
+    assert view_epoch(view) == pytest.approx(datetime(2026, 11, 26, 23, 0).timestamp())
+    channels = analysis_channels(view)
+    assert set(channels) >= {"rpm", "vss", "tps", "gps_heading"}
+    d, found = analyse(view)
+    kinds = [e.kind for e in found]
+    assert kinds == ["near_stall", "knock", "vtec", "dropout", "harsh_brake", "mark", "key_off"]
+    near = found[0]
+    assert near.value == pytest.approx(460, abs=15) and near.verdict.startswith("throttle 0.")
+    assert d.at(38.0)["gear"] == 2 and d.at(38.0)["power"] > 30
+
+    model = ReplayModel(view)
+    model.set_derived("lat_g", *d.series("lat_g"))
+    assert model.has("lat_g") and not model.has("nope")
+    x, y, reduced = model.trace("lat_g", 400)
+    assert len(x) and np.nanmax(np.abs(y)) > 0.1
+    assert model.overlay_trace("lat_g", 400) is None
+    model.set_cursor(50.0)
+    model.set_cursor(10.0, "b")
+    row = model.readouts(["lat_g", "rpm"])
+    assert row["lat_g"].value == pytest.approx(model.derived_at("lat_g", 50.0))
+    assert row["lat_g"].stats.a == pytest.approx(row["lat_g"].value) and "rpm" in row
+    model.clear_cursor_b()
+    model.set_events(found)
+    model.set_cursor(0.0)
+    seen = []
+    while (t := model.jump(+1)) is not None:
+        seen.append(round(t, 1))
+    assert seen == [round(e.t, 1) for e in found]           # only the drive's events, in order
+
+
 # ---- the screen ----
 
 def key(win, k, mods=Qt.NoModifier, text=""):
@@ -158,6 +194,8 @@ def test_lanes_are_drawn_from_the_replay_session(shell, app, tmp_path):
     shell.show_screen(mw.REPLAY)
     r, b = shell.replay, shell.replay.block
     assert r.open(refs[0]) and r.model is not None and r.model.session is r.view.replay
+    # what the view lacks of rpm / speed / throttle / MAP / lateral g comes from the black box
+    assert b.lane_ids() == ["rpm", "fpv", "bbatt", "tach"]
     assert (b.t0, b.t1) == pytest.approx(r.model.span) and b.span == pytest.approx((0.0, 50.0), abs=0.1)
     spin(app, shell)
     fpv = lane(b, "fpv")
@@ -167,6 +205,7 @@ def test_lanes_are_drawn_from_the_replay_session(shell, app, tmp_path):
     before = b.traces
     b.set_cursor(21.0)                                                 # moving the cursor draws nothing anew
     assert b.traces == before and fpv.value == "13.60" and lane(b, "tach").value == "27"
+    assert r._cursor_text == "07:12:21.0"                              # the wall clock of the drive
     key(shell, 0, text="+")                                            # zooming does: a new envelope
     assert b.traces == before + 1 and b.t1 - b.t0 == pytest.approx(25.0, abs=0.1)
     assert (b.t0, b.t1) == pytest.approx(r.model.window) and b.t0 <= b.cursor <= b.t1
@@ -179,78 +218,159 @@ def test_lanes_are_drawn_from_the_replay_session(shell, app, tmp_path):
     assert (b.t0, b.t1) == pytest.approx(b.span)
 
     # the wheel zooms around the pointer, Shift + wheel pans, a right drag pans
-    def wheel(dy, mods=Qt.NoModifier, x=407.0):
+    x0 = b.plot_w() * 0.8
+
+    def wheel(dy, mods=Qt.NoModifier, x=x0):
         ev = QWheelEvent(QPointF(x, 100), QPointF(x, 100), QPoint(0, 0), QPoint(0, dy), Qt.NoButton, mods,
                          Qt.NoScrollPhase, False)
         b.overlay.wheelEvent(ev)
-    at = b.t_of(407.0)
+    at = b.t_of(x0)
     wheel(120)
-    assert b.t1 - b.t0 == pytest.approx(40.0, abs=0.1) and b.t_of(407.0) == pytest.approx(at, abs=0.05)
+    assert b.t1 - b.t0 == pytest.approx(40.0, abs=0.1) and b.t_of(x0) == pytest.approx(at, abs=0.05)
     t0 = b.t0
     wheel(-120, Qt.ShiftModifier)
     assert b.t0 > t0 and b.t1 - b.t0 == pytest.approx(40.0, abs=0.1)
     t0 = b.t0
-    QTest.mousePress(b.overlay, Qt.RightButton, Qt.NoModifier, QPoint(400, 100))
-    QTest.mouseMove(b.overlay, QPoint(300, 100))
-    # QTest does not carry button state on a move: drive the handler the way Qt would
+    QTest.mousePress(b.overlay, Qt.RightButton, Qt.NoModifier, QPoint(300, 100))
     from PySide6.QtGui import QMouseEvent
     from PySide6.QtCore import QEvent
-    b.overlay.mouseMoveEvent(QMouseEvent(QEvent.MouseMove, QPointF(300, 100), QPointF(300, 100), Qt.NoButton,
+    b.overlay.mouseMoveEvent(QMouseEvent(QEvent.MouseMove, QPointF(200, 100), QPointF(200, 100), Qt.NoButton,
                                          Qt.RightButton, Qt.NoModifier))
     assert b.t0 == pytest.approx(min(t0 + 100 / b.plot_w() * 40.0, 10.0), abs=0.1)
-    QTest.mouseRelease(b.overlay, Qt.RightButton, Qt.NoModifier, QPoint(300, 100))
+    QTest.mouseRelease(b.overlay, Qt.RightButton, Qt.NoModifier, QPoint(200, 100))
 
-    # a capture opens on the stall window, with the trigger at zero
+    # a capture opens on the stall window, with the trigger at zero and the cursor on it
     assert r.open("stall_20261110_071240") and (b.t0, b.t1) == pytest.approx((-30.0, 10.0), abs=0.1)
-    assert b.trigger == 0.0 and r.loss.rows and r.loss.rows[0].channel_id == "fpv"
+    assert b.trigger == 0.0 and b.cursor == 0.0 and r.forensics.loss[0].channel_id == "fpv"
+    assert r._cursor_text == "+0.0 s" or r._cursor_text == "0.0 s"
 
 
 def test_two_cursors_give_every_lane_a_delta(shell, app):
     shell.show_screen(mw.REPLAY)
     r, b = shell.replay, shell.replay.block
-    b.set_cursor(-5.0)
+    assert r.view.title.startswith("demo_drive")
+    b.set_cursor(30.0)
     assert all(not x.delta for x in b.lanes) and r._delta_text == ""
     key(shell, Qt.Key_D)                                    # B drops where A is
-    assert b.cursor_b == pytest.approx(-5.0) and r.model.cursor_b == pytest.approx(-5.0)
-    b.set_cursor(1.0)
-    assert r._delta_text == "Δ +6.00 s" and r._cursor_text == "+1.0 s"
-    fpv, rpm, flag = lane(b, "fpv"), lane(b, "rpm"), lane(b, "closed_loop")
-    view = r.view
-    was, now = view.value_at("fpv", -5.0), view.value_at("fpv", 1.0)
-    assert fpv.delta == f"Δ −{was - now:.2f}" and fpv.value == f"{now:.2f}"
-    assert rpm.delta.startswith("Δ −") and flag.delta == ""            # ON/OFF has no difference to show
+    assert b.cursor_b == pytest.approx(30.0) and r.model.cursor_b == pytest.approx(30.0)
+    b.set_cursor(38.0)
+    assert r._delta_text == "Δ +8.00 s" and r._cursor_text == "23:00:38.0"
+    rpm = lane(b, "rpm")
+    was, now = r.view.value_at("rpm", 30.0), r.view.value_at("rpm", 38.0)
+    assert rpm.value == f"{now:.0f}" and rpm.delta.startswith("Δ +") and rpm.delta == f"Δ +{now - was:.0f}"
+    assert lane(b, "lat_g").delta.startswith("Δ")            # calculated lanes have one too
     # Shift+click moves B, a plain click moves A
-    QTest.mouseClick(b.overlay, Qt.LeftButton, Qt.ShiftModifier, QPoint(int(b.x_of(-10.0)), 100))
-    assert b.cursor_b == pytest.approx(-10.0, abs=0.06) and r._delta_text.startswith("Δ +1")
-    QTest.mouseClick(b.overlay, Qt.LeftButton, Qt.NoModifier, QPoint(int(b.x_of(-12.0)), 100))
-    assert b.cursor == pytest.approx(-12.0, abs=0.06) and r._delta_text.startswith("Δ −")
+    QTest.mouseClick(b.overlay, Qt.LeftButton, Qt.ShiftModifier, QPoint(int(b.x_of(20.0)), 100))
+    assert b.cursor_b == pytest.approx(20.0, abs=0.2) and r._delta_text.startswith("Δ +1")
+    QTest.mouseClick(b.overlay, Qt.LeftButton, Qt.NoModifier, QPoint(int(b.x_of(12.0)), 100))
+    assert b.cursor == pytest.approx(12.0, abs=0.2) and r._delta_text.startswith("Δ −")
     spin(app, shell)
     shot = shell.replay.grab().toImage()
     assert shot.width() > 0
     key(shell, Qt.Key_D)
-    assert b.cursor_b is None and r.model.cursor_b is None and not fpv.delta and r._delta_text == ""
+    assert b.cursor_b is None and r.model.cursor_b is None and not rpm.delta and r._delta_text == ""
 
 
-def test_jumps_walk_the_sessions_events_and_the_order_of_loss(shell, app):
+def test_jumps_walk_the_drives_events(shell, app):
     shell.show_screen(mw.REPLAY)
     r, b = shell.replay, shell.replay.block
-    kinds = [kind for _, kind, _ in r.model.events()]
-    assert kinds.count("marker") == 2 and "trigger" in kinds and "loss" in kinds
+    times = [round(e.t, 2) for e in r.drive_events]
+    assert [e.kind for e in r.drive_events][0] == "near_stall" and len(times) == 7
     key(shell, Qt.Key_Home)
     seen = []
-    for _ in range(len(kinds) + 1):
+    for _ in range(len(times) + 1):
         key(shell, 0, text="]")
         seen.append(round(b.cursor, 2))
-    assert seen[:2] == [-22.0, -9.0] and seen[-1] == 10.0             # past the last event: the end
-    assert r.loss.rows[0].t in seen and 0.0 in seen and seen == sorted(seen)
+    assert seen[:-1] == times and seen[-1] == pytest.approx(b.span[1])  # past the last event: the end
     key(shell, 0, text="[")
-    assert b.cursor == 0.0
+    assert b.cursor == pytest.approx(times[-1], abs=0.01)
     b.zoom(0.1)
     key(shell, Qt.Key_Home)
     key(shell, 0, text="]")
-    assert b.cursor == pytest.approx(-22.0) and b.t0 <= -22.0 <= b.t1  # the window follows the jump
-    r.jump_seg.picked.emit("stall")
-    assert b.cursor == 0.0 and b.t0 <= 0.0 <= b.t1
+    assert b.cursor == pytest.approx(times[0], abs=0.01) and b.t0 <= b.cursor <= b.t1   # the window follows
+    # the scrubber has a tick per event and follows the cursor
+    assert [k for _, k in r.scrub.ticks] == [e.kind for e in r.drive_events]
+    lo, hi = b.span
+    assert r.scrub.frac == pytest.approx((b.cursor - lo) / (hi - lo), abs=1e-3)
+    r._scrubbed(0.5)
+    assert b.cursor == pytest.approx(lo + 0.5 * (hi - lo), abs=0.1)
+
+
+def test_playback_transport_and_speeds(shell, app):
+    shell.show_screen(mw.REPLAY)
+    r, b = shell.replay, shell.replay.block
+    b.set_cursor(10.0)
+    key(shell, Qt.Key_P)
+    assert r.playing and r.play_btn.icon_path is not None
+    r.refresh(100.0)
+    r.refresh(101.0)
+    assert b.cursor == pytest.approx(11.0)
+    r.speed_seg.picked.emit("4")
+    assert r.speed == 4.0 and r.speed_seg.current == "4"
+    r.refresh(101.5)
+    assert b.cursor == pytest.approx(13.0)
+    key(shell, 0, text="1")                                 # 1 / 2 / 4: half, normal, four times
+    assert r.speed == 0.5
+    key(shell, Qt.Key_P)
+    assert not r.playing
+    r.refresh(103.0)
+    assert b.cursor == pytest.approx(13.0)
+    key(shell, Qt.Key_Right)
+    assert b.cursor == pytest.approx(13.1)                  # step 0.1 s
+    b.set_cursor(b.span[1])
+    key(shell, Qt.Key_P)                                    # from the end it starts over
+    assert r.playing and b.cursor == pytest.approx(b.span[0])
+    key(shell, Qt.Key_P)
+
+
+def test_map_gg_pull_readouts_and_sensors(shell, app):
+    shell.show_screen(mw.REPLAY)
+    r, b = shell.replay, shell.replay.block
+    spin(app, shell)
+    assert r.track is not None and len(r.track) == 195
+    assert sorted(p.kind for p in r.canvas.pins) == ["alarm", "capture", "capture", "marker", "start"]
+    assert r.canvas.title.startswith("GPS · coloured by speed")
+    # the car follows the cursor; a click on a pin moves the cursor there
+    b.set_cursor(60.0)
+    pos = r.track.at(60.0)
+    assert r.canvas.cursor == (pytest.approx(pos.x), pytest.approx(pos.y))
+    near = next(p for p in r.canvas.pins if p.kind == "alarm")
+    r._pin_clicked(near.payload)
+    assert b.cursor == pytest.approx(near.payload.t)
+    r.set_colour("rpm")
+    assert r.colour_by == "rpm" and r.colour_btn.text() == "Colour: rpm"
+    # in the 2nd-gear pull: gear, power, torque, the pull card
+    b.set_cursor(38.0)
+    values = dict(zip(r.readouts.LABELS, r.readouts.values))
+    assert values["Gear"] == "2nd" and values["Power now"].endswith("hp") and values["Torque now"].endswith("N·m")
+    assert values["Accel"].startswith("+") and values["Fuel flow"].endswith("/h")     # L/h or gal/h
+    assert r.pull_card.line1.startswith("2nd gear") and "N·m" in r.pull_card.big
+    # cornering: the g-g plot has its trail and a point
+    b.set_cursor(50.0)
+    assert len(r.gg.trail_x) > 10 and r.gg.now is not None and abs(r.gg.now[0]) > 0.05
+    values = dict(zip(r.readouts.LABELS, r.readouts.values))
+    assert values["Lateral"] != "—" and values["Grade (est.)"] != "—"
+    # standing: neutral, no pull
+    b.set_cursor(5.0)
+    values = dict(zip(r.readouts.LABELS, r.readouts.values))
+    assert values["Gear"] in ("neutral / clutch", "—") and r.pull_card.line1 == "No pull at the cursor"
+    assert values["RPM − target"] != "—"
+    # every sensor, grouped; never the position itself
+    titles = [t for t, _ in r.sensors.groups]
+    assert titles[:3] == ["ENGINE", "IDLE CONTROL", "FUEL"] and "CALCULATED" in titles
+    cids = {cid for _, rows in r.sensors.groups for cid, _, _ in rows}
+    assert not cids & {"gps_lat", "gps_lon"} and {"rpm", "batt", "gps_speed", "lat_g"} <= cids
+    # a click adds the lane, another takes it away; the lane menu resets
+    r.toggle_lane("batt")
+    assert "batt" in b.lane_ids() and lane(b, "batt").has_data and lane(b, "batt").value
+    r.toggle_lane("batt")
+    assert "batt" not in b.lane_ids()
+    r.toggle_lane("power")
+    assert lane(b, "power").has_data
+    r.reset_lanes()
+    assert b.lane_ids() == ["rpm", "vss", "tps", "map", "lat_g"]
+    assert lane(b, "rpm").extra is not None and points(lane(b, "rpm").extra) > 0    # the idle target
+    assert "demo_drive" in r.title_text()
 
 
 def test_compare_lays_a_second_drive_over_the_first(shell, app, tmp_path):
