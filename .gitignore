@@ -18,3 +18,7 @@ docs/analysis/*/work-*/*.gpx
 docs/analysis/*/work-*/*.npz
 docs/analysis/*/work-*/*.npy
 docs/analysis/*/work-*/track_*.png
+# service manual extracts (copyrighted; rebuilt locally by the scripts beside them)
+docs/analysis/*/work-manual/img/
+docs/analysis/*/work-manual/manual.txt
+docs/analysis/*/work-*/manual*.txt

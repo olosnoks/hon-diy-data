@@ -1,0 +1,178 @@
+d6  11-25 18:19:23-18:19:28     6s ?  rpm  746 raw  37- 40 iacv  5.5 eld 14.6 fan 0
+d6  11-25 18:19:29-18:20:15    46s L  rpm  682 raw  35- 38 iacv  2.0 eld 12.8 fan 0
+d7  11-25 18:20:23-18:21:01    38s L  rpm  666 raw  35- 40 iacv  1.2 eld 12.8 fan 0
+d8  11-25 18:21:10-18:21:10     0s L  rpm  661 raw  39- 39 iacv  2.0 eld 14.0 fan 0
+d8  11-25 18:21:12-18:22:16    64s c  rpm  813 raw  50- 61 iacv  7.1 eld 13.2 fan 1
+d9  11-25 18:35:27-18:38:08   161s c  rpm  697 raw  37- 99 iacv  3.9 eld 13.6 fan 0
+d10 11-25 18:38:15-18:40:14   119s L  rpm  671 raw  36- 39 iacv  2.7 eld 13.2 fan 0
+d11 11-25 18:40:19-18:40:39    20s L  rpm  656 raw  36- 41 iacv  3.1 eld 12.4 fan 0
+d11 11-25 18:40:40-18:41:45    65s c  rpm  682 raw  35- 46 iacv  3.9 eld 13.2 fan 1
+d11 11-25 18:41:46-18:43:36   110s L  rpm  668 raw  35- 39 iacv  2.7 eld 12.8 fan 1
+d11 11-25 18:43:37-18:44:00    23s ?  rpm  749 raw  34- 38 iacv  7.5 eld 19.9 fan 1
+d11 11-25 18:44:01-18:45:25    84s L  rpm  676 raw  34- 41 iacv  2.7 eld 13.2 fan 0
+d11 11-25 18:45:27-18:46:34    67s M  rpm  807 raw  34- 41 iacv  7.1 eld 13.2 fan 1
+d11 11-25 18:46:37-18:46:52    15s M  rpm  815 raw  40- 41 iacv  6.7 eld 12.4 fan 0
+d12 11-25 18:47:01-18:47:43    42s M  rpm  809 raw  39- 41 iacv  6.3 eld 12.4 fan 0
+d12 11-25 18:47:44-18:47:49     5s c  rpm  806 raw  42- 42 iacv  6.3 eld 12.0 fan 0
+d12 11-25 18:47:50-18:48:52    62s M  rpm  807 raw  31- 40 iacv  6.7 eld 13.2 fan 1
+d12 11-25 18:48:53-18:49:01     8s c  rpm  809 raw  43- 45 iacv  6.7 eld 12.4 fan 0
+d13 11-25 18:49:06-18:49:32    26s c  rpm  814 raw  42- 43 iacv  6.7 eld 12.8 fan 0
+d13 11-25 18:49:33-18:49:47    14s M  rpm  809 raw  41- 41 iacv  6.3 eld 12.4 fan 0
+d13 11-25 18:49:49-18:50:10    21s M  rpm  807 raw  33- 41 iacv  6.3 eld 13.2 fan 0
+d13 11-25 18:50:12-18:54:12   240s M  rpm  810 raw  33- 41 iacv  6.7 eld 15.2 fan 1
+d14 11-25 18:54:16-18:54:34    17s c  rpm  806 raw  40-127 iacv  8.0 eld 22.3 fan 0
+d15 11-25 18:54:38-18:55:13    34s c  rpm  819 raw  39- 51 iacv  6.7 eld 14.4 fan 0
+d16 11-25 18:58:16-18:58:19     3s M  rpm 1126 raw  38- 39 iacv 10.6 eld 11.2 fan 0
+d16 11-25 18:58:20-19:01:03   163s L  rpm  669 raw  37- 41 iacv  2.0 eld 15.2 fan 0
+d16 11-25 19:01:06-19:01:26    21s L  rpm  671 raw  38- 38 iacv  2.7 eld 14.8 fan 0
+d17 11-25 19:01:31-19:03:19   108s L  rpm  670 raw  37- 40 iacv  2.4 eld 15.2 fan 0
+d17 11-25 19:03:21-19:03:35    13s L  rpm  669 raw  40- 41 iacv  2.5 eld 15.0 fan 0
+d17 11-25 19:03:36-19:06:31   176s c  rpm  755 raw  42- 70 iacv  5.5 eld 14.8 fan 0
+d18 11-25 19:06:47-19:06:53     6s L  rpm  677 raw  34- 41 iacv  3.9 eld 15.2 fan 0
+d18 11-25 19:07:00-19:08:18    78s L  rpm  675 raw  40- 41 iacv  2.0 eld 14.4 fan 0
+d18 11-25 19:08:19-19:08:42    23s c  rpm  666 raw  42- 43 iacv  2.0 eld 14.6 fan 0
+d19 11-25 19:08:47-19:08:54     7s c  rpm  668 raw  42- 42 iacv  2.4 eld 15.6 fan 0
+d19 11-25 19:08:55-19:08:55     0s L  rpm  661 raw  41- 41 iacv  2.4 eld 15.2 fan 0
+d19 11-25 19:08:56-19:09:17    20s c  rpm  668 raw  42- 42 iacv  2.4 eld 14.4 fan 0
+d19 11-25 19:09:22-19:10:27    65s c  rpm  676 raw  39- 46 iacv  2.7 eld 14.8 fan 0
+d19 11-25 19:10:28-19:10:38    10s L  rpm  672 raw  39- 39 iacv  2.4 eld 16.4 fan 0
+d19 11-25 19:10:39-19:10:45     6s n  rpm 1816 raw  39- 39 iacv  3.5 eld 16.0 fan 0
+d19 11-25 19:10:48-19:11:09    21s L  rpm  675 raw  39- 40 iacv  4.3 eld 14.8 fan 0
+d19 11-25 19:11:11-19:11:21    10s L  rpm  669 raw  39- 41 iacv  4.3 eld 16.0 fan 0
+d20 11-25 19:11:52-19:12:33    41s L  rpm  670 raw  38- 39 iacv  4.7 eld 15.6 fan 1
+d20 11-25 19:12:39-19:12:46     6s n  rpm 1150 raw  38- 38 iacv 15.7 eld 34.1 fan 1
+d20 11-25 19:12:48-19:12:48     0s M  rpm  860 raw  38- 38 iacv  5.5 eld 14.4 fan 1
+d20 11-25 19:12:49-19:12:58     9s ?  rpm  745 raw  39- 41 iacv  5.9 eld 15.6 fan 1
+d20 11-25 19:12:59-19:13:07     8s n  rpm 1864 raw  39- 40 iacv  3.1 eld 16.8 fan 0
+d20 11-25 19:13:10-19:19:43   392s L  rpm  668 raw  37- 41 iacv  2.7 eld 14.8 fan 1
+d20 11-25 19:19:44-19:20:12    28s ?  rpm  759 raw  37- 41 iacv  7.8 eld 21.5 fan 1
+d20 11-25 19:20:13-19:29:05   532s M  rpm  810 raw  36- 41 iacv  6.7 eld 15.6 fan 1
+d21 11-25 19:32:25-19:32:28     3s M  rpm 1018 raw  38- 38 iacv 10.4 eld 10.8 fan 0
+d21 11-25 19:32:29-19:32:49    20s L  rpm  660 raw  38- 41 iacv  2.7 eld 15.2 fan 0
+d21 11-25 19:32:50-19:34:19    89s c  rpm  694 raw  42- 47 iacv  2.4 eld 14.4 fan 0
+d21 11-25 19:34:20-19:38:24   243s L  rpm  669 raw  36- 41 iacv  2.7 eld 14.8 fan 1
+d21 11-25 19:38:25-19:38:47    23s ?  rpm  749 raw  36- 40 iacv  7.5 eld 21.9 fan 1
+d21 11-25 19:38:48-19:41:19   150s L  rpm  671 raw  36- 40 iacv  2.4 eld 14.4 fan 0
+d21 11-25 19:41:21-19:43:12   111s M  rpm  811 raw  36- 40 iacv  7.1 eld 15.6 fan 1
+d22 11-25 19:43:30-19:47:48   258s M  rpm  809 raw  36- 41 iacv  6.7 eld 14.8 fan 1
+d22 11-25 19:47:50-19:47:52     2s M  rpm  808 raw  39- 40 iacv  7.1 eld 14.8 fan 0
+d22 11-25 19:47:54-19:47:55     1s M  rpm  817 raw  40- 40 iacv  6.9 eld 14.4 fan 0
+d22 11-25 19:47:57-19:47:59     2s M  rpm  803 raw  40- 41 iacv  7.1 eld 15.2 fan 0
+d22 11-25 19:48:00-19:49:28    88s c  rpm  817 raw  37-127 iacv  6.7 eld 15.2 fan 1
+d22 11-25 19:49:29-19:50:24    54s M  rpm  806 raw  37- 38 iacv  6.3 eld 14.6 fan 0
+d22 11-25 19:50:25-19:51:57    92s c  rpm  809 raw  37-126 iacv  6.7 eld 14.4 fan 1
+d22 11-25 19:51:58-19:52:27    29s M  rpm  809 raw  38- 41 iacv  6.3 eld 14.8 fan 0
+d22 11-25 19:52:32-19:56:40   249s M  rpm  808 raw  37- 41 iacv  6.7 eld 15.2 fan 1
+d22 11-25 19:56:44-20:00:34   231s M  rpm  810 raw  37- 41 iacv  6.3 eld 15.6 fan 0
+d22 11-25 20:00:35-20:00:45    10s n  rpm 1380 raw  38- 40 iacv  4.3 eld 15.2 fan 0
+d22 11-25 20:00:47-20:00:47     0s M  rpm  783 raw  38- 38 iacv  5.9 eld 16.8 fan 0
+d22 11-25 20:00:48-20:00:54     6s L  rpm  673 raw  37- 38 iacv  3.9 eld 15.2 fan 0
+d22 11-25 20:00:55-20:01:56    61s c  rpm  749 raw  36-121 iacv  5.1 eld 16.8 fan 1
+d22 11-25 20:01:57-20:05:54   237s L  rpm  669 raw  34- 41 iacv  2.4 eld 14.8 fan 0
+d22 11-25 20:05:55-20:06:05    10s ?  rpm  743 raw  34- 34 iacv  5.9 eld 15.2 fan 0
+d22 11-25 20:06:06-20:07:58   112s L  rpm  669 raw  33- 34 iacv  4.3 eld 15.2 fan 0
+d22 11-25 20:08:03-20:13:43   339s M  rpm  809 raw  31- 40 iacv  6.7 eld 15.2 fan 1
+d23 11-25 20:17:56-20:18:00     3s M  rpm 1019 raw  34- 34 iacv  7.8 eld 10.8 fan 0
+d23 11-25 20:18:01-20:18:08     7s L  rpm  670 raw  34- 40 iacv  1.2 eld 10.8 fan 0
+d23 11-25 20:18:11-20:18:20     9s L  rpm  716 raw  38- 41 iacv  4.7 eld 14.4 fan 0
+d23 11-25 20:18:21-20:19:30    69s c  rpm  680 raw  33-135 iacv  2.7 eld 14.8 fan 0
+d23 11-25 20:19:31-20:21:45   134s L  rpm  668 raw  32- 41 iacv  2.7 eld 15.2 fan 1
+d23 11-25 20:21:46-20:22:08    22s ?  rpm  750 raw  32- 34 iacv  7.6 eld 21.5 fan 1
+d23 11-25 20:22:09-20:25:25   197s L  rpm  670 raw  33- 38 iacv  2.7 eld 14.8 fan 1
+d23 11-25 20:25:26-20:26:14    47s ?  rpm  756 raw  34- 40 iacv  6.7 eld 16.0 fan 1
+d23 11-25 20:26:15-20:27:38    84s M  rpm  808 raw  31- 34 iacv  6.7 eld 14.8 fan 0
+d24 11-25 20:28:03-20:28:30    27s M  rpm  811 raw  30- 30 iacv  7.5 eld 17.0 fan 0
+d25 11-25 20:28:44-20:28:47     3s M  rpm  802 raw  36- 41 iacv  7.1 eld 14.0 fan 0
+d25 11-25 20:28:48-20:30:38   110s c  rpm  688 raw  33-118 iacv  3.9 eld 14.4 fan 0
+d25 11-25 20:30:39-20:30:51    12s L  rpm  663 raw  34- 34 iacv  3.9 eld 15.2 fan 0
+d25 11-25 20:30:52-20:36:21   328s c  rpm  671 raw  34-124 iacv  2.7 eld 14.8 fan 1
+d25 11-25 20:36:22-20:36:22     0s M  rpm  792 raw  41- 41 iacv  6.7 eld 14.0 fan 0
+d25 11-25 20:36:23-20:38:07   104s c  rpm  812 raw  39- 49 iacv  6.7 eld 14.8 fan 0
+d25 11-25 20:38:08-20:39:48   100s M  rpm  809 raw  37- 41 iacv  7.1 eld 14.8 fan 1
+d25 11-25 20:39:49-20:40:12    23s c  rpm  814 raw  42- 43 iacv  6.7 eld 14.4 fan 0
+d25 11-25 20:40:13-20:44:30   257s M  rpm  809 raw  36- 41 iacv  6.7 eld 14.8 fan 1
+d26 11-25 20:44:53-20:44:55     2s M  rpm  817 raw  36- 36 iacv  7.1 eld 14.0 fan 0
+d27 11-25 20:45:34-21:16:08  1834s M  rpm  810 raw  33- 41 iacv  6.7 eld 15.2 fan 1
+d28 11-25 21:20:01-21:20:04     3s M  rpm  940 raw  33- 33 iacv 10.6 eld 12.4 fan 0
+d28 11-25 21:20:06-21:20:12     6s L  rpm  664 raw  34- 40 iacv  2.0 eld 10.8 fan 0
+d28 11-25 21:20:14-21:42:39  1345s c  rpm  807 raw  33-135 iacv  6.3 eld 11.2 fan 1
+d29 11-25 21:42:41-21:45:09   148s c  rpm 1081 raw 117-143 iacv 11.0 eld 15.2 fan 1
+d29 11-25 21:45:11-21:49:28   257s c  rpm 1083 raw 117-151 iacv 11.0 eld 15.2 fan 1
+d29 11-25 21:49:31-21:49:50    19s c  rpm 1078 raw  44-167 iacv 10.6 eld 14.8 fan 0
+d29 11-25 21:49:54-21:50:19    25s c  rpm  728 raw  43- 49 iacv  5.1 eld 15.6 fan 1
+d29 11-25 21:50:37-21:51:07    30s c  rpm  806 raw  49- 56 iacv  6.7 eld 14.4 fan 0
+d29 11-25 21:51:25-21:51:59    35s c  rpm  831 raw  50- 61 iacv  6.9 eld 14.8 fan 0
+d29 11-25 21:52:03-21:54:41   157s c  rpm  786 raw  32-128 iacv  6.7 eld 15.2 fan 1
+d29 11-25 21:54:42-21:54:57    15s L  rpm  663 raw  31- 32 iacv  4.3 eld 15.6 fan 1
+d29 11-25 21:54:58-21:55:19    22s ?  rpm  754 raw  31- 35 iacv  7.8 eld 21.5 fan 1
+d29 11-25 21:55:20-21:56:05    45s L  rpm  675 raw  33- 38 iacv  3.9 eld 15.2 fan 0
+d29 11-25 21:56:06-22:03:26   440s c  rpm  899 raw  33-146 iacv  7.8 eld 14.8 fan 1
+d29 11-25 22:03:29-22:08:28   299s c  rpm  885 raw  31-173 iacv  7.8 eld 15.2 fan 1
+d29 11-25 22:08:29-22:10:47   138s L  rpm  669 raw  31- 37 iacv  3.9 eld 14.8 fan 0
+d29 11-25 22:10:48-22:11:12    24s ?  rpm  754 raw  31- 37 iacv  7.8 eld 21.9 fan 1
+d29 11-25 22:11:13-22:11:23     9s L  rpm  671 raw  38- 41 iacv  4.3 eld 15.6 fan 0
+d29 11-25 22:11:25-22:11:28     3s L  rpm  672 raw  41- 41 iacv  4.3 eld 14.0 fan 0
+d29 11-25 22:11:30-22:14:31   181s L  rpm  668 raw  35- 40 iacv  2.7 eld 14.8 fan 1
+d29 11-25 22:14:32-22:14:52    21s ?  rpm  755 raw  38- 41 iacv  7.8 eld 21.7 fan 1
+d29 11-25 22:14:53-22:16:45   112s c  rpm  687 raw  34-178 iacv  4.3 eld 14.4 fan 0
+d29 11-25 22:16:46-22:17:51    65s L  rpm  661 raw  36- 37 iacv  4.3 eld 14.4 fan 1
+d29 11-25 22:17:52-22:18:16    24s ?  rpm  756 raw  36- 41 iacv  7.8 eld 21.5 fan 1
+d29 11-25 22:18:17-22:18:17     0s L  rpm  724 raw  41- 41 iacv  4.3 eld 16.0 fan 0
+d29 11-25 22:18:35-22:19:50    75s c  rpm  678 raw  40- 81 iacv  2.4 eld 14.4 fan 0
+d29 11-25 22:19:51-22:21:29    98s L  rpm  668 raw  38- 41 iacv  2.7 eld 14.8 fan 1
+d29 11-25 22:21:30-22:21:49    20s ?  rpm  749 raw  38- 41 iacv  7.5 eld 21.1 fan 1
+d29 11-25 22:21:50-22:22:46    56s c  rpm  680 raw  42- 44 iacv  3.5 eld 14.4 fan 0
+d29 11-25 22:22:47-22:23:10    23s L  rpm  672 raw  40- 41 iacv  2.4 eld 14.0 fan 0
+d29 11-25 22:23:12-22:24:41    89s L  rpm  667 raw  37- 40 iacv  2.7 eld 14.0 fan 1
+d29 11-25 22:24:42-22:25:05    22s ?  rpm  749 raw  36- 40 iacv  7.5 eld 22.3 fan 1
+d29 11-25 22:25:05-22:25:09     3s L  rpm  670 raw  40- 41 iacv  4.3 eld 14.2 fan 0
+d29 11-25 22:25:10-22:25:27    17s c  rpm  677 raw  42- 42 iacv  4.1 eld 15.2 fan 0
+d29 11-25 22:25:28-22:27:54   146s L  rpm  670 raw  37- 41 iacv  2.7 eld 14.8 fan 1
+d29 11-25 22:27:55-22:28:16    21s ?  rpm  751 raw  37- 39 iacv  7.8 eld 21.5 fan 1
+d29 11-25 22:28:17-22:28:20     3s L  rpm  698 raw  40- 41 iacv  4.3 eld 15.6 fan 0
+d29 11-25 22:28:22-22:28:41    18s c  rpm  815 raw  42- 42 iacv  7.1 eld 15.2 fan 0
+d29 11-25 22:28:42-22:31:00   138s M  rpm  808 raw  36- 41 iacv  6.7 eld 14.8 fan 1
+d29 11-25 22:31:06-22:32:27    81s M  rpm  811 raw  37- 41 iacv  6.7 eld 14.8 fan 0
+d29 11-25 22:32:29-22:34:28   119s M  rpm  812 raw  35- 41 iacv  6.7 eld 15.2 fan 1
+d30 11-25 22:38:00-22:38:28    28s M  rpm  803 raw  32- 37 iacv  7.8 eld 21.5 fan 0
+d30 11-25 22:38:29-22:39:56    87s c  rpm  692 raw  32-104 iacv  4.7 eld 14.8 fan 0
+d30 11-25 22:39:57-22:40:41    44s L  rpm  664 raw  31- 32 iacv  4.3 eld 14.8 fan 1
+d30 11-25 22:40:42-22:41:06    24s ?  rpm  755 raw  31- 36 iacv  7.8 eld 21.5 fan 1
+d30 11-25 22:41:07-22:41:07     0s L  rpm  698 raw  37- 37 iacv  4.3 eld 15.6 fan 0
+d30 11-25 22:41:08-22:43:04   116s c  rpm  673 raw  39-116 iacv  3.5 eld 14.8 fan 0
+d30 11-25 22:43:05-22:44:01    56s L  rpm  661 raw  36- 39 iacv  4.3 eld 14.4 fan 1
+d30 11-25 22:44:02-22:44:22    21s ?  rpm  755 raw  33- 36 iacv  7.8 eld 21.1 fan 1
+d30 11-25 22:44:23-22:44:29     6s L  rpm  673 raw  36- 41 iacv  4.3 eld 16.0 fan 0
+d30 11-25 22:44:30-22:44:45    15s c  rpm  675 raw  42-119 iacv  4.3 eld 13.6 fan 0
+d31 11-26 20:31:58-20:32:18    20s n  rpm    0 raw  66- 70 iacv  7.8 eld 12.0 fan 1
+d31 11-26 20:32:19-20:34:07   108s c  rpm 1005 raw  55-151 iacv  0.4 eld 16.4 fan 1
+d32 11-26 20:34:24-20:35:36    72s c  rpm  991 raw  51- 82 iacv  0.0 eld 12.0 fan 0
+d32 11-26 20:35:40-20:44:29   530s c  rpm  920 raw  45-189 iacv  0.0 eld 12.0 fan 0
+d33 11-26 20:45:19-21:10:10  1491s c  rpm  818 raw  41-120 iacv  2.0 eld 11.2 fan 0
+d33 11-26 21:10:11-21:12:15   124s L  rpm  716 raw  40- 41 iacv  0.0 eld  9.7 fan 0
+d33 11-26 21:12:16-21:13:53    97s c  rpm  715 raw  42-108 iacv  0.0 eld  9.3 fan 0
+d34 11-26 21:14:52-21:36:23  1291s c  rpm  800 raw  34-137 iacv  5.1 eld  9.3 fan 1
+d35 11-26 21:37:12-21:44:19   427s L  rpm  676 raw  35- 41 iacv  0.0 eld  8.9 fan 1
+d35 11-26 21:44:21-21:45:16    55s M  rpm  810 raw  35- 41 iacv  7.1 eld 10.1 fan 1
+d35 11-26 21:45:17-21:48:12   175s c  rpm  824 raw  45-152 iacv  5.9 eld  9.7 fan 1
+d35 11-26 21:48:16-21:49:29    74s c  rpm  937 raw 132-158 iacv  7.1 eld  9.7 fan 1
+d36 11-26 21:53:20-21:57:52   273s c  rpm  888 raw  52- 63 iacv  6.7 eld  9.7 fan 1
+d37 11-26 21:58:09-22:24:31  1581s c  rpm  830 raw  46-146 iacv  6.3 eld  9.7 fan 1
+d38 11-26 22:24:38-22:36:16   697s c  rpm  813 raw  46- 56 iacv  5.5 eld  9.7 fan 1
+d38 11-26 22:37:12-22:39:47   155s c  rpm  810 raw  46- 50 iacv  9.8 eld 24.2 fan 1
+d38 11-26 22:39:48-22:41:23    95s n  rpm 1585 raw  49- 63 iacv 20.8 eld 25.0 fan 1
+d38 11-26 22:41:24-22:41:41    17s c  rpm  969 raw  63- 66 iacv  9.8 eld 25.8 fan 1
+d38 11-26 22:41:42-22:43:13    92s n  rpm 1748 raw  53- 72 iacv 12.2 eld 26.2 fan 1
+d38 11-26 22:43:14-22:45:24   129s c  rpm  834 raw  51- 64 iacv  5.1 eld 24.2 fan 1
+d39 11-26 22:51:10-22:53:15   125s c  rpm  837 raw  51- 53 iacv  7.5 eld 23.8 fan 1
+d39 11-26 22:53:16-22:54:15    59s n  rpm 1206 raw  51- 53 iacv 11.8 eld 24.2 fan 1
+d39 11-26 22:54:20-22:57:57   217s n  rpm 1812 raw  52- 55 iacv 22.4 eld 25.4 fan 1
+d39 11-26 22:58:03-23:02:56   293s n  rpm 1797 raw  52- 58 iacv 13.3 eld 26.2 fan 1
+d39 11-26 23:03:00-23:12:28   568s n  rpm 2002 raw  41- 71 iacv 21.2 eld 26.6 fan 1
+d39 11-26 23:12:29-23:12:36     7s c  rpm  877 raw  58- 58 iacv  3.9 eld 27.0 fan 1
+d39 11-26 23:12:38-23:12:56    19s n  rpm 2684 raw  57- 58 iacv 38.8 eld 27.4 fan 1
+d39 11-26 23:13:03-23:16:25   203s n  rpm 1796 raw  54- 56 iacv 16.5 eld 27.4 fan 1
+d39 11-26 23:16:34-23:25:53   559s n  rpm 2265 raw  53- 58 iacv 23.5 eld 28.2 fan 1
+d39 11-26 23:25:54-23:26:03     9s c  rpm  954 raw  55- 56 iacv 14.3 eld 30.6 fan 1
+d39 11-26 23:26:12-23:26:17     5s n  rpm  851 raw  55- 55 iacv  8.6 eld 30.2 fan 1
+d39 11-26 23:26:28-23:26:58    30s c  rpm  860 raw  55- 56 iacv  2.4 eld 22.7 fan 1

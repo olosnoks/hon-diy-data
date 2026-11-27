@@ -138,6 +138,29 @@ knock/fan/ign_limit suspect, notes on the plausible channels, new channels `idle
   before pulling away; link clean until 23:10, then a loose OBD2 contact; vss reads 1.1 % low vs
   GPS; GPS drops 5-13 s of fixes every ~2 min. (GPS files and track plots are git-ignored.)
 
+## Third round (2026-11-27)
+
+- `idle-vs-drive.md`: most idle findings hold. **Changed:** besides the ECT term in the idle
+  target there is a separate ~810 rpm idle state that does not depend on ECT (21:44:17 on 11-26:
+  ECT steady 85.9 °C, iac_cmd 51 -> 84 in one read, rpm 670 -> 808 in 6 s, ELD/MAP/A/C unchanged;
+  0x2F flat at 26-27, so not a purge change if 0x2F is purge). It clears on restart, a rev or
+  pulling away; cause unknown. The radiator fan cycles only when parked (none while driving). The
+  ECT offset was mostly absent on 11-25 (fan-on reading 84.8 °C) and mostly present on 11-26
+  (72.1 °C). The glitches stopped 14 min before the drive, so "none while driving" is not a
+  driving effect.
+- `vehicle-dynamics.md`: engine power normal (one clean 2nd-gear WOT pull: 118-127 N·m at
+  2,800-4,900 rpm, roughly 85-94 % of a D16Y8 there; the report was first written against the
+  D16Y7's 106 hp rating and carries a correction: the EX's D16Y8 is 127 hp at 6,600, 145 N·m at
+  5,500, never reached in the logs; no intake restriction, no fuel starvation, cat not clogged); no hesitation or flat
+  spot on 23 tip-ins; route nearly flat (~20 m relief, modelled: nothing logs altitude); about
+  34-36 mpg overall; the low ECT reading costs ~0.09 L/h at idle.
+- `next-session-plan.md`: one ~3 h 20 min session: cold soak and sweep, cold start to first fan,
+  poke test, a drive loop (launch matrix with throttle/closed/full lock/A/C, VTEC pull, interstate,
+  hill), hot idle with the ECT wiggle test, then the mechanic checks.
+- Local only, not in git: `driver-technique.md`, `trips.md`, `nearstall-timeline.md` (every
+  near-stall had a closed throttle at the clutch bite; every good launch had it open within
+  0.2 s; nothing else separates them before the bite).
+
 ## Next
 
 - At the first real engine death, look at 0x29/0x28, 0x2F, ELD and battery in the last 2 s.
