@@ -30,10 +30,18 @@ function Assert-Command([string]$Name, [string]$Hint) {
 }
 
 # Runs a native program, throws if it fails. Arguments as an array.
+# Exit codes decide: Windows PowerShell 5.1 turns a tool's stderr into errors when the
+# caller's output is redirected, so git push's "To https://..." (stderr) or a javac note
+# would otherwise count as a failure. stderr is shown as plain text instead.
 function Invoke-Native([string]$Exe, [string[]]$Arguments, [string]$What) {
     if (-not $What) { $What = "$Exe $($Arguments -join ' ')" }
-    & $Exe @Arguments | Out-Host   # keep tool output out of the function result
-    if ($LASTEXITCODE -ne 0) { Fail "$What failed (exit $LASTEXITCODE)" }
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Exe @Arguments 2>&1 | ForEach-Object { "$_" } | Out-Host   # keep tool output out of the function result
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $old }
+    if ($code -ne 0) { Fail "$What failed (exit $code)" }
 }
 
 # git in the repo; returns trimmed stdout, throws on failure unless -AllowFail.
