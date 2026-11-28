@@ -26,9 +26,17 @@ $repo = Split-Path -Parent $here
 $build = Join-Path $here 'build'
 
 function Step($m) { Write-Host "== $m" -ForegroundColor Cyan }
+# Tool output (stderr too) goes to the console as plain text. Windows PowerShell 5.1
+# turns a native tool's stderr into errors when the caller redirects it (build-all.ps1
+# does), so a javac "Note:" or a d8 warning would stop the build. Exit codes decide.
 function Run($exe, [string[]]$argv, $what) {
-    & $exe @argv
-    if ($LASTEXITCODE) { throw "$what failed (exit $LASTEXITCODE)" }
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $exe @argv 2>&1 | ForEach-Object { Write-Host "$_" }
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $old }
+    if ($code) { throw "$what failed (exit $code)" }
 }
 
 # ---- tools
@@ -94,7 +102,7 @@ $sources += (Join-Path $build 'gen\com\olosnoks\hondalog\R.java')
 $srcList = Join-Path $build 'sources.txt'
 # javac @file: one path per line, quoted, forward slashes
 ($sources | ForEach-Object { '"' + ($_ -replace '\\', '/') + '"' }) | Set-Content -Encoding ascii $srcList
-Run $javac @('-nowarn', '-Xlint:-options', '-source', '8', '-target', '8', '-encoding', 'UTF-8',
+Run $javac @('-nowarn', '-Xlint:none', '-XDsuppressNotes', '-source', '8', '-target', '8', '-encoding', 'UTF-8',
     '-bootclasspath', $jar, '-d', (Join-Path $build 'classes'), "@$srcList") 'javac'
 $classesJar = Join-Path $build 'classes.jar'
 Run $jartool @('cf', $classesJar, '-C', (Join-Path $build 'classes'), '.') 'jar'
@@ -104,7 +112,7 @@ Step 'apk'
 $apk = Join-Path $build 'app.apk'
 Copy-Item $res $apk
 Push-Location $build
-try { Run $aapt @('add', '-f', 'app.apk', 'classes.dex') 'aapt add' | Out-Null } finally { Pop-Location }
+try { Run $aapt @('add', '-f', 'app.apk', 'classes.dex') 'aapt add' } finally { Pop-Location }
 $unsigned = Join-Path $build "hondalog-$version-android-unsigned.apk"
 Run $zipalign @('-f', '-p', '4', $apk, $unsigned) 'zipalign'
 Write-Host "unsigned: $unsigned"

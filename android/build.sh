@@ -48,7 +48,7 @@ aapt package -f -M "$out/AndroidManifest.xml" -S "$here/res" -A "$out/assets" -I
 echo "== java"
 find "$here/src" -name '*.java' > "$out/sources.txt"
 echo "$out/gen/com/olosnoks/hondalog/R.java" >> "$out/sources.txt"
-javac -nowarn -Xlint:-options -source 8 -target 8 -encoding UTF-8 -bootclasspath "$jar" -d "$out/classes" @"$out/sources.txt"
+javac -nowarn -Xlint:none -XDsuppressNotes -source 8 -target 8 -encoding UTF-8 -bootclasspath "$jar" -d "$out/classes" @"$out/sources.txt"
 "$dx" --dex --min-sdk-version=23 --output="$out/classes.dex" "$out/classes"
 
 echo "== apk"
