@@ -67,6 +67,8 @@ public final class MainActivity extends Activity implements Bridge.Host {
         WebView.setWebContentsDebuggingEnabled(true);   // chrome://inspect over adb, for the owner
         web = new AppWebView(this);
         web.setBackgroundColor(Color.parseColor("#282A36"));
+        web.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        web.setHapticFeedbackEnabled(true);
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);

@@ -5,6 +5,7 @@
  * MARK button (Space).
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useTouchOnly } from './touch';
 import { SCREENS, useSession, type CydStatus, type EcuStatus, type StallStatus } from '../../core/session';
 import type { Theme } from '../theme';
 import { FONTS } from '../theme';
@@ -139,6 +140,7 @@ export function TopBar() {
   const now = useSecondTick(rec.active);
   const stageW = useStageSize().width;
   const narrow = stageW < NARROW_BELOW;
+  const touch = useTouchOnly();
   // fit: start from everything whenever what is shown changes, then drop until it fits
   const statusRef = useRef<HTMLDivElement>(null);
   const fitKey = `${ecu.state}|${ecu.errors > 0}|${ecu.detail ?? ''}|${stall.state}|${cyd.state}|${cyd.mapMatch}|${rec.active}|${Math.round(stageW)}`;
@@ -235,8 +237,8 @@ export function TopBar() {
         }}
       >
         MARK
-        {/* the head unit's narrow bar has no room for the key (it is a touch screen) */}
-        {!narrow && <span style={{ fontFamily: FONTS.mono, fontSize: 11, fontWeight: 700, border: `1.5px solid ${t.onAccent}`, padding: '0 4px' }}>Space</span>}
+        {/* no key on a touch screen, nor room for one on the head unit's narrow bar */}
+        {!narrow && !touch && <span style={{ fontFamily: FONTS.mono, fontSize: 11, fontWeight: 700, border: `1.5px solid ${t.onAccent}`, padding: '0 4px' }}>Space</span>}
       </button>
     </header>
   );

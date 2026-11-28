@@ -32,6 +32,10 @@ page ── <a download> (shim) ──┘        ├─ UsbBridge: Android USB h
 Web side: `web/src/platform/native.ts` (`NativeFileStore`, `isNativeApp`).
 `platform/index.ts` picks the native store and the USB bridge when
 `window.HondalogAndroid` is there. `pwa.ts` skips the service worker there.
+`ui/shell/Stage.tsx` picks full vs phone layout by device pixels in the app (a 1280×720 radio at any density gets the
+full stage). `ui/shell/touch.ts` treats the app as touch-only (no key hints). The shim adds touch CSS (no tap flash,
+no long-press selection, no overscroll). Setup > Downloads (`ui/setup/DownloadsTab.tsx`) links the latest release.
+Links leave the app through `shouldOverrideUrlLoading` to the radio's browser.
 
 ## Build
 

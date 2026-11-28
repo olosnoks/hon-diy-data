@@ -11,7 +11,9 @@ of the radio's USB ports.
 - **It opens by itself when you plug in the cable**, and connects with no taps.
 - **Drives stay on the radio** until you export them for the laptop.
 
-Needs Android 6 or newer (made for Android 10+ head units), with
+Made for a 1280×720 touch head unit: the app always uses the full layout on a
+1280×720 panel, whatever density the radio is set to, and shows no keyboard
+hints. Needs Android 6 or newer (made for Android 10+ head units), with
 "Android System WebView" version 100 or newer. The app checks this and tells you
 if it's too old.
 
@@ -64,9 +66,15 @@ signed with the same key and has a higher version.
 
 ### Way 3: download on the radio
 
-Attach the signed APK to a GitHub release (`scripts\release\publish-release.ps1`),
-open the release page in the radio's browser over a hotspot, download the APK
-and tap it. Steps 3–4 of Way 1 apply.
+Every GitHub release has the APK (`scripts\release\build-all.ps1` then
+`publish-release.ps1`). On the radio, over a hotspot, open
+https://github.com/olosnoks/hon-diy-data/releases/latest in the browser, download
+`hondalog-<version>-android.apk` and tap it. Steps 3–4 of Way 1 apply.
+
+Once hondalog is on the radio, updates are easier: **F8 Setup → Downloads**
+shows the newest release, marks the radio's file and says **UPDATE AVAILABLE**.
+Tap Download, then open the APK. It installs over the running version and
+keeps the drives.
 
 ## First start (2 minutes, once)
 

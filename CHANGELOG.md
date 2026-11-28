@@ -9,6 +9,20 @@ against the simulators and the host builds of the firmware cores.
 
 ## Unreleased
 
+### Version 0.2.1
+
+- Setup > **Downloads** (web app, desktop browsers and the Android app): direct links to the newest GitHub release for
+  Android, Windows, Linux (tar.gz and AppImage), the CYD firmware and the offline web app, with sizes, release
+  notes, SHA256SUMS and the CYD flashing steps. The build for this device is marked, and an update is flagged when
+  the release is newer than what's running. It asks api.github.com only when the tab opens and keeps the last
+  answer for offline. On the radio, Download opens the browser and the APK installs over the running version.
+- Head-unit screen (a 1280×720 touch radio): in the Android app the layout is picked from the panel's real pixels,
+  so a 1280×720 radio gets the full 1366-wide layout at any density setting. At 240 dpi it used to drop into the
+  cramped phone layout, which cut values off. Touch screens and the app show no keyboard hints (bottom strip,
+  "Space" on MARK). The app also has no tap flash, no long-press selection and no overscroll.
+- 0.2.1 everywhere (web, desktop, drive headers, TWA manifest). The Android versionCode is 201, so the standalone APK
+  installs over the 0.2.0 TWA from the v0.2.0 release when both are signed with the release key.
+
 ### Standalone Android app for the head unit
 
 - `android/`: the web app built into the APK and run in the app's own WebView, replacing the Chrome TWA for the radio

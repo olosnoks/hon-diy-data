@@ -1,7 +1,7 @@
 /**
  * F8 Setup (design: "Alarms, the CYD black box (map push, SD drives,
  * firmware), units, cable and map files"). Tabs: Alarms, CYD black box,
- * Units, Cable, Files, Theme, About.
+ * Units, Cable, Files, Theme, Downloads, About.
  *
  * The router renders screens without props, so the integrator registers
  * what the tabs need once with registerSetupDeps (alarm engine, CYD client,
@@ -18,15 +18,17 @@ import { SHIPPED_MAP } from '../bytes/deps';
 import { tryParse } from '../bytes/MapView';
 import { validateMap } from '../bytes/model/mapdoc';
 import { AlarmsTab, type AlarmSource } from './AlarmsTab';
+import { DownloadsTab } from './DownloadsTab';
+import { nativeAppVersion } from '../../platform/native';
 import type { CydClient } from './cyd/client';
 import { CydTab, type Confirm } from './cyd/CydTab';
 import { useCable, type Protocol } from './settings';
 import { registeredSetupDeps, setupDepsVersion, subscribeSetupDeps, type ConnectionControl, type PlatformFacts, type SetupDeps } from './deps';
 import pkg from '../../../package.json';
 
-export type SetupTab = 'alarms' | 'cyd' | 'units' | 'cable' | 'files' | 'theme' | 'about';
+export type SetupTab = 'alarms' | 'cyd' | 'units' | 'cable' | 'files' | 'theme' | 'downloads' | 'about';
 export const TABS: readonly (readonly [SetupTab, string])[] = [
-  ['alarms', 'Alarms'], ['cyd', 'CYD black box'], ['units', 'Units'], ['cable', 'Cable'], ['files', 'Files'], ['theme', 'Theme'], ['about', 'About'],
+  ['alarms', 'Alarms'], ['cyd', 'CYD black box'], ['units', 'Units'], ['cable', 'Cable'], ['files', 'Files'], ['theme', 'Theme'], ['downloads', 'Downloads'], ['about', 'About'],
 ];
 
 export type { ConnectionControl, PlatformFacts, SetupDeps } from './deps';
@@ -265,7 +267,7 @@ function AboutTab(props: { versions: Record<string, string>; platform: PlatformF
     <Card title="About" style={{ maxWidth: 760 }}>
       {rows.map(([k, v]) => <Row key={k} label={k}><span style={mono}>{v}</span></Row>)}
       {props.platform.notes.map((n) => <Note key={n}>{n}</Note>)}
-      <Note>No network at runtime except cached OpenStreetMap tiles on the GPS map. No analytics. No GPS data leaves the device.</Note>
+      <Note>No network at runtime except cached OpenStreetMap tiles on the GPS map and the Downloads tab's release check. No analytics. No GPS data leaves the device.</Note>
     </Card>
   );
 }
@@ -299,6 +301,7 @@ export default function SetupScreen(props: SetupScreenProps) {
           {tab === 'cable' && <CableTab picker={deps.picker} notes={platform.notes} connection={deps.connection} />}
           {tab === 'files' && <FilesTab store={deps.store} mapText={mapText} saveMap={saveMap} confirm={deps.confirm} />}
           {tab === 'theme' && <ThemeTab />}
+          {tab === 'downloads' && <DownloadsTab running={nativeAppVersion() ?? deps.versions.app ?? pkg.version} />}
           {tab === 'about' && <AboutTab versions={deps.versions} platform={platform} mapText={mapText} />}
         </div>
       </div>

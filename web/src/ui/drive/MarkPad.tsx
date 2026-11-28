@@ -1,5 +1,6 @@
 /** The MARK pad (screens/drive.py MarkPad): one press, no aiming. */
 import { useEffect, useState } from 'react';
+import { useTouchOnly } from '../shell/touch';
 import { useSession } from '../../core/session';
 import { FONTS } from '../theme';
 import { useTheme } from '../shell/useTheme';
@@ -14,6 +15,7 @@ export function markLine(active: boolean, marks: number, lastMarkMs: number | nu
 
 export function MarkPad() {
   const t = useTheme();
+  const touch = useTouchOnly();
   const active = useSession((s) => s.recording.active);
   const marks = useSession((s) => s.marks.length);
   const last = useSession((s) => s.marks[s.marks.length - 1]?.unixMs ?? null);
@@ -41,7 +43,7 @@ export function MarkPad() {
     >
       <span style={{ fontSize: 104, fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1 }}>MARK</span>
       <span style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 18, fontWeight: 700 }}>
-        <span style={{ fontFamily: FONTS.mono, fontSize: 16, border: `2px solid ${ink}`, padding: '1px 6px' }}>Space</span>
+        {!touch && <span style={{ fontFamily: FONTS.mono, fontSize: 16, border: `2px solid ${ink}`, padding: '1px 6px' }}>Space</span>}
         it just stumbled
       </span>
       <span style={{ fontFamily: FONTS.mono, fontSize: 16, fontWeight: 700 }} data-testid="mark-line">

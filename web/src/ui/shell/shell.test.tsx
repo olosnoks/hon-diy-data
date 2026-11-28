@@ -15,6 +15,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('stageFit', () => {
+  it('the Android app picks the layout by panel pixels: a 1280x720 radio at any density gets the full stage', () => {
+    for (const dpr of [1, 1.33125, 1.5, 2]) {
+      const f = stageFit(1280 / dpr, 720 / dpr, dpr);
+      expect(f.height).toBeGreaterThan(767);         // full design, not the 640 phone one
+      expect(f.width).toBeCloseTo(1366, 6);
+    }
+    expect(stageFit(853.33, 480).height).toBeLessThan(720);    // by CSS pixels (the browser): phone layout
+    expect(stageFit(800 / 2, 360 / 2, 2).height).toBeLessThan(720);   // a small phone stays a phone
+  });
+
   it('is 1:1 at the design size', () => {
     expect(stageFit(1366, 768)).toEqual({ scale: 1, width: 1366, height: 768 });
   });

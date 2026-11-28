@@ -233,6 +233,17 @@
     if (typeof h === 'function') { try { h.call(usb, ev); } catch (e) { console.error(e); } }
   };
 
+  // ---- touch screen ----
+  // A car radio: no grey tap flash, no long-press text selection or callout,
+  // no overscroll bounce. Text fields stay selectable.
+  try {
+    var css = document.createElement('style');
+    css.textContent = 'html,body{-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;' +
+      '-webkit-user-select:none;user-select:none;overscroll-behavior:none}' +
+      'input,textarea,select,[contenteditable],[contenteditable] *{-webkit-user-select:text;user-select:text}';
+    (document.head || document.documentElement).appendChild(css);
+  } catch (e) { /* cosmetic */ }
+
   // ---- downloads ----
 
   function save(name, mime, bytes) {

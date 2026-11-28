@@ -6,6 +6,7 @@
  * compact sizes).
  */
 import { useEffect, useState, type CSSProperties } from 'react';
+import { useTouchOnly } from './touch';
 import { useSession, type ActiveAlarm } from '../../core/session';
 import { FONTS } from '../theme';
 import { COMPACT_BELOW, useStageSize } from './Stage';
@@ -32,18 +33,6 @@ function Keycap({ text, color }: { text: string; color: string }) {
   return <span style={{ fontFamily: FONTS.mono, fontSize: 11, fontWeight: 700, border: `1.5px solid ${color}`, padding: '0 4px', lineHeight: '16px' }}>{text}</span>;
 }
 
-/** Touch screens get no key hints (the Android head unit, a phone). */
-function useCoarsePointer(): boolean {
-  const [coarse, setCoarse] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches);
-  useEffect(() => {
-    const mq = typeof window !== 'undefined' ? window.matchMedia?.('(pointer: coarse)') : undefined;
-    if (!mq) return;
-    const on = () => setCoarse(mq.matches);
-    mq.addEventListener?.('change', on);
-    return () => mq.removeEventListener?.('change', on);
-  }, []);
-  return coarse;
-}
 
 /** 44 px alarm bar over the top of the screen (content does not move): "STALL 23:03:07", the cause, Open in Replay (Enter), Dismiss (Esc). */
 export function StallBannerBar() {
@@ -97,7 +86,7 @@ export function BottomStrip() {
   const t = useTheme();
   const stage = useStageSize();
   const compact = stage.height < COMPACT_BELOW;
-  const coarse = useCoarsePointer();
+  const coarse = useTouchOnly();
   const alarms = useSession((s) => s.alarms);
   const message = useSession((s) => s.message);
   const info = useSession((s) => s.linkInfo);
