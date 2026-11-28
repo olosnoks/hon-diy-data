@@ -13,10 +13,12 @@ import type { TransportPicker } from '../core/types';
 import { MemoryFileStore, OpfsFileStore, type FileStore } from './files';
 import { WebSerialPicker, WebUsbPicker } from './picker';
 import { isStandalone, isTwa } from './pwa';
+import { isNativeApp, NativeFileStore } from './native';
 
 export type { FileStore } from './files';
 export { registerServiceWorker, isStandalone, isTwa } from './pwa';
 export { SERIAL_FILTERS, FTDI_FT232R, CH340 } from './usbids';
+export { isNativeApp, nativeAppVersion } from './native';
 
 export type SerialPath = 'webserial' | 'webusb' | 'none';
 export type PlatformName = 'web' | 'pwa' | 'android-web' | 'android-pwa' | 'android-app';
@@ -24,8 +26,8 @@ export type PlatformName = 'web' | 'pwa' | 'android-web' | 'android-pwa' | 'andr
 export interface Capabilities {
   platform: PlatformName;
   serial: SerialPath;
-  /** Browser OPFS (persistent) or memory only. */
-  files: 'opfs' | 'memory';
+  /** The Android app's own storage, browser OPFS (both persistent) or memory only. */
+  files: 'app' | 'opfs' | 'memory';
   offline: boolean;
   /** Short notes for the Setup screen and the connect dialog; empty when all is well. */
   notes: string[];
@@ -47,6 +49,7 @@ export function isAndroid(): boolean {
 }
 
 export function serialPath(): SerialPath {
+  if (isNativeApp() && hasWebUsb()) return 'webusb';   // the app's USB bridge, whatever the user agent says
   if (isAndroid()) return hasWebUsb() ? 'webusb' : hasWebSerial() ? 'webserial' : 'none';
   if (hasWebSerial()) return 'webserial';
   if (hasWebUsb()) return 'webusb';
@@ -54,6 +57,7 @@ export function serialPath(): SerialPath {
 }
 
 export function platformName(): PlatformName {
+  if (isNativeApp()) return 'android-app';
   if (isAndroid()) return isTwa() ? 'android-app' : isStandalone() ? 'android-pwa' : 'android-web';
   return isStandalone() ? 'pwa' : 'web';
 }
@@ -72,13 +76,13 @@ export function getTransportPicker(): TransportPicker | null {
 let store: FileStore | undefined;
 
 export function getFileStore(): FileStore {
-  if (!store) store = OpfsFileStore.available() ? new OpfsFileStore() : new MemoryFileStore();
+  if (!store) store = isNativeApp() ? new NativeFileStore() : OpfsFileStore.available() ? new OpfsFileStore() : new MemoryFileStore();
   return store;
 }
 
 export function capabilities(): Capabilities {
   const serial = serialPath();
-  const files = OpfsFileStore.available() ? 'opfs' : 'memory';
+  const files = isNativeApp() ? 'app' : OpfsFileStore.available() ? 'opfs' : 'memory';
   const notes: string[] = [];
   if (serial === 'none') {
     notes.push(
@@ -86,6 +90,8 @@ export function capabilities(): Capabilities {
         ? 'This browser has no WebUSB. Use Chrome on Android (or the hondalog app) to talk to the cable.'
         : 'Web Serial is not available in this browser. Use Chrome or Edge on a desktop to talk to the cable; the simulator works everywhere.',
     );
+  } else if (serial === 'webusb' && isNativeApp()) {
+    notes.push('USB serial through the app: FTDI FT232R (KKL cable) and CH340 (CYD). Plug the cable in and the app opens and connects by itself.');
   } else if (serial === 'webusb') {
     notes.push('USB serial through WebUSB: FTDI FT232R (KKL cable) and CH340 (CYD) are supported. Plug in with an OTG adapter and allow access when asked.');
   }
@@ -93,7 +99,7 @@ export function capabilities(): Capabilities {
     notes.push('Not a secure context (https or localhost): serial and offline mode are off.');
   }
   if (files === 'memory') notes.push('This browser has no private file storage (OPFS): drives are lost on reload. Export them before closing.');
-  const offline = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
+  const offline = isNativeApp() || (typeof navigator !== 'undefined' && 'serviceWorker' in navigator);
   return { platform: platformName(), serial, files, offline, notes };
 }
 

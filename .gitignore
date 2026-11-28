@@ -24,3 +24,7 @@ docs/analysis/*/work-manual/manual.txt
 docs/analysis/*/work-*/manual*.txt
 /release/
 firmware-out/
+
+# Android app build output and the throwaway test-signing key
+/android/build/
+/android/.test-key.jks

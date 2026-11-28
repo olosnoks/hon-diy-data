@@ -11,7 +11,8 @@
               -> hondalog-<ver>-windows-x64.zip
     linux     the same app in WSL, packaging/linux/build-linux.sh (PyInstaller)
               -> hondalog-<ver>-linux-x64.tar.gz (+ .AppImage when appimagetool is there)
-    android   the web app as an APK: web\android-twa\build-apk.ps1 (Bubblewrap TWA),
+    android   the standalone app: android\build.ps1 (web build inside the APK, native USB
+              bridge); else web\android-twa\build-apk.ps1 (Bubblewrap TWA),
               or a Tauri Android project if web\src-tauri\gen\android exists; signed with
               %USERPROFILE%\.hondalog-keys\hondalog-release.jks
               -> hondalog-<ver>-android.apk
@@ -62,6 +63,7 @@ $Version = Get-ReleaseVersion $Version
 $Rev = Invoke-Git rev-parse --short HEAD
 $Dirty = (@(Get-TreeChanges).Count -gt 0)
 $Out = Join-Path $RepoRoot "release\$Version"
+$AppScript = Join-Path $RepoRoot "android\build.ps1"
 $TwaScript = Join-Path $WebDir "android-twa\build-apk.ps1"
 $TwaApk = Join-Path $env:USERPROFILE ".hondalog-build\twa\app-release-signed.apk"
 $TauriAndroid = Join-Path $WebDir "src-tauri\gen\android"
@@ -99,7 +101,10 @@ function Test-Prereqs([string]$t) {
             if (-not (Test-WslDistro $Distro)) { $p += "WSL distribution '$Distro' (wsl --install -d Ubuntu, or -Distro <name>)" }
         }
         "android" {
-            if (Test-Path $TwaScript) {
+            if (Test-Path $AppScript) {
+                if (-not (Test-Command "npx")) { $p += "Node.js (the web build)" }
+                if (-not (Test-Path (Join-Path $WebDir "node_modules"))) { $p += "web\node_modules (cd web; npm ci)" }
+            } elseif (Test-Path $TwaScript) {
                 if (-not (Test-Command "npx")) { $p += "Node.js (Bubblewrap runs through npx)" }
             } elseif (Test-Path $TauriAndroid) {
                 if (-not (Test-Command "cargo")) { $p += "Rust (rustup) for the Tauri Android build" }
@@ -181,7 +186,13 @@ function Build-Android {
     $apkOut = Join-Path $Out "hondalog-$Version-android.apk"
     $setHere = Read-KeystorePassword
     try {
-        if (Test-Path $TwaScript) {
+        if (Test-Path $AppScript) {
+            # The standalone app: the web build inside the APK, native USB bridge (android\README.md).
+            Write-Step "android: standalone app (android\build.ps1)"
+            $shell = if (Test-Command "pwsh") { "pwsh" } else { "powershell" }
+            Invoke-Native $shell @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $AppScript, "-Out", $apkOut) "android\build.ps1"
+            if (-not (Test-Path $apkOut)) { Fail "android\build.ps1 made no $apkOut" }
+        } elseif (Test-Path $TwaScript) {
             Write-Step "android: Bubblewrap TWA (web\android-twa\build-apk.ps1)"
             $m = Get-Content (Join-Path $WebDir "android-twa\twa-manifest.json") -Raw
             if ($m -match '"appVersionName"\s*:\s*"([^"]+)"' -and $Matches[1] -ne $Version) {

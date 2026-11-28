@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- USB serial chips the app has drivers for (decimal ids) -->
+<resources>
+    <!-- FTDI FT232R: the KKL cable, 0403:6001 -->
+    <usb-device vendor-id="1027" product-id="24577" />
+    <!-- CH340: the CYD handheld, 1a86:7523 and 1a86:5523 -->
+    <usb-device vendor-id="6790" product-id="29987" />
+    <usb-device vendor-id="6790" product-id="21795" />
+</resources>

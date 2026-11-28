@@ -22,6 +22,7 @@ pinouts. Every page says which of its claims are still unverified, and
 | 6 | [Stall hunting](stall-hunting.md) | The intermittent stall: what to record and how to read it |
 | 7 | [Data and SQL](data-and-sql.md) | The database, queries, exports, backups |
 | 8 | [Handheld](handheld.md) | The CYD viewer for when the laptop stays home; start with [using it in the car without the laptop](handheld.md#using-the-cyd-in-the-car-without-the-laptop) |
+| 8a | [Android radio](android.md) | The app on the car's Android head unit: installing it for free (USB stick or adb), first start, exporting drives |
 | 9 | [Tuning a P28](tuning-p28.md) | Track C: the chipped OBD1 ECU |
 
 Look things up in:

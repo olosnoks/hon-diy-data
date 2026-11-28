@@ -11,6 +11,8 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
   // The dev server serves modules that must not be cached.
   if (env.DEV) return null;
+  // The Android app serves the bundle from its own APK: always offline, no worker.
+  if (typeof window !== 'undefined' && 'HondalogAndroid' in window) return null;
   const base = env.BASE_URL ?? '/';
   try {
     return await navigator.serviceWorker.register(`${base}sw.js`, { scope: base });

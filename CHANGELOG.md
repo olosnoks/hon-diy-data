@@ -9,6 +9,23 @@ against the simulators and the host builds of the firmware cores.
 
 ## Unreleased
 
+### Standalone Android app for the head unit
+
+- `android/`: the web app built into the APK and run in the app's own WebView, replacing the Chrome TWA for the radio
+  (`web/android-twa` stays as a fallback). No Chrome and no internet needed. Logging, ECU polling and the stall
+  catcher keep running behind other apps (foreground service, wake lock, page kept "visible"). The app opens and
+  connects by itself when the KKL cable (FTDI) or the CYD (CH340) is plugged in. Optional start at boot. Drives
+  live in app storage (atomic writes). Exports go to `Download/hondalog`. Warns when the WebView is older than 100.
+- USB: a `navigator.usb` shim over Android's USB host API (`assets/hondalog-android.js`, `UsbBridge.java`), so the
+  web app's FTDI/CH340 WebUSB drivers run unchanged. The web app uses its `NativeFileStore`
+  (`web/src/platform/native.ts`) and the USB bridge when `window.HondalogAndroid` is there, and no service worker.
+- Build: `android\build.ps1` on Windows (SDK build-tools, signs with the release key; `build-all.ps1 -Only android`
+  uses it) or `android/build.sh` from Debian/Ubuntu packages. versionCode = major·10000 + minor·100 + patch.
+- Install plan and first-start steps for the radio: `docs/android.md`.
+- Tested: the shim in front of the P2P simulator with the app's own link, transport and FTDI driver (wakes at 10400,
+  reads RAM). In headless Chrome at 1024×600, the APK's own assets with a faked bridge connect by themselves, poll at
+  about 13 Hz and record. Not yet run on a real radio or on the car.
+
 ### Handheld shows US units
 
 - The CYD's screen shows °F, mph, mi (ft on the map scale bar), inHg and gal/h by default; `units = metric` in
